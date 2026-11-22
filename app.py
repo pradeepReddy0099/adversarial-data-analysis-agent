@@ -213,11 +213,25 @@ with col_right:
         with tab_copilot:
             st.markdown("#### 💬 Ask ADAA AI Copilot")
             st.caption("Ask questions about risk scores, specific variables, confounders, or leadership actions.")
-            user_q = st.text_input("Enter your question:", placeholder="e.g., Why did customer support calls reverse across tiers?", key="copilot_user_q")
-            if user_q:
-                narrator = LLMNarrator(provider=llm_provider)
-                answer = narrator.answer_query(user_q, findings, dataset_name=dataset_name)
-                st.info(f"**Copilot:** {answer}")
+            
+            with st.form(key="copilot_form", clear_on_submit=False):
+                user_q = st.text_input(
+                    "Enter your question:",
+                    placeholder="e.g., Why did gender flag as a Simpson's Paradox?",
+                    key="copilot_user_q"
+                )
+                submit_q = st.form_submit_button("Ask Copilot 🚀")
+
+            if submit_q and user_q:
+                with st.spinner("Copilot is analyzing the audited findings..."):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    answer = narrator.answer_query(user_q, findings, dataset_name=dataset_name)
+                    st.session_state["last_copilot_q"] = user_q
+                    st.session_state["last_copilot_a"] = answer
+
+            if "last_copilot_a" in st.session_state:
+                st.markdown(f"**Q:** *{st.session_state.get('last_copilot_q', '')}*")
+                st.info(f"**Copilot:** {st.session_state['last_copilot_a']}")
 
         with tab_export:
             st.markdown("#### 📥 Download Audit Artifacts")

@@ -80,6 +80,9 @@ def _render_html(results: Dict[str, Any]) -> str:
         sections.append(f"<p><strong>⚖️ Devil's Advocate Audit:</strong> {html.escape(f['audit']['falsification_reason'])}</p>")
 
         simpsons = f["audit"].get("simpsons_audit", {})
+        if simpsons.get("cmh_odds_ratio") is not None:
+            sections.append(f"<p><strong>📐 Cochran-Mantel-Haenszel (CMH) Test:</strong> Common Odds Ratio = <code>{simpsons['cmh_odds_ratio']:.3f}</code> (p = <code>{simpsons.get('cmh_p_value', 0.0):.3e}</code>)</p>")
+
         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
             sections.append(f"<details><summary><strong>Subgroup Breakdown across '{html.escape(simpsons['confounder_column'])}' (Click to view)</strong></summary><ul>")
             for b in simpsons["breakdowns"]:
@@ -112,6 +115,8 @@ def _render_markdown(results: Dict[str, Any]) -> str:
         lines.append(f"- **Explorer Claim:** {f['claim']['description']}")
         lines.append(f"- **Devil's Advocate Audit:** {f['audit']['falsification_reason']}")
         simpsons = f["audit"].get("simpsons_audit", {})
+        if simpsons.get("cmh_odds_ratio") is not None:
+            lines.append(f"  - *CMH Stratified Common Odds Ratio:* `{simpsons['cmh_odds_ratio']:.3f}` (p = `{simpsons.get('cmh_p_value', 0.0):.3e}`)")
         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
             lines.append(f"  - *Subgroup breakdown across '{simpsons['confounder_column']}':*")
             for b in simpsons["breakdowns"]:

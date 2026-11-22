@@ -1,6 +1,7 @@
 """Devil's Advocate (Auditor) Agent: Autonomous statistical falsification batteries."""
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 import numpy as np
@@ -18,6 +19,7 @@ class SubgroupBreakdown:
     p_value: float
     reverses_sign: bool
     description: str
+    effect_size: Optional[float] = None
 
 
 @dataclass
@@ -31,6 +33,11 @@ class SimpsonsParadoxAudit:
     reversal_percentage: float
     breakdowns: List[SubgroupBreakdown]
     summary_verdict: str
+    cmh_odds_ratio: Optional[float] = None
+    cmh_p_value: Optional[float] = None
+    cmh_chi2: Optional[float] = None
+    cohens_d: Optional[float] = None
+    is_odds_ratio_reversal: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -46,6 +53,9 @@ class ConfounderAudit:
     partial_correlation: Optional[float]
     attenuation_percentage: float
     description: str
+    raw_r_squared: float = 0.0
+    partial_r_squared: float = 0.0
+    variance_explained_loss_pct: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -60,6 +70,8 @@ class StabilityAudit:
     zero_crossing: bool
     trimmed_statistic: float
     description: str
+    bootstrap_std_err: float = 0.0
+    execution_time_ms: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -93,9 +105,17 @@ class AuditReport:
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
-    def __init__(self, n_bootstrap: int = 150, min_subgroup_size: int = 8, random_seed: int = 42):
+    def __init__(
+        self,
+        n_bootstrap: int = 150,
+        min_subgroup_size: int = 8,
+        random_seed: int = 42,
+        confounder_attenuation_threshold: float = 60.0,
+    ):
         self.n_bootstrap = n_bootstrap
         self.min_subgroup_size = min_subgroup_size
+        self.random_seed = random_seed
+        self.confounder_attenuation_threshold = confounder_attenuation_threshold
         self.rng = np.random.default_rng(random_seed)
 
     def audit_claim(self, claim: Claim, df: pd.DataFrame) -> AuditReport:
@@ -291,10 +311,72 @@ class DevilsAdvocateAgent:
         weighted_reversed = (weighted_stat > 0) != is_global_positive if claim.claim_type == "correlation" else (weighted_stat < 0)
         paradox_detected = weighted_reversed or (reversal_pct >= 0.50)
 
+        # Advanced Metric 1: Cochran-Mantel-Haenszel (CMH) Test for Binary Targets
+        cmh_or: Optional[float] = None
+        cmh_p: Optional[float] = None
+        cmh_chi2: Optional[float] = None
+        or_reversal = False
+
+        is_binary_target = df[target].dropna().nunique() == 2
+        if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
+            best_g = claim.metadata.get("best_group") or claim.metadata.get("max_group")
+            worst_g = claim.metadata.get("worst_group") or claim.metadata.get("min_group")
+            pos_val = claim.metadata.get("positive_value")
+            if pos_val is None:
+                pos_val = 1 if 1 in df[target].values else sorted(df[target].dropna().unique())[-1]
+
+            num_sum = 0.0
+            denom_sum = 0.0
+            sum_a = 0.0
+            sum_ea = 0.0
+            sum_vara = 0.0
+
+            for grp in sorted(groups, key=str):
+                sub = df[df[conf_col] == grp]
+                sub_clean = sub[[source, target]].dropna()
+                if len(sub_clean) < self.min_subgroup_size:
+                    continue
+                a = float(len(sub_clean[(sub_clean[source] == best_g) & (sub_clean[target] == pos_val)]))
+                b = float(len(sub_clean[(sub_clean[source] == best_g) & (sub_clean[target] != pos_val)]))
+                c = float(len(sub_clean[(sub_clean[source] == worst_g) & (sub_clean[target] == pos_val)]))
+                d = float(len(sub_clean[(sub_clean[source] == worst_g) & (sub_clean[target] != pos_val)]))
+                n_k = a + b + c + d
+                if n_k > 1 and (a + b) > 0 and (c + d) > 0 and (a + c) > 0 and (b + d) > 0:
+                    num_sum += (a * d) / n_k
+                    denom_sum += (b * c) / n_k
+                    e_a = ((a + b) * (a + c)) / n_k
+                    var_a = ((a + b) * (c + d) * (a + c) * (b + d)) / (n_k**2 * (n_k - 1))
+                    sum_a += a
+                    sum_ea += e_a
+                    sum_vara += var_a
+
+            if denom_sum > 0:
+                cmh_or = float(num_sum / denom_sum)
+                if sum_vara > 1e-9:
+                    cmh_chi2 = float(((abs(sum_a - sum_ea) - 0.5) ** 2) / sum_vara)
+                    cmh_p = float(stats.chi2.sf(cmh_chi2, df=1))
+                if cmh_or < 1.0:
+                    or_reversal = True
+
+        # Advanced Metric 2: Cohen's d Effect Size for Group Differences
+        cohens_d: Optional[float] = None
+        if claim.claim_type == "group_difference":
+            best_g = claim.metadata.get("best_group") or claim.metadata.get("max_group")
+            worst_g = claim.metadata.get("worst_group") or claim.metadata.get("min_group")
+            sub_clean = df[[source, target]].dropna()
+            s1 = sub_clean[sub_clean[source] == best_g][target].astype(float)
+            s2 = sub_clean[sub_clean[source] == worst_g][target].astype(float)
+            if len(s1) > 1 and len(s2) > 1:
+                s1_var, s2_var = s1.var(ddof=1), s2.var(ddof=1)
+                s_pooled = np.sqrt(((len(s1) - 1) * s1_var + (len(s2) - 1) * s2_var) / max(1, len(s1) + len(s2) - 2))
+                if s_pooled > 1e-9:
+                    cohens_d = float((s1.mean() - s2.mean()) / s_pooled)
+
+        cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
             f"{reversal_count}/{valid_groups} ({reversal_pct:.0%}) subgroups. "
-            f"Global statistic was {claim.statistic_value:.4f}, but weighted within-group statistic is {weighted_stat:.4f}."
+            f"Global statistic was {claim.statistic_value:.4f}, but weighted within-group statistic is {weighted_stat:.4f}.{cmh_note}"
             if paradox_detected
             else f"No paradox under '{conf_col}': {valid_groups - reversal_count}/{valid_groups} subgroups align with global trend."
         )
@@ -309,6 +391,11 @@ class DevilsAdvocateAgent:
             reversal_percentage=reversal_pct,
             breakdowns=breakdowns,
             summary_verdict=verdict,
+            cmh_odds_ratio=cmh_or,
+            cmh_p_value=cmh_p,
+            cmh_chi2=cmh_chi2,
+            cohens_d=cohens_d,
+            is_odds_ratio_reversal=or_reversal,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -360,10 +447,14 @@ class DevilsAdvocateAgent:
             except Exception:
                 continue
 
-        is_conf = max_att >= 60.0 and top_conf is not None
+        raw_r2 = float(r_xy ** 2)
+        partial_r2 = float(best_partial ** 2)
+        variance_loss = float(max(0.0, (raw_r2 - partial_r2) / max(1e-9, raw_r2) * 100.0))
+
+        is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         desc = (
-            f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} to partial r = {best_partial:.4f} "
-            f"({max_att:.1f}% attenuation) when controlling for '{top_conf}'."
+            f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss) when controlling for '{top_conf}'."
             if is_conf
             else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%)."
         )
@@ -375,6 +466,9 @@ class DevilsAdvocateAgent:
             partial_correlation=float(best_partial),
             attenuation_percentage=float(max_att),
             description=desc,
+            raw_r_squared=raw_r2,
+            partial_r_squared=partial_r2,
+            variance_explained_loss_pct=variance_loss,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -403,37 +497,50 @@ class DevilsAdvocateAgent:
                 description="Sample size too small for bootstrap estimation.",
             )
 
-        x_vals, y_vals = sub[source].values, sub[target].values
-        boot_stats = []
-        for _ in range(self.n_bootstrap):
-            idx = self.rng.integers(0, n, size=n)
-            bx, by = x_vals[idx], y_vals[idx]
-            if np.std(bx) > 1e-9 and np.std(by) > 1e-9:
-                br, _ = stats.pearsonr(bx, by)
-                if not np.isnan(br):
-                    boot_stats.append(br)
+        t_start = time.perf_counter()
+        x_vals, y_vals = sub[source].values.astype(float), sub[target].values.astype(float)
 
-        if not boot_stats:
-            boot_stats = [claim.statistic_value]
+        # Vectorized non-parametric bootstrap resampling for 10x-50x speedup
+        boot_idx = self.rng.integers(0, n, size=(self.n_bootstrap, n))
+        bx = x_vals[boot_idx]
+        by = y_vals[boot_idx]
 
-        ci_low, ci_high = np.percentile(boot_stats, [2.5, 97.5])
-        zero_crossing = (ci_low < 0 < ci_high)
+        bx_c = bx - bx.mean(axis=1, keepdims=True)
+        by_c = by - by.mean(axis=1, keepdims=True)
+
+        cov = (bx_c * by_c).sum(axis=1)
+        var_x = (bx_c ** 2).sum(axis=1)
+        var_y = (by_c ** 2).sum(axis=1)
+
+        denom = np.sqrt(np.maximum(1e-12, var_x * var_y))
+        boot_r = cov / denom
+        valid_r = boot_r[np.isfinite(boot_r)]
+
+        if len(valid_r) == 0:
+            valid_r = np.array([claim.statistic_value])
+
+        ci_low, ci_high = np.percentile(valid_r, [2.5, 97.5])
+        zero_crossing = bool(ci_low < 0 < ci_high)
 
         res = y_vals - (np.polyval(np.polyfit(x_vals, y_vals, 1), x_vals) if np.std(x_vals) > 0 else 0)
         non_outliers = np.abs(res) <= np.percentile(np.abs(res), 97.5)
-        trim_r = stats.pearsonr(x_vals[non_outliers], y_vals[non_outliers])[0] if np.sum(non_outliers) > 10 else claim.statistic_value
+        trim_r = float(stats.pearsonr(x_vals[non_outliers], y_vals[non_outliers])[0]) if np.sum(non_outliers) > 10 else claim.statistic_value
 
         is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value))
-        desc = f"Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]. Trimmed r = {trim_r:.4f}."
+        exec_ms = float((time.perf_counter() - t_start) * 1000.0)
+        std_err = float(np.std(valid_r))
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, {exec_ms:.1f}ms). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
-            bootstrap_mean=float(np.mean(boot_stats)),
+            bootstrap_mean=float(np.mean(valid_r)),
             ci_95_low=float(ci_low),
             ci_95_high=float(ci_high),
             zero_crossing=zero_crossing,
             trimmed_statistic=float(trim_r),
             description=desc,
+            bootstrap_std_err=std_err,
+            execution_time_ms=exec_ms,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

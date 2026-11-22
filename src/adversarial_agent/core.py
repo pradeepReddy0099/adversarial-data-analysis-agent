@@ -20,7 +20,8 @@ class AgentConfig:
     n_bootstrap: int = 150
     significance_level: float = 0.05
     min_subgroup_size: int = 8
-    version: str = "1.0.0"
+    confounder_attenuation_threshold: float = 60.0
+    version: str = "1.1.0"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,9 +44,17 @@ def run_adversarial_pipeline(
     target: Optional[str] = None,
     out_dir: str | Path = "output",
     seed: int = 42,
+    n_bootstrap: int = 150,
+    min_subgroup_size: int = 8,
+    confounder_attenuation_threshold: float = 60.0,
 ) -> Dict[str, Any]:
     """Execute the full adversarial multi-agent pipeline."""
-    config = AgentConfig(random_seed=seed)
+    config = AgentConfig(
+        random_seed=seed,
+        n_bootstrap=n_bootstrap,
+        min_subgroup_size=min_subgroup_size,
+        confounder_attenuation_threshold=confounder_attenuation_threshold,
+    )
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -61,6 +70,7 @@ def run_adversarial_pipeline(
         n_bootstrap=config.n_bootstrap,
         min_subgroup_size=config.min_subgroup_size,
         random_seed=seed,
+        confounder_attenuation_threshold=config.confounder_attenuation_threshold,
     )
     audits = [auditor.audit_claim(c, df) for c in claims]
 
