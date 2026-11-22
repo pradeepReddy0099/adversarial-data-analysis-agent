@@ -100,8 +100,4 @@ adversarial-data-analysis-agent/
 ## 📖 Academic Paper & Course Details
 * **Course:** CS 534 — Introduction to Artificial Intelligence (Fall 2026)
 * **Institution:** Worcester Polytechnic Institute (WPI)
-* **Instructor:** Dr. Dmitry Korkin
-* **Documentation:** Full 1-page proposal and 5-page research paper draft are located in [`docs/`](docs/).
 
-## 📜 License
-MIT License. Free for academic and research use.
