@@ -12,6 +12,7 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from adversarial_agent.core import run_adversarial_pipeline, load_dataset
+from adversarial_agent.llm_narrator import LLMNarrator
 
 st.set_page_config(
     page_title="Adversarial Data Analysis Agent",
@@ -42,6 +43,7 @@ with col_left:
     benchmarks = {
         "UC Berkeley Admissions (Simpson's Paradox Benchmark)": data_dir / "berkeley_admissions.csv",
         "Commercial Customer Churn (Subgroup Paradox Benchmark)": data_dir / "simpsons_churn.csv",
+        "UCI Adult Census Income (Real-World Social Benchmark)": data_dir / "adult_census.csv",
     }
     
     choice = st.radio("Choose a benchmark or upload your own:", list(benchmarks.keys()) + ["Upload Custom CSV"])
@@ -72,6 +74,9 @@ with col_left:
         selected_target = st.selectbox("Optional Outcome / Target Variable:", target_candidates, index=default_target_idx)
         target_val = None if selected_target == "None" else selected_target
         
+        enable_llm = st.checkbox("🧠 Enable LLM Executive Narrator (Gemini / OpenAI / Offline)", value=True)
+        llm_provider = st.selectbox("LLM Provider", ["auto", "gemini", "openai", "offline"]) if enable_llm else "offline"
+
         run_btn = st.button("🚀 Run Adversarial Multi-Agent Audit", type="primary")
     else:
         run_btn = False
@@ -101,6 +106,21 @@ with col_right:
         m4.metric("🔴 Spurious / Confounded", c_spurious)
         
         st.write("---")
+        
+        if enable_llm:
+            with st.spinner("LLM Narrator is synthesizing executive briefing..."):
+                narrator = LLMNarrator(provider=llm_provider)
+                briefing = narrator.generate_executive_briefing(findings, dataset_name=selected_path.name)
+                st.markdown(briefing)
+                st.write("---")
+
+                st.subheader("💬 Ask ADAA Copilot About Findings")
+                user_q = st.text_input("Ask a question about confounders, paradoxes, or recommendations:")
+                if user_q:
+                    with st.spinner("Copilot is analyzing findings dossier..."):
+                        answer = narrator.answer_query(user_q, findings, dataset_name=selected_path.name)
+                        st.info(f"**Copilot:** {answer}")
+                st.write("---")
         
         for f in findings:
             badge = f["verdict_badge"]

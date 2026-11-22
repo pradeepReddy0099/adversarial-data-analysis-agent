@@ -11,6 +11,7 @@ if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 from adversarial_agent.core import run_adversarial_pipeline
+from adversarial_agent.llm_narrator import LLMNarrator
 
 
 def main():
@@ -21,6 +22,8 @@ def main():
     parser.add_argument("--target", type=str, default=None, help="Optional outcome/target variable to audit")
     parser.add_argument("--out", type=str, default="output", help="Directory where reports will be saved")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--llm", action="store_true", help="Generate an LLM executive narrative briefing")
+    parser.add_argument("--provider", type=str, default="auto", choices=["auto", "gemini", "openai", "offline"], help="LLM provider")
 
     args = parser.parse_args()
 
@@ -55,6 +58,16 @@ def main():
     print(f"  - HTML Report:     {results['reports']['html']}")
     print(f"  - Markdown Report: {results['reports']['markdown']}")
     print(f"  - JSON Findings:   {results['reports']['json']}")
+
+    if args.llm:
+        print(f"\nGenerating LLM Executive Narrative Briefing (Provider: {args.provider})...")
+        narrator = LLMNarrator(provider=args.provider)
+        briefing = narrator.generate_executive_briefing(findings, dataset_name=Path(args.input_file).name)
+        print(f"\n{briefing}\n")
+        llm_out_path = Path(args.out) / "llm_executive_briefing.md"
+        llm_out_path.write_text(briefing, encoding="utf-8")
+        print(f"  - LLM Briefing:    {llm_out_path}")
+
     print(f"==================================================================\n")
 
 
