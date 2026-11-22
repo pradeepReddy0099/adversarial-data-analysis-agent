@@ -141,6 +141,39 @@ class LLMNarrator:
                 )
             return "All verified findings are invariant across tested covariates. Proceed with controlled rollouts while monitoring stability metrics."
 
+        if any(w in q_lower for w in ["e-value", "e value", "e_value", "unmeasured", "sensitivity", "hidden confound"]):
+            e_vals = []
+            for f in findings:
+                simps_e = f.get("audit", {}).get("simpsons_audit", {}).get("e_value")
+                conf_e = f.get("audit", {}).get("confounder_audit", {}).get("e_value")
+                ev = simps_e or conf_e
+                if ev:
+                    e_vals.append(f"• **{f.get('claim', {}).get('source_variable')}**: E-value = {ev:.2f}")
+            if e_vals:
+                return (
+                    "**Causal Sensitivity (VanderWeele-Ding E-values):**\n"
+                    "The E-value represents the minimum risk ratio association that an unmeasured confounder must have with both the exposure and outcome to fully nullify the observed effect.\n"
+                    + "\n".join(e_vals)
+                )
+            return "E-value sensitivity metrics are computed for continuous correlations and stratified odds ratios."
+
+        if any(w in q_lower for w in ["tarone", "homogeneity", "interaction", "effect modification"]):
+            tarone_findings = [
+                f for f in findings
+                if f.get("audit", {}).get("simpsons_audit", {}).get("tarone_homogeneity_p") is not None
+            ]
+            if tarone_findings:
+                top_t = tarone_findings[0]
+                p_t = top_t["audit"]["simpsons_audit"]["tarone_homogeneity_p"]
+                chi_t = top_t["audit"]["simpsons_audit"]["tarone_chi2"]
+                v_name = top_t.get("claim", {}).get("source_variable")
+                status = "effect modification (odds ratios vary significantly across strata)" if p_t < 0.05 else "homogeneous odds ratios across strata"
+                return (
+                    f"**Tarone's Homogeneity Test for '{v_name}':** χ² = {chi_t:.2f}, p = {p_t:.3e}. "
+                    f"This indicates {status}."
+                )
+            return "Tarone's test evaluates whether the odds ratio is invariant across subgroups in stratified 2x2xK tables."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),

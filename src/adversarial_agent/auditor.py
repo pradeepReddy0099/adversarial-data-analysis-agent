@@ -38,6 +38,10 @@ class SimpsonsParadoxAudit:
     cmh_chi2: Optional[float] = None
     cohens_d: Optional[float] = None
     is_odds_ratio_reversal: bool = False
+    tarone_homogeneity_p: Optional[float] = None
+    tarone_chi2: Optional[float] = None
+    e_value: Optional[float] = None
+    e_value_interpretation: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -56,6 +60,8 @@ class ConfounderAudit:
     raw_r_squared: float = 0.0
     partial_r_squared: float = 0.0
     variance_explained_loss_pct: float = 0.0
+    e_value: Optional[float] = None
+    e_value_interpretation: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -72,6 +78,10 @@ class StabilityAudit:
     description: str
     bootstrap_std_err: float = 0.0
     execution_time_ms: float = 0.0
+    spearman_rho: Optional[float] = None
+    rank_discrepancy: Optional[float] = None
+    max_leverage: Optional[float] = None
+    high_leverage_points: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -100,6 +110,88 @@ class AuditReport:
             "falsified": self.falsified,
             "falsification_reason": self.falsification_reason,
         }
+
+
+def calculate_e_value(rr: float) -> tuple[float, str]:
+    """Calculates the VanderWeele-Ding E-value for unmeasured confounding.
+    
+    E-value = RR + sqrt(RR * (RR - 1)) for RR >= 1.
+    Quantifies the minimum strength of association an unmeasured confounder must have
+    with both the exposure and outcome to fully explain away the observed association.
+    """
+    if rr <= 0 or np.isnan(rr):
+        return 1.0, "Undefined (non-positive or NaN effect)"
+    rr_star = rr if rr >= 1.0 else 1.0 / rr
+    e_val = float(rr_star + np.sqrt(max(0.0, rr_star * (rr_star - 1.0))))
+    if e_val < 1.3:
+        interp = f"High sensitivity (E-value = {e_val:.2f}): A weak unmeasured confounder (RR >= {e_val:.2f}) could explain away the effect."
+    elif e_val < 2.5:
+        interp = f"Moderate sensitivity (E-value = {e_val:.2f}): An unmeasured confounder with RR >= {e_val:.2f} with both exposure and outcome would be needed to nullify this association."
+    else:
+        interp = f"Strong robustness (E-value = {e_val:.2f}): An unmeasured confounder would need an association of RR >= {e_val:.2f} with both exposure and outcome to fully explain away this finding."
+    return e_val, interp
+
+
+def tarone_homogeneity_test(tables_2x2: List[tuple[float, float, float, float]], common_or: float) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Tarone's modification of the Breslow-Day test for odds ratio homogeneity.
+    
+    H0: The odds ratio is homogeneous across all K strata.
+    Rejection (p < 0.05) indicates effect modification (interaction) across strata.
+    """
+    K = len(tables_2x2)
+    if K < 2 or common_or <= 0 or np.isnan(common_or):
+        return None, None
+    
+    bd_stat = 0.0
+    sum_diff = 0.0
+    sum_var = 0.0
+    valid_k = 0
+
+    for a, b, c, d in tables_2x2:
+        n1 = a + b
+        n2 = c + d
+        m1 = a + c
+        m2 = b + d
+        N = n1 + n2
+        if N <= 0 or n1 <= 0 or n2 <= 0 or m1 <= 0 or m2 <= 0:
+            continue
+        
+        A_q = common_or - 1.0
+        B_q = -(common_or * (n1 + m1) + (N - n1 - m1)) if abs(A_q) > 1e-7 else -N
+        C_q = common_or * n1 * m1
+        
+        if abs(A_q) < 1e-7:
+            mu = (n1 * m1) / N
+        else:
+            disc = max(0.0, B_q**2 - 4 * A_q * C_q)
+            low_bound = max(0.0, n1 + m1 - N)
+            high_bound = min(n1, m1)
+            r1 = (-B_q - np.sqrt(disc)) / (2 * A_q)
+            r2 = (-B_q + np.sqrt(disc)) / (2 * A_q)
+            if low_bound - 1e-5 <= r1 <= high_bound + 1e-5:
+                mu = r1
+            elif low_bound - 1e-5 <= r2 <= high_bound + 1e-5:
+                mu = r2
+            else:
+                mu = (n1 * m1) / N
+        
+        d1 = mu
+        d2 = n1 - mu
+        d3 = m1 - mu
+        d4 = N - n1 - m1 + mu
+        if d1 > 0 and d2 > 0 and d3 > 0 and d4 > 0:
+            var_mu = 1.0 / (1.0 / d1 + 1.0 / d2 + 1.0 / d3 + 1.0 / d4)
+            bd_stat += ((a - mu) ** 2) / max(1e-9, var_mu)
+            sum_diff += (a - mu)
+            sum_var += var_mu
+            valid_k += 1
+
+    if valid_k < 2 or sum_var <= 1e-9:
+        return None, None
+    
+    tarone_stat = float(max(0.0, bd_stat - (sum_diff ** 2) / sum_var))
+    p_val = float(stats.chi2.sf(tarone_stat, df=valid_k - 1))
+    return tarone_stat, p_val
 
 
 class DevilsAdvocateAgent:
@@ -327,11 +419,15 @@ class DevilsAdvocateAgent:
         weighted_reversed = (weighted_stat > 0) != is_global_positive if claim.claim_type == "correlation" else (weighted_stat < 0)
         paradox_detected = weighted_reversed or (reversal_pct >= 0.50)
 
-        # Advanced Metric 1: Cochran-Mantel-Haenszel (CMH) Test for Binary Targets
+        # Advanced Metric 1: Cochran-Mantel-Haenszel (CMH) & Tarone's Homogeneity Test for Binary Targets
         cmh_or: Optional[float] = None
         cmh_p: Optional[float] = None
         cmh_chi2: Optional[float] = None
         or_reversal = False
+        tarone_stat: Optional[float] = None
+        tarone_p: Optional[float] = None
+        simpson_e_val: Optional[float] = None
+        simpson_e_desc: Optional[str] = None
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -346,6 +442,7 @@ class DevilsAdvocateAgent:
             sum_a = 0.0
             sum_ea = 0.0
             sum_vara = 0.0
+            tables_2x2 = []
 
             for grp in sorted(groups, key=str):
                 sub = df[df[conf_col] == grp]
@@ -358,6 +455,7 @@ class DevilsAdvocateAgent:
                 d = float(len(sub_clean[(sub_clean[source] == worst_g) & (sub_clean[target] != pos_val)]))
                 n_k = a + b + c + d
                 if n_k > 1 and (a + b) > 0 and (c + d) > 0 and (a + c) > 0 and (b + d) > 0:
+                    tables_2x2.append((a, b, c, d))
                     num_sum += (a * d) / n_k
                     denom_sum += (b * c) / n_k
                     e_a = ((a + b) * (a + c)) / n_k
@@ -373,6 +471,11 @@ class DevilsAdvocateAgent:
                     cmh_p = float(stats.chi2.sf(cmh_chi2, df=1))
                 if cmh_or < 1.0:
                     or_reversal = True
+                
+                # Tarone's Homogeneity Test
+                tarone_stat, tarone_p = tarone_homogeneity_test(tables_2x2, cmh_or)
+                # E-value for unmeasured confounding
+                simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -389,6 +492,11 @@ class DevilsAdvocateAgent:
                     cohens_d = float((s1.mean() - s2.mean()) / s_pooled)
 
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
+        if tarone_p is not None:
+            cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
+        if simpson_e_val is not None:
+            cmh_note += f" [E-value: {simpson_e_val:.2f}]"
+
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
             f"{reversal_count}/{valid_groups} ({reversal_pct:.0%}) subgroups. "
@@ -412,6 +520,10 @@ class DevilsAdvocateAgent:
             cmh_chi2=cmh_chi2,
             cohens_d=cohens_d,
             is_odds_ratio_reversal=or_reversal,
+            tarone_homogeneity_p=tarone_p,
+            tarone_chi2=tarone_stat,
+            e_value=simpson_e_val,
+            e_value_interpretation=simpson_e_desc,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -467,12 +579,17 @@ class DevilsAdvocateAgent:
         partial_r2 = float(best_partial ** 2)
         variance_loss = float(max(0.0, (raw_r2 - partial_r2) / max(1e-9, raw_r2) * 100.0))
 
+        # Causal Sensitivity Metric: VanderWeele-Ding E-value for unmeasured confounding
+        d_approx = 2.0 * abs(r_xy) / max(1e-6, np.sqrt(max(1e-9, 1.0 - r_xy**2)))
+        rr_approx = float(np.exp(0.91 * d_approx))
+        e_val, e_desc = calculate_e_value(rr_approx)
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss) when controlling for '{top_conf}'."
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%)."
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -485,6 +602,8 @@ class DevilsAdvocateAgent:
             raw_r_squared=raw_r2,
             partial_r_squared=partial_r2,
             variance_explained_loss_pct=variance_loss,
+            e_value=e_val,
+            e_value_interpretation=e_desc,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -570,7 +689,29 @@ class DevilsAdvocateAgent:
         is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value))
         exec_ms = float((time.perf_counter() - t_start) * 1000.0)
         std_err = float(np.std(valid_r))
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, {exec_ms:.1f}ms). Trimmed r = {trim_r:.4f}."
+
+        # Monotonic rank correlation and discrepancy metric
+        try:
+            spearman_rho, _ = stats.spearmanr(x_vals, y_vals)
+            spearman_rho = float(spearman_rho)
+            rank_disc = float(abs(claim.statistic_value - spearman_rho))
+        except Exception:
+            spearman_rho = None
+            rank_disc = None
+
+        # Outlier leverage score (diagonal of hat matrix H = X(X^T X)^(-1)X^T)
+        x_diff = x_vals - np.mean(x_vals)
+        x_ss = float(np.sum(x_diff ** 2))
+        if x_ss > 1e-9:
+            h_ii = (1.0 / n) + (x_diff ** 2) / x_ss
+            max_lev = float(np.max(h_ii))
+            high_lev_count = int(np.sum(h_ii > (4.0 / n)))
+        else:
+            max_lev = 0.0
+            high_lev_count = 0
+
+        disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, {exec_ms:.1f}ms{disc_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -582,6 +723,10 @@ class DevilsAdvocateAgent:
             description=desc,
             bootstrap_std_err=std_err,
             execution_time_ms=exec_ms,
+            spearman_rho=spearman_rho,
+            rank_discrepancy=rank_disc,
+            max_leverage=max_lev,
+            high_leverage_points=high_lev_count,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

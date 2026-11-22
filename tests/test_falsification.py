@@ -37,6 +37,10 @@ def test_berkeley_admissions_falsification():
     # Verify CMH metric is computed
     assert audit.simpsons_audit.cmh_odds_ratio is not None
     assert audit.simpsons_audit.cmh_p_value is not None
+    # Verify Tarone's homogeneity test and E-value are computed
+    assert audit.simpsons_audit.tarone_homogeneity_p is not None
+    assert audit.simpsons_audit.e_value is not None
+    assert audit.simpsons_audit.e_value > 1.0
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -84,6 +88,8 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.is_confounded
         assert audit_coffee.confounder_audit.attenuation_percentage > 50.0
         assert audit_coffee.confounder_audit.variance_explained_loss_pct > 70.0
+        assert audit_coffee.confounder_audit.e_value is not None
+        assert audit_coffee.confounder_audit.e_value >= 1.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -99,6 +105,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.bootstrap_std_err > 0
     # Vectorized bootstrap should finish in under 150 milliseconds
     assert audit.stability_audit.execution_time_ms < 150.0
+    # Check Spearman rank and leverage metrics
+    assert audit.stability_audit.spearman_rho is not None
+    assert audit.stability_audit.rank_discrepancy is not None
+    assert audit.stability_audit.max_leverage is not None
+    assert audit.stability_audit.max_leverage >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -126,6 +137,12 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_gender = narrator.answer_query("Explain gender", findings)
     assert len(ans_gender) > 10
+
+    ans_ev = narrator.answer_query("What is the E-value?", findings)
+    assert "E-value" in ans_ev
+
+    ans_tarone = narrator.answer_query("Explain Tarone homogeneity", findings)
+    assert "Tarone" in ans_tarone
 
 
 def test_end_to_end_pipeline(tmp_path):
