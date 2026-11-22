@@ -72,6 +72,18 @@ def test_end_to_end_pipeline(tmp_path):
 
 
 if __name__ == "__main__":
+    import tempfile
+    import shutil
+
+    print("Running test_berkeley_admissions_falsification...")
     test_berkeley_admissions_falsification()
+    print("Running test_simpsons_churn_falsification...")
     test_simpsons_churn_falsification()
+    print("Running test_end_to_end_pipeline...")
+    local_temp = Path(__file__).resolve().parent.parent / ".pytest_temp" / "manual_run"
+    local_temp.mkdir(parents=True, exist_ok=True)
+    try:
+        test_end_to_end_pipeline(local_temp)
+    finally:
+        shutil.rmtree(local_temp, ignore_errors=True)
     print("ALL TESTS IN NEW REPO PASSED!")

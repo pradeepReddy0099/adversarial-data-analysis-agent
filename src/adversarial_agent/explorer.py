@@ -40,7 +40,7 @@ class ExplorerAgent:
         counter = 1
 
         numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if not self._is_identifier(c, df)]
-        categorical_cols = [c for c in df.select_dtypes(include=["object", "category", "bool"]).columns if not self._is_identifier(c, df)]
+        categorical_cols = [c for c in df.select_dtypes(include=["object", "string", "category", "bool"]).columns if not self._is_identifier(c, df)]
 
         # Target-driven exploration
         if target and target in df.columns:
