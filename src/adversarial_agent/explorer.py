@@ -139,7 +139,15 @@ class ExplorerAgent:
         g1 = sub[sub[target] == vals[1]][num_col]
         if len(g0) < 5 or len(g1) < 5:
             return None
-        r, p = stats.pointbiserialr(sub[target].astype(float), sub[num_col])
+        
+        # Safely convert target to binary 0/1 numeric codes (handles strings like 'Male'/'Female', 'Yes'/'No', etc.)
+        target_series = pd.Series(pd.Categorical(sub[target]).codes, index=sub.index, dtype=float)
+        num_series = pd.to_numeric(sub[num_col], errors='coerce')
+        valid_mask = ~(target_series.isna() | num_series.isna())
+        if valid_mask.sum() < self.min_sample_size:
+            return None
+
+        r, p = stats.pointbiserialr(target_series[valid_mask], num_series[valid_mask])
         if np.isnan(r):
             return None
         direction = "positive" if r > 0 else "negative"
