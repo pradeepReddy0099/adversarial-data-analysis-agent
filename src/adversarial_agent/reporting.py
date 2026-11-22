@@ -91,6 +91,21 @@ def _render_html(results: Dict[str, Any]) -> str:
             sections.append("</ul></details>")
 
         sections.append(f"<p><strong>🏆 Referee Adjudication:</strong> {html.escape(f['synthesis_summary'])}</p>")
+        
+        rationale = f.get("classification_rationale", {})
+        if rationale.get("why_assigned"):
+            sections.append(f"<div style='background: #f8fafc; border-left: 4px solid #64748b; padding: 10px 14px; margin: 10px 0; border-radius: 4px;'>")
+            sections.append(f"<p style='margin: 0 0 6px 0;'><strong>🎯 Why Categorized as <em>{html.escape(rationale.get('category_name', f['verdict_badge']))}</em>:</strong></p>")
+            sections.append(f"<p style='margin: 0 0 6px 0; font-size: 0.95em;'>{html.escape(rationale['why_assigned'])}</p>")
+            if rationale.get("decision_rule"):
+                sections.append(f"<p style='margin: 0 0 4px 0; font-size: 0.85em; color: #475569;'><strong>Decision Rule:</strong> <code>{html.escape(rationale['decision_rule'])}</code></p>")
+            if rationale.get("key_evidence"):
+                sections.append("<ul style='margin: 4px 0 0 18px; font-size: 0.9em;'>")
+                for ev in rationale["key_evidence"]:
+                    sections.append(f"<li>{html.escape(ev)}</li>")
+                sections.append("</ul>")
+            sections.append("</div>")
+
         sections.append(f"<p><strong>💡 Actionable Takeaway:</strong> <em>{html.escape(f['actionable_takeaway'])}</em></p>")
         sections.append("</div>")
 
@@ -123,6 +138,16 @@ def _render_markdown(results: Dict[str, Any]) -> str:
                 flag = " **[REVERSED]**" if b["reverses_sign"] else ""
                 lines.append(f"    - {b['description']}{flag}")
         lines.append(f"- **Referee Verdict:** {f['synthesis_summary']}")
+        rationale = f.get("classification_rationale", {})
+        if rationale.get("why_assigned"):
+            lines.append(f"  - **🎯 Why Categorized as `{rationale.get('category_name', f['verdict_badge'])}`:**")
+            lines.append(f"    - *Rationale:* {rationale['why_assigned']}")
+            if rationale.get("decision_rule"):
+                lines.append(f"    - *Rule:* `{rationale['decision_rule']}`")
+            if rationale.get("key_evidence"):
+                lines.append("    - *Key Evidence:*")
+                for ev in rationale["key_evidence"]:
+                    lines.append(f"      • {ev}")
         lines.append(f"- **Actionable Takeaway:** *{f['actionable_takeaway']}*")
         lines.append("")
 

@@ -142,7 +142,27 @@ with col_right:
         ])
 
         with tab_dossier:
-            for f in findings:
+            # Filter bar for claims
+            f_col1, f_col2 = st.columns([2, 1])
+            with f_col1:
+                verdict_filter = st.multiselect(
+                    "Filter by Verdict Type:",
+                    ["🟢 ROBUST & VERIFIED", "🟡 SIMPSON'S PARADOX", "🔴 CONFOUNDED", "🔴 UNSTABLE"],
+                    default=["🟢 ROBUST & VERIFIED", "🟡 SIMPSON'S PARADOX", "🔴 CONFOUNDED", "🔴 UNSTABLE"]
+                )
+            with f_col2:
+                search_kw = st.text_input("🔍 Search variable name:", placeholder="e.g., gender, support_calls")
+
+            filtered_findings = [
+                f for f in findings
+                if any(vf.split()[0] in f["verdict_badge"] for vf in verdict_filter)
+                and (not search_kw or search_kw.lower() in f["claim"]["source_variable"].lower() or search_kw.lower() in f["claim"]["target_variable"].lower())
+            ]
+
+            if not filtered_findings:
+                st.info("No findings match the current filter criteria.")
+
+            for f in filtered_findings:
                 badge = f["verdict_badge"]
                 claim = f["claim"]
                 audit = f["audit"]
@@ -167,6 +187,20 @@ with col_right:
                         simpsons = audit.get("simpsons_audit", {})
                         if simpsons.get("cmh_odds_ratio") is not None:
                             st.markdown(f"**Cochran-Mantel-Haenszel Test:** Common OR = `{simpsons['cmh_odds_ratio']:.3f}` (p = `{simpsons.get('cmh_p_value', 0.0):.3e}`)")
+                        if simpsons.get("tarone_homogeneity_p") is not None:
+                            st.markdown(f"**Tarone Homogeneity Test:** `p = {simpsons['tarone_homogeneity_p']:.3e}` (χ² = `{simpsons.get('tarone_chi2', 0.0):.2f}`)")
+                        if simpsons.get("e_value") is not None:
+                            st.markdown(f"**Causal Sensitivity E-Value:** `{simpsons['e_value']:.2f}`")
+
+                        conf_aud = audit.get("confounder_audit", {})
+                        if conf_aud.get("e_value") is not None:
+                            st.markdown(f"**VanderWeele E-Value:** `{conf_aud['e_value']:.2f}`")
+
+                        stab_aud = audit.get("stability_audit", {})
+                        if stab_aud.get("rank_discrepancy") is not None:
+                            st.markdown(f"**Spearman Rank Discrepancy:** `Δr = {stab_aud['rank_discrepancy']:.3f}` (ρ = `{stab_aud.get('spearman_rho', 0.0):.3f}`)")
+                        if stab_aud.get("max_leverage") is not None and stab_aud.get("max_leverage", 0) > 0:
+                            st.markdown(f"**Outlier Leverage:** Max `h_ii = {stab_aud['max_leverage']:.4f}` ({stab_aud.get('high_leverage_points', 0)} high-leverage points)")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -185,6 +219,25 @@ with col_right:
                         st.success(f"**Synthesis:** {f['synthesis_summary']}")
                     else:
                         st.error(f"**Synthesis:** {f['synthesis_summary']}")
+                    
+                    rationale = f.get("classification_rationale", {})
+                    if rationale.get("why_assigned"):
+                        with st.container():
+                            st.markdown(
+                                f"""
+                                <div style="background-color: rgba(30, 41, 59, 0.4); border-left: 4px solid #3b82f6; padding: 10px 14px; margin: 8px 0; border-radius: 4px;">
+                                    <p style="margin: 0 0 6px 0; font-weight: bold; color: #93c5fd;">🎯 Why Classified as {rationale.get('category_name', badge)}:</p>
+                                    <p style="margin: 0 0 6px 0; font-size: 0.95em;">{rationale['why_assigned']}</p>
+                                    <p style="margin: 0 0 4px 0; font-size: 0.85em; color: #cbd5e1;"><b>Decision Rule:</b> <code>{rationale.get('decision_rule', '')}</code></p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                            if rationale.get("key_evidence"):
+                                st.markdown("**Key Mathematical Evidence:**")
+                                for ev in rationale["key_evidence"]:
+                                    st.markdown(f"- `{ev}`")
+                    
                     st.markdown(f"**💡 Actionable Takeaway:** *{f['actionable_takeaway']}*")
 
         with tab_viz:
@@ -204,6 +257,31 @@ with col_right:
                 st.info(f"**Conditioning Variable:** `{simps['confounder_column']}`. Notice the inversion between aggregate and stratified bars!")
             else:
                 st.info("No subgroup reversals were detected in this audit.")
+
+            st.write("---")
+            st.markdown("#### 🕸️ Causal Directed Acyclic Graph (DAG) & Backdoor Path Inspector")
+            all_vars = [f["claim"]["source_variable"] for f in findings]
+            sel_dag_var = st.selectbox("Select variable for Causal DAG Inspection:", all_vars, key="dag_select_var")
+            f_dag = next(f for f in findings if f["claim"]["source_variable"] == sel_dag_var)
+            
+            src = f_dag["claim"]["source_variable"]
+            tgt = f_dag["claim"]["target_variable"]
+            v_badge = f_dag["verdict_badge"]
+            
+            if "SIMPSON" in v_badge:
+                conf = f_dag["audit"]["simpsons_audit"].get("confounder_column", "Confounder")
+                st.info(f"**Structural Causal Model:** Backdoor Path Open via `{conf}`. Conditioning $P(Y \\mid do(X)) \\ne P(Y \\mid X)$.")
+                st.markdown(
+                    f"**Causal Diagram (Pearl's Backdoor Criterion):**\n"
+                    f"* Confounder `{conf}` simultaneously influences `{src}` and `{tgt}`.\n"
+                    f"* Naive association is an artifact of composition; adjusting for `{conf}` closes the backdoor path."
+                )
+            elif "CONFOUNDED" in v_badge:
+                conf = f_dag["audit"]["confounder_audit"].get("top_confounder", "Covariate")
+                att = f_dag["audit"]["confounder_audit"].get("attenuation_percentage", 0.0)
+                st.warning(f"**Structural Causal Model:** Association between `{src}` and `{tgt}` attenuates by {att:.1f}% when conditioning on `{conf}`.")
+            else:
+                st.success(f"**Structural Causal Model:** Verified invariant direct path `{src} \u2192 {tgt}` across tested covariates.")
 
         with tab_briefing:
             narrator = LLMNarrator(provider=llm_provider)
@@ -245,6 +323,22 @@ with col_right:
                 st.download_button("📝 Download Markdown Report", data=md_path.read_text(encoding="utf-8"), file_name=md_path.name, mime="text/markdown")
             if json_path.exists():
                 st.download_button("📦 Download JSON Findings Dossier", data=json_path.read_text(encoding="utf-8"), file_name=json_path.name, mime="application/json")
+
+            summary_rows = []
+            for f in findings:
+                cl = f.get("claim", {})
+                summary_rows.append({
+                    "Variable": cl.get("source_variable", ""),
+                    "Target": cl.get("target_variable", ""),
+                    "Statistic": f"{cl.get('statistic_name', '')} = {cl.get('statistic_value', 0.0):.4f}",
+                    "p_value": f"{cl.get('p_value', 0.0):.4e}",
+                    "Verdict": f.get("verdict_badge", ""),
+                    "Confidence": f.get("confidence_score", 0.0),
+                    "Synthesis": f.get("synthesis_summary", ""),
+                    "Takeaway": f.get("actionable_takeaway", ""),
+                })
+            df_summary = pd.DataFrame(summary_rows)
+            st.download_button("📊 Download Findings Summary CSV", data=df_summary.to_csv(index=False).encode("utf-8"), file_name="findings_summary.csv", mime="text/csv")
                 
     else:
         st.info("👈 Select a benchmark dataset or upload your own table, then press **Run Adversarial Multi-Agent Audit**.")
