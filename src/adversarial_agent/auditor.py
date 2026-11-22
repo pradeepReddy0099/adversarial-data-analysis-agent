@@ -230,7 +230,23 @@ class DevilsAdvocateAgent:
                 sub_clean = sub[[source, target]].dropna()
                 if len(sub_clean) < self.min_subgroup_size or sub_clean[source].nunique() < 2 or sub_clean[target].nunique() < 2:
                     continue
-                r_sub, p_sub = stats.pearsonr(sub_clean[source].astype(float), sub_clean[target].astype(float))
+
+                # Safely convert to float, handling categorical strings (e.g. 'Male'/'Female') via category codes
+                if pd.api.types.is_numeric_dtype(sub_clean[source]):
+                    s_vals = pd.to_numeric(sub_clean[source], errors='coerce')
+                else:
+                    s_vals = pd.Series(pd.Categorical(sub_clean[source]).codes, index=sub_clean.index, dtype=float)
+
+                if pd.api.types.is_numeric_dtype(sub_clean[target]):
+                    t_vals = pd.to_numeric(sub_clean[target], errors='coerce')
+                else:
+                    t_vals = pd.Series(pd.Categorical(sub_clean[target]).codes, index=sub_clean.index, dtype=float)
+
+                valid_pair = ~(s_vals.isna() | t_vals.isna())
+                if valid_pair.sum() < self.min_subgroup_size:
+                    continue
+
+                r_sub, p_sub = stats.pearsonr(s_vals[valid_pair], t_vals[valid_pair])
                 if np.isnan(r_sub):
                     continue
 
@@ -498,7 +514,32 @@ class DevilsAdvocateAgent:
             )
 
         t_start = time.perf_counter()
-        x_vals, y_vals = sub[source].values.astype(float), sub[target].values.astype(float)
+        
+        # Safely extract numeric arrays for bootstrap
+        if pd.api.types.is_numeric_dtype(sub[source]):
+            x_series = pd.to_numeric(sub[source], errors='coerce')
+        else:
+            x_series = pd.Series(pd.Categorical(sub[source]).codes, index=sub.index, dtype=float)
+
+        if pd.api.types.is_numeric_dtype(sub[target]):
+            y_series = pd.to_numeric(sub[target], errors='coerce')
+        else:
+            y_series = pd.Series(pd.Categorical(sub[target]).codes, index=sub.index, dtype=float)
+
+        valid_m = ~(x_series.isna() | y_series.isna())
+        x_vals = x_series[valid_m].to_numpy(dtype=float)
+        y_vals = y_series[valid_m].to_numpy(dtype=float)
+        n = len(x_vals)
+        if n < 5:
+            return StabilityAudit(
+                is_stable=False,
+                bootstrap_mean=0.0,
+                ci_95_low=0.0,
+                ci_95_high=0.0,
+                zero_crossing=True,
+                trimmed_statistic=0.0,
+                description="Insufficient valid numeric records for bootstrap estimation.",
+            )
 
         # Vectorized non-parametric bootstrap resampling for 10x-50x speedup
         boot_idx = self.rng.integers(0, n, size=(self.n_bootstrap, n))
