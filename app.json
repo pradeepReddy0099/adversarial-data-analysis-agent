@@ -1,0 +1,12 @@
+{
+  "name": "Adversarial Data Analysis Agent",
+  "description": "Multi-agent dialectical system for automated hypothesis generation and Simpson's Paradox detection in tabular data.",
+  "repository": "https://github.com/pradeepReddy0099/adversarial-data-analysis-agent",
+  "logo": "https://raw.githubusercontent.com/streamlit/brand/master/core/png/streamlit-mark-color.png",
+  "keywords": ["python", "streamlit", "multi-agent", "simpsons-paradox", "ai", "machine-learning"],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}

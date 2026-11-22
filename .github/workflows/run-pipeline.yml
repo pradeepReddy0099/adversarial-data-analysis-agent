@@ -1,0 +1,43 @@
+name: Run Tests and Pipeline Validation
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Test Suite
+      run: |
+        python tests/test_falsification.py
+
+    - name: Run Pipeline on Berkeley Benchmark
+      run: |
+        python cli.py data/berkeley_admissions.csv --target admitted --out output/berkeley_ci
+
+    - name: Run Pipeline on Churn Benchmark
+      run: |
+        python cli.py data/simpsons_churn.csv --target churn --out output/churn_ci
+
+    - name: Run Pipeline on Adult Census Benchmark
+      run: |
+        python cli.py data/adult_census.csv --target income_above_50k --out output/adult_ci
