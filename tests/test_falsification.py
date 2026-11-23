@@ -73,6 +73,14 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.freeman_tukey_p is not None
     assert audit.simpsons_audit.kruskal_wallis_h is not None
     assert audit.simpsons_audit.kruskal_wallis_p is not None
+    # Verify Peto's stratified odds ratio & heterogeneity test and Fligner-Killeen variance test
+    assert audit.simpsons_audit.peto_odds_ratio is not None
+    assert audit.simpsons_audit.peto_z_stat is not None
+    assert audit.simpsons_audit.peto_p_value is not None
+    assert audit.simpsons_audit.peto_heterogeneity_q is not None
+    assert audit.simpsons_audit.peto_heterogeneity_p is not None
+    assert audit.simpsons_audit.fligner_killeen_stat is not None
+    assert audit.simpsons_audit.fligner_killeen_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -164,6 +172,11 @@ def test_confounder_variance_loss_and_leakage():
         # Check Davidson-MacKinnon J-test for non-nested models
         assert audit_coffee.confounder_audit.davidson_mackinnon_j_stat is not None
         assert audit_coffee.confounder_audit.davidson_mackinnon_p is not None
+        # Check Durbin-Wu-Hausman endogeneity test and Stock-Yogo relevance F-statistic
+        assert audit_coffee.confounder_audit.durbin_wu_hausman_f is not None
+        assert audit_coffee.confounder_audit.durbin_wu_hausman_p is not None
+        assert audit_coffee.confounder_audit.stock_yogo_f_stat is not None
+        assert audit_coffee.confounder_audit.stock_yogo_f_stat >= 10.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -233,6 +246,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.andrews_sup_w is not None
     assert audit.stability_audit.andrews_p_value is not None
     assert audit.stability_audit.andrews_break_fraction is not None
+    # Check Brown-Durbin-Evans recursive CUSUM and Koenker studentized BP
+    assert audit.stability_audit.cusum_stat is not None
+    assert audit.stability_audit.cusum_p_approx is not None
+    assert audit.stability_audit.koenker_lm_stat is not None
+    assert audit.stability_audit.koenker_p_value is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -398,6 +416,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_andrews = narrator.answer_query("Explain Donald Andrews Supremum Wald test for unknown structural breaks", findings)
     assert "Andrews" in ans_andrews or "Supremum" in ans_andrews or "Wald" in ans_andrews
+
+    ans_peto = narrator.answer_query("Explain Peto odds ratio and heterogeneity test", findings)
+    assert "Peto" in ans_peto or "Odds Ratio" in ans_peto or "Heterogeneity" in ans_peto
+
+    ans_flig = narrator.answer_query("Explain Fligner-Killeen variance homogeneity test", findings)
+    assert "Fligner" in ans_flig or "Killeen" in ans_flig or "Variance" in ans_flig
+
+    ans_dwh = narrator.answer_query("Explain Durbin-Wu-Hausman test for endogeneity", findings)
+    assert "Durbin" in ans_dwh or "Hausman" in ans_dwh or "Endogeneity" in ans_dwh
+
+    ans_sy = narrator.answer_query("Explain Stock-Yogo first-stage relevance test", findings)
+    assert "Stock" in ans_sy or "Yogo" in ans_sy or "Relevance" in ans_sy
+
+    ans_cusum = narrator.answer_query("Explain Brown-Durbin-Evans CUSUM recursive test", findings)
+    assert "CUSUM" in ans_cusum or "Recursive" in ans_cusum or "Brown" in ans_cusum
+
+    ans_koenker = narrator.answer_query("Explain Koenker studentized Breusch-Pagan test", findings)
+    assert "Koenker" in ans_koenker or "Studentized" in ans_koenker or "Heteroscedasticity" in ans_koenker
 
 
 def test_end_to_end_pipeline(tmp_path):

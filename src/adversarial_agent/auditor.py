@@ -72,6 +72,15 @@ class SimpsonsParadoxAudit:
     kruskal_wallis_h: Optional[float] = None
     kruskal_wallis_p: Optional[float] = None
     is_kruskal_heterogeneous: bool = False
+    peto_odds_ratio: Optional[float] = None
+    peto_z_stat: Optional[float] = None
+    peto_p_value: Optional[float] = None
+    peto_heterogeneity_q: Optional[float] = None
+    peto_heterogeneity_p: Optional[float] = None
+    is_peto_heterogeneous: bool = False
+    fligner_killeen_stat: Optional[float] = None
+    fligner_killeen_p: Optional[float] = None
+    is_fligner_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -132,6 +141,11 @@ class ConfounderAudit:
     davidson_mackinnon_j_stat: Optional[float] = None
     davidson_mackinnon_p: Optional[float] = None
     is_j_test_rejected: bool = False
+    durbin_wu_hausman_f: Optional[float] = None
+    durbin_wu_hausman_p: Optional[float] = None
+    is_dwh_endogenous: bool = False
+    stock_yogo_f_stat: Optional[float] = None
+    is_weak_confounder: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -194,6 +208,12 @@ class StabilityAudit:
     andrews_break_fraction: Optional[float] = None
     andrews_p_value: Optional[float] = None
     has_unknown_structural_break: bool = False
+    cusum_stat: Optional[float] = None
+    cusum_p_approx: Optional[float] = None
+    has_cusum_instability: bool = False
+    koenker_lm_stat: Optional[float] = None
+    koenker_p_value: Optional[float] = None
+    is_koenker_heteroscedastic: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1860,6 +1880,310 @@ def andrews_sup_wald_test(
         return None, None, None, False
 
 
+def peto_stratified_odds_ratio_test(
+    tables_2x2: List[tuple[float, float, float, float]],
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Peto et al.'s (1977) assumption-free one-step odds ratio estimator
+    and cross-stratum heterogeneity Q-test for stratified 2x2 contingency tables.
+
+    For each stratum k with cells (a_k, b_k, c_k, d_k), marginals n_1k = a_k + b_k,
+    n_2k = c_k + d_k, m_1k = a_k + c_k, m_2k = b_k + d_k, N_k = n_1k + n_2k:
+      Expected events: E_k = (n_1k * m_1k) / N_k
+      Hypergeometric variance: V_k = (n_1k * n_2k * m_1k * m_2k) / (N_k^2 * (N_k - 1))
+      Peto ln(OR) = sum(a_k - E_k) / sum(V_k), OR_Peto = exp(ln(OR))
+      Peto test statistic: Z_Peto = sum(a_k - E_k) / sqrt(sum(V_k)) ~ N(0, 1)
+      Peto heterogeneity: Q_Peto = sum((a_k - E_k)^2 / V_k) - (sum(a_k - E_k))^2 / sum(V_k) ~ chi2(K - 1)
+
+    Peto's method provides superior finite-sample properties and robust power in the presence
+    of sparse event counts or highly unbalanced exposure allocations.
+    Rejection (p < 0.05) proves statistically significant stratum odds ratio heterogeneity.
+    """
+    if len(tables_2x2) < 2:
+        return None, None, None, None, None, False
+    try:
+        o_minus_e = []
+        v_list = []
+        for a, b, c, d in tables_2x2:
+            n1 = float(a + b)
+            n2 = float(c + d)
+            m1 = float(a + c)
+            m2 = float(b + d)
+            n_tot = n1 + n2
+            if n_tot <= 1 or n1 <= 0 or n2 <= 0 or m1 <= 0 or m2 <= 0:
+                continue
+            e_k = (n1 * m1) / n_tot
+            v_k = (n1 * n2 * m1 * m2) / ((n_tot ** 2) * (n_tot - 1.0))
+            if v_k > 1e-12:
+                o_minus_e.append(float(a - e_k))
+                v_list.append(float(v_k))
+
+        if len(v_list) < 2:
+            return None, None, None, None, None, False
+
+        sum_ome = float(np.sum(o_minus_e))
+        sum_v = float(np.sum(v_list))
+        if sum_v <= 1e-12:
+            return None, None, None, None, None, False
+
+        ln_or = sum_ome / sum_v
+        peto_or = float(np.exp(np.clip(ln_or, -20.0, 20.0)))
+        z_stat = float(sum_ome / np.sqrt(sum_v))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+
+        # Peto Heterogeneity Q
+        q_stat = float(np.sum((np.array(o_minus_e) ** 2) / np.array(v_list)) - (sum_ome ** 2) / sum_v)
+        q_stat = max(0.0, q_stat)
+        df_q = len(v_list) - 1
+        q_p = float(stats.chi2.sf(q_stat, df=df_q))
+        is_hetero = bool(q_p < 0.05)
+
+        return peto_or, z_stat, p_val, q_stat, q_p, is_hetero
+    except Exception:
+        return None, None, None, None, None, False
+
+
+def fligner_killeen_homogeneity_test(
+    subgroup_samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Fligner & Killeen (1976) non-parametric test for homogeneity of variances.
+
+    Scores ranked absolute deviations from subgroup medians |Y_kj - median(Y_k)| using
+    standard normal quantiles a_N(i) = Phi^{-1}((1 + i / (N + 1)) / 2).
+    Offers robust error rate control against departures from Gaussian normality.
+    Rejection (p < 0.05) demonstrates that target variance scales diverge significantly across strata.
+    """
+    valid_samples = [s for s in subgroup_samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        stat_val, p_val = stats.fligner(*valid_samples)
+        f_stat = float(stat_val)
+        p_val = float(p_val)
+        is_hetero = bool(p_val < 0.05)
+        return f_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def durbin_wu_hausman_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Durbin (1954), Wu (1973), and Hausman (1978) specification test
+    for regressor endogeneity and omitted variable bias.
+
+    Evaluates whether the candidate confounder Z induces statistically significant endogeneity
+    into regressor X when omitted from the bivariate specification Y ~ 1 + X.
+    Procedure:
+      1. First-stage auxiliary regression: X = pi_0 + pi_1 * Z + v.
+         Extract estimated residuals v_hat.
+      2. Augmented outcome regression: Y = beta_0 + beta_1 * X + delta * v_hat + u.
+      3. Under H_0: delta = 0 (X is exogenous w.r.t. Z; omitting Z does not bias beta_1).
+         Under H_1: delta != 0 (X is endogenous; bivariate OLS suffers severe omitted variable bias).
+
+    Test statistic:
+      F_DWH = (delta_hat / SE(delta_hat))^2 ~ F(1, n - 3).
+    Rejection (p < 0.05) confirms statistically significant endogeneity / omitted variable bias.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        # Step 1: Auxiliary regression X ~ 1 + Z
+        z_mat = np.column_stack([np.ones(n), z])
+        beta_z, _, _, _ = np.linalg.lstsq(z_mat, x, rcond=None)
+        v_hat = x - z_mat @ beta_z
+
+        if np.std(v_hat) < 1e-9:
+            return None, None, False
+
+        # Step 2: Augmented regression Y ~ 1 + X + v_hat
+        aug_mat = np.column_stack([np.ones(n), x, v_hat])
+        beta_aug, _, _, _ = np.linalg.lstsq(aug_mat, y, rcond=None)
+        res_aug = y - aug_mat @ beta_aug
+        rss_aug = float(np.sum(res_aug ** 2))
+
+        df_e = n - 3
+        if df_e <= 0 or rss_aug < 1e-12:
+            return None, None, False
+
+        mse_aug = rss_aug / df_e
+        cov_matrix = mse_aug * np.linalg.pinv(aug_mat.T @ aug_mat)
+        se_delta = float(np.sqrt(max(1e-12, cov_matrix[2, 2])))
+
+        delta_hat = float(beta_aug[2])
+        t_stat = delta_hat / se_delta
+        f_stat = float(t_stat ** 2)
+        p_val = float(stats.f.sf(f_stat, dfn=1, dfd=df_e))
+        is_endogenous = bool(p_val < 0.05)
+
+        return f_stat, p_val, is_endogenous
+    except Exception:
+        return None, None, False
+
+
+def stock_yogo_first_stage_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], bool]:
+    """Calculates the Stock & Yogo (2005) first-stage relevance F-statistic between regressor X and confounder Z.
+
+    F_first_stage = (R^2_{XZ} / 1) / ((1 - R^2_{XZ}) / (n - 2)).
+    Evaluates whether the coupling between candidate confounder Z and regressor X satisfies
+    the standard rule-of-thumb threshold (F >= 10.0) certifying strong first-stage identification
+    (bias < 10% of maximal bias). If F < 10.0, the confounder exhibits weak explanatory coupling.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, False
+    try:
+        r = float(np.corrcoef(x, z)[0, 1])
+        r2 = min(0.999999, max(0.0, r ** 2))
+        f_stat = float((r2 / 1.0) / ((1.0 - r2) / (n - 2)))
+        is_weak = bool(f_stat < 10.0)
+        return f_stat, is_weak
+    except Exception:
+        return None, False
+
+
+def brown_durbin_evans_cusum_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Brown, Durbin, & Evans (1975) Cumulative Sum of Recursive Residuals (CUSUM) test.
+
+    Evaluates parameter constancy across sorted regressor values (or sequential ordering).
+    Recursively updates least-squares estimates for r = k+1, ..., n (k=2) via rank-one Sherman-Morrison
+    inversions:
+      Standardized recursive residual:
+        w_r = (y_r - x_r' beta_{r-1}) / sqrt(1 + x_r' (X_{r-1}' X_{r-1})^{-1} x_r)
+      Standardized cumulative sum:
+        W_t = (1 / sigma_hat) * sum_{r=k+1}^t w_r, where sigma_hat^2 = (1 / (n - k)) * sum w_r^2
+      Boundary test ratio:
+        S = max_{k+1 <= t <= n} |W_t| / [ sqrt(n - k) * (1 + 2 * (t - k) / (n - k)) ]
+
+    The 5% asymptotic critical value is a = 0.948. If S > 0.948, the recursive path breaches
+    the 95% confidence boundary (p < 0.05), proving parameter instability and cumulative structural drift.
+    """
+    n = len(x)
+    if n < 25 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        idx = np.argsort(x)
+        x_s = x[idx]
+        y_s = y[idx]
+
+        k = 2
+        x_mat = np.column_stack([np.ones(n), x_s])
+        
+        # Determine minimal base window init_m where design matrix achieves full rank
+        init_m = max(k + 2, 5)
+        while init_m < n // 2 and np.linalg.matrix_rank(x_mat[:init_m]) < k:
+            init_m += 1
+
+        if np.linalg.matrix_rank(x_mat[:init_m]) < k:
+            return None, None, False
+
+        x_init = x_mat[:init_m]
+        y_init = y_s[:init_m]
+        a_inv = np.linalg.pinv(x_init.T @ x_init)
+        xty = x_init.T @ y_init
+        beta = a_inv @ xty
+
+        w_list = []
+        for r in range(init_m, n):
+            xr = x_mat[r]
+            yr = y_s[r]
+            f_r = float(1.0 + xr @ a_inv @ xr)
+            if f_r < 1e-12:
+                f_r = 1e-12
+            res_r = float(yr - xr @ beta)
+            w_r = res_r / np.sqrt(f_r)
+            w_list.append(w_r)
+
+            # Sherman-Morrison rank-1 update
+            a_xr = a_inv @ xr
+            a_inv = a_inv - np.outer(a_xr, a_xr) / f_r
+            xty = xty + yr * xr
+            beta = a_inv @ xty
+
+        w_arr = np.array(w_list, dtype=float)
+        m = len(w_arr)
+        if m < 5:
+            return None, None, False
+
+        sigma_sq = float(np.sum(w_arr ** 2) / m)
+        if sigma_sq <= 1e-12:
+            return None, None, False
+
+        sigma_hat = np.sqrt(sigma_sq)
+        w_cum = np.cumsum(w_arr) / sigma_hat
+
+        t_vec = np.arange(init_m + 1, n + 1, dtype=float)
+        boundary_denom = np.sqrt(n - k) * (1.0 + 2.0 * (t_vec - k) / float(n - k))
+        s_ratios = np.abs(w_cum) / boundary_denom
+        s_stat = float(np.max(s_ratios))
+
+        # Asymptotic p-value approximation based on boundary crossing distribution
+        if s_stat >= 1.143:
+            p_val = float(0.01 * np.exp(-3.0 * (s_stat - 1.143)))
+        elif s_stat >= 0.948:
+            p_val = float(0.01 + 0.04 * (1.143 - s_stat) / (1.143 - 0.948))
+        elif s_stat >= 0.850:
+            p_val = float(0.05 + 0.05 * (0.948 - s_stat) / (0.948 - 0.850))
+        else:
+            p_val = float(0.10 + 0.90 * max(0.0, (0.850 - s_stat) / 0.850))
+        p_val = min(1.0, max(1e-8, p_val))
+        has_instability = bool(s_stat > 0.948)
+
+        return s_stat, p_val, has_instability
+    except Exception:
+        return None, None, False
+
+
+def koenker_studentized_breusch_pagan_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Koenker (1981) studentized Breusch-Pagan test for heteroscedasticity.
+
+    Standard Breusch-Pagan assumes Gaussian error distributions. Koenker demonstrated that
+    excess kurtosis severely inflates the type I error rate.
+    The studentized LM statistic replaces 2*sigma^4 with the empirical sample variance
+    of squared residuals:
+      S_{e^2}^2 = (1 / n) * sum (e_i^2 - bar(e^2))^2
+      LM_Koenker = n * R_{e^2}^2 = sum (hat{e}_i^2 - bar(e^2))^2 / S_{e^2}^2 ~ chi2(1).
+
+    Rejection (p < 0.05) proves heteroscedasticity that is robust to leptokurtic and fat-tailed residuals.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(mat, y, rcond=None)
+        residuals = y - mat @ beta
+        u = residuals ** 2
+        u_bar = float(np.mean(u))
+        var_u = float(np.mean((u - u_bar) ** 2))
+
+        if var_u < 1e-12:
+            return None, None, False
+
+        beta_u, _, _, _ = np.linalg.lstsq(mat, u, rcond=None)
+        u_hat = mat @ beta_u
+        ess_u = float(np.sum((u_hat - u_bar) ** 2))
+
+        lm_stat = float(ess_u / var_u)
+        p_val = float(stats.chi2.sf(lm_stat, df=1))
+        is_hetero = bool(p_val < 0.05)
+
+        return lm_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -2100,6 +2424,15 @@ class DevilsAdvocateAgent:
         ft_chi2: Optional[float] = None
         ft_p: Optional[float] = None
         is_ft_hetero: bool = False
+        peto_or: Optional[float] = None
+        peto_z: Optional[float] = None
+        peto_p: Optional[float] = None
+        peto_q: Optional[float] = None
+        peto_qp: Optional[float] = None
+        is_peto_hetero: bool = False
+        fligner_stat: Optional[float] = None
+        fligner_p: Optional[float] = None
+        is_fligner_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -2150,6 +2483,8 @@ class DevilsAdvocateAgent:
                 woolf_chi2, woolf_p, is_woolf_hetero = woolf_stratified_heterogeneity_test(tables_2x2)
                 # Freeman-Tukey (1950) Variance-Stabilizing Double-Arcsine Homogeneity Test
                 ft_chi2, ft_p, is_ft_hetero = freeman_tukey_double_arcsine_test(tables_2x2)
+                # Peto et al. (1977) Stratified Odds Ratio & Heterogeneity Test
+                peto_or, peto_z, peto_p, peto_q, peto_qp, is_peto_hetero = peto_stratified_odds_ratio_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -2218,6 +2553,7 @@ class DevilsAdvocateAgent:
                 if len(s) >= 3 and np.std(s) > 1e-9:
                     kw_samples.append(s)
             kw_h, kw_p, is_kw_hetero = kruskal_wallis_strata_test(kw_samples)
+            fligner_stat, fligner_p, is_fligner_hetero = fligner_killeen_homogeneity_test(kw_samples)
         except Exception:
             pass
 
@@ -2309,6 +2645,15 @@ class DevilsAdvocateAgent:
             kruskal_wallis_h=kw_h,
             kruskal_wallis_p=kw_p,
             is_kruskal_heterogeneous=is_kw_hetero,
+            peto_odds_ratio=peto_or,
+            peto_z_stat=peto_z,
+            peto_p_value=peto_p,
+            peto_heterogeneity_q=peto_q,
+            peto_heterogeneity_p=peto_qp,
+            is_peto_heterogeneous=is_peto_hetero,
+            fligner_killeen_stat=fligner_stat,
+            fligner_killeen_p=fligner_p,
+            is_fligner_heterogeneous=is_fligner_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -2448,6 +2793,8 @@ class DevilsAdvocateAgent:
         aet_val, is_aet_vuln = None, False
         mallows_cp_val, mallows_disc_val, is_mallows_bad = None, None, False
         j_stat, j_p, is_j_bad = None, None, False
+        dwh_f, dwh_p, is_dwh = None, None, False
+        sy_f, is_weak_conf = None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -2464,6 +2811,8 @@ class DevilsAdvocateAgent:
                     y_mal = sub_aet[target].to_numpy(dtype=float)
                     mallows_cp_val, mallows_disc_val, is_mallows_bad = calculate_mallows_cp(x_mal, z_mal, y_mal)
                     j_stat, j_p, is_j_bad = davidson_mackinnon_j_test(x_mal, z_mal, y_mal)
+                    dwh_f, dwh_p, is_dwh = durbin_wu_hausman_test(x_mal, z_mal, y_mal)
+                    sy_f, is_weak_conf = stock_yogo_first_stage_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -2543,6 +2892,11 @@ class DevilsAdvocateAgent:
             davidson_mackinnon_j_stat=j_stat,
             davidson_mackinnon_p=j_p,
             is_j_test_rejected=is_j_bad,
+            durbin_wu_hausman_f=dwh_f,
+            durbin_wu_hausman_p=dwh_p,
+            is_dwh_endogenous=is_dwh,
+            stock_yogo_f_stat=sy_f,
+            is_weak_confounder=is_weak_conf,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -2755,6 +3109,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Donald Andrews (1993) Supremum Wald Test for Unknown Structural Break
         andrews_w, andrews_frac, andrews_p, has_andrews_break = andrews_sup_wald_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Brown, Durbin, & Evans (1975) Recursive Residual CUSUM Test
+        cusum_s, cusum_p, has_cusum_drift = brown_durbin_evans_cusum_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Koenker (1981) Studentized Breusch-Pagan Test
+        koenker_lm, koenker_p, is_koenker_hetero = koenker_studentized_breusch_pagan_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -2765,6 +3125,8 @@ class DevilsAdvocateAgent:
         white_str = f", White_p={white_p:.3e}" if white_p is not None else ""
         chow_str = f", Chow_p={chow_p:.3e}" if chow_p is not None else ""
         andrews_str = f", Andrews_SupW={andrews_w:.2f} (p={andrews_p:.3e})" if andrews_w is not None else ""
+        cusum_str = f", CUSUM_S={cusum_s:.3f} (p={cusum_p:.3e})" if cusum_s is not None else ""
+        koenker_str = f", Koenker_p={koenker_p:.3e}" if koenker_p is not None else ""
         jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
         dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
@@ -2772,7 +3134,7 @@ class DevilsAdvocateAgent:
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
         type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{andrews_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{chow_str}{andrews_str}{cusum_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -2830,6 +3192,12 @@ class DevilsAdvocateAgent:
             andrews_break_fraction=andrews_frac,
             andrews_p_value=andrews_p,
             has_unknown_structural_break=has_andrews_break,
+            cusum_stat=cusum_s,
+            cusum_p_approx=cusum_p,
+            has_cusum_instability=has_cusum_drift,
+            koenker_lm_stat=koenker_lm,
+            koenker_p_value=koenker_p,
+            is_koenker_heteroscedastic=is_koenker_hetero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

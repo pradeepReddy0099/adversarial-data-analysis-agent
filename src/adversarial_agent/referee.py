@@ -109,6 +109,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Freeman-Tukey Double-Arcsine Homogeneity Test: χ² = {simpsons.freeman_tukey_chi2:.2f} (p = {simpsons.freeman_tukey_p:.3e}) {'[VARIANCE-STABILIZED HETEROGENEITY]' if simpsons.is_freeman_tukey_heterogeneous else '[HOMOGENEOUS STRATA]'}")
             if simpsons.kruskal_wallis_p is not None:
                 rationale["key_evidence"].append(f"Kruskal-Wallis Rank Heterogeneity: H = {simpsons.kruskal_wallis_h:.2f} (p = {simpsons.kruskal_wallis_p:.3e}) {'[NON-PARAMETRIC STRATA SHIFT]' if simpsons.is_kruskal_heterogeneous else '[INVARIANT MEDIANS]'}")
+            if simpsons.peto_p_value is not None:
+                rationale["key_evidence"].append(f"Peto Odds Ratio & Heterogeneity: OR_Peto = {simpsons.peto_odds_ratio:.3f} (Z = {simpsons.peto_z_stat:.2f}, p = {simpsons.peto_p_value:.3e}; Q_Peto = {simpsons.peto_heterogeneity_q:.2f}, p_het = {simpsons.peto_heterogeneity_p:.3e}) {'[PETO STRATA HETEROGENEITY]' if simpsons.is_peto_heterogeneous else '[HOMOGENEOUS STRATA]'}")
+            if simpsons.fligner_killeen_p is not None:
+                rationale["key_evidence"].append(f"Fligner-Killeen Variance Homogeneity: χ² = {simpsons.fligner_killeen_stat:.2f} (p = {simpsons.fligner_killeen_p:.3e}) {'[NON-PARAMETRIC VARIANCE SHIFT]' if simpsons.is_fligner_heterogeneous else '[HOMOSCEDASTIC STRATA]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -170,6 +174,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Mallows' Cp Misspecification: Cp = {confounder.mallows_cp:.2f} (ΔCp = {confounder.cp_bias_discrepancy:+.2f}) {'[SEVERE OMITTED-VARIABLE BIAS]' if confounder.is_mallows_biased else '[WELL-SPECIFIED]'}")
             if confounder.davidson_mackinnon_p is not None:
                 rationale["key_evidence"].append(f"Davidson-MacKinnon J-Test: t_J = {confounder.davidson_mackinnon_j_stat:.2f} (p = {confounder.davidson_mackinnon_p:.3e}) {'[NON-NESTED CONFOUNDER SPECIFICATION FAVORED]' if confounder.is_j_test_rejected else '[ORIGINAL MODEL ADEQUATE]'}")
+            if confounder.durbin_wu_hausman_p is not None:
+                rationale["key_evidence"].append(f"Durbin-Wu-Hausman Endogeneity Test: F = {confounder.durbin_wu_hausman_f:.2f} (p = {confounder.durbin_wu_hausman_p:.3e}) {'[SIGNIFICANT REGRESSOR ENDOGENEITY]' if confounder.is_dwh_endogenous else '[EXOGENOUS SPECIFICATION]'}")
+            if confounder.stock_yogo_f_stat is not None:
+                rationale["key_evidence"].append(f"Stock-Yogo First-Stage Relevance: F = {confounder.stock_yogo_f_stat:.2f} {'[STRONG CONVOLUTION - F >= 10]' if not confounder.is_weak_confounder else '[WEAK COUPLING - F < 10]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -232,6 +240,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Gelman-Carlin Design Analysis: Type M ratio = {stability.type_m_exaggeration_ratio:.2f}x (Type S error = {stability.type_s_error_prob:.1%}, Power = {stability.retrodesign_power:.1%}) {flag_tm}")
             if stability.andrews_p_value is not None:
                 rationale["key_evidence"].append(f"Andrews Sup-Wald Unknown Break Test: Sup W = {stability.andrews_sup_w:.2f} at τ* = {stability.andrews_break_fraction:.1%} (p = {stability.andrews_p_value:.3e}) {'[UNKNOWN REGIME SHIFT / BREAK DETECTED]' if stability.has_unknown_structural_break else '[STABLE PARAMETERS ALONG REGRESSOR]'}")
+            if stability.cusum_stat is not None:
+                rationale["key_evidence"].append(f"Brown-Durbin-Evans CUSUM Parameter Drift: S = {stability.cusum_stat:.3f} (p ≈ {stability.cusum_p_approx:.3e}) {'[RECURSIVE STRUCTURAL INSTABILITY - S > 0.948]' if stability.has_cusum_instability else '[STABLE RECURSIVE TRAJECTORY]'}")
+            if stability.koenker_p_value is not None:
+                rationale["key_evidence"].append(f"Koenker Studentized Heteroscedasticity: LM = {stability.koenker_lm_stat:.2f} (p = {stability.koenker_p_value:.3e}) {'[ROBUST NON-NORMAL HETEROSCEDASTICITY]' if stability.is_koenker_heteroscedastic else '[HOMOSCEDASTIC]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -337,8 +349,16 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Gelman-Carlin Type M Ratio: {stability.type_m_exaggeration_ratio:.2f}x (Type S = {stability.type_s_error_prob:.1%})")
             if confounder.davidson_mackinnon_p is not None:
                 rationale["key_evidence"].append(f"Davidson-MacKinnon J-Test: t_J = {confounder.davidson_mackinnon_j_stat:.2f} (p = {confounder.davidson_mackinnon_p:.3e})")
+            if confounder.durbin_wu_hausman_p is not None:
+                rationale["key_evidence"].append(f"Durbin-Wu-Hausman Exogeneity: F = {confounder.durbin_wu_hausman_f:.2f} (p = {confounder.durbin_wu_hausman_p:.3e})")
+            if confounder.stock_yogo_f_stat is not None:
+                rationale["key_evidence"].append(f"Stock-Yogo First-Stage Relevance: F = {confounder.stock_yogo_f_stat:.2f}")
             if stability.andrews_p_value is not None:
                 rationale["key_evidence"].append(f"Andrews Sup-Wald Invariance: Sup W = {stability.andrews_sup_w:.2f} (p = {stability.andrews_p_value:.3e})")
+            if stability.cusum_stat is not None:
+                rationale["key_evidence"].append(f"Brown-Durbin-Evans CUSUM Stability: S = {stability.cusum_stat:.3f} (p ≈ {stability.cusum_p_approx:.3e})")
+            if stability.koenker_p_value is not None:
+                rationale["key_evidence"].append(f"Koenker Studentized Homoscedasticity: LM = {stability.koenker_lm_stat:.2f} (p = {stability.koenker_p_value:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
