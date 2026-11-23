@@ -215,10 +215,17 @@ with col_right:
                         if simpsons.get("vuong_p") is not None:
                             v_flag = " ⚠️ Stratification Significantly Favored" if simpsons.get("is_stratification_favored") else " (Equivalent)"
                             st.markdown(f"**Vuong Model Selection Test:** z = `{simpsons.get('vuong_z', 0.0):.2f}` (p = `{simpsons['vuong_p']:.3e}`){v_flag}")
+                        if simpsons.get("higgins_h_squared") is not None and simpsons.get("higgins_h_squared") > 1.0:
+                            st.markdown(f"**Higgins H² Heterogeneity:** `{simpsons['higgins_h_squared']:.2f}` (Inflation Factor H = `{np.sqrt(simpsons['higgins_h_squared']):.2f}`)")
+                        if simpsons.get("galbraith_outlier_count", 0) > 0:
+                            st.markdown(f"**Galbraith Radial Outliers:** `{simpsons['galbraith_outlier_count']}` strata flagged (`{', '.join(simpsons.get('galbraith_outlier_subgroups', []))}`)")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
                             st.markdown(f"**VanderWeele E-Value:** `{conf_aud['e_value']:.2f}`")
+                        if conf_aud.get("aet_selection_ratio") is not None:
+                            aet_flag = " ⚠️ High Selection Vulnerability (R_AET < 1.0)" if conf_aud.get("is_aet_vulnerable") else " (Robust R_AET ≥ 1.0)"
+                            st.markdown(f"**Altonji-Elder-Taber Ratio:** R_AET = `{conf_aud['aet_selection_ratio']:.2f}`{aet_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -280,6 +287,9 @@ with col_right:
                             st.markdown(f"**BCa Bootstrap 95% CI:** [`{stab_aud['bca_ci_low']:.4f}`, `{stab_aud.get('bca_ci_high', 0.0):.4f}`]{bca_flag}")
                         if stab_aud.get("max_leverage") is not None and stab_aud.get("max_leverage", 0) > 0:
                             st.markdown(f"**Outlier Leverage:** Max `h_ii = {stab_aud['max_leverage']:.4f}` ({stab_aud.get('high_leverage_points', 0)} high-leverage points)")
+                        if stab_aud.get("chow_p_value") is not None:
+                            chow_flag = " ⚠️ Structural Break Detected" if stab_aud.get("has_structural_break") else " (Parameter Invariant)"
+                            st.markdown(f"**Chow Structural Break Test:** F = `{stab_aud.get('chow_f_stat', 0.0):.2f}` (p = `{stab_aud['chow_p_value']:.3e}`){chow_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -370,7 +380,25 @@ with col_right:
         with tab_copilot:
             st.markdown("#### 💬 Ask ADAA AI Copilot")
             st.caption("Ask questions about risk scores, specific variables, confounders, or leadership actions.")
-            
+
+            st.markdown("**Suggested Quick Inquiries:**")
+            sug_col1, sug_col2, sug_col3 = st.columns(3)
+            with sug_col1:
+                if st.button("📊 Altonji-Elder-Taber Ratio", key="sug_aet"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Altonji-Elder-Taber Ratio"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Altonji-Elder-Taber Ratio", findings, dataset_name=dataset_name)
+            with sug_col2:
+                if st.button("⚡ Chow Structural Break", key="sug_chow"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Check Chow Structural Break"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Check Chow Structural Break", findings, dataset_name=dataset_name)
+            with sug_col3:
+                if st.button("🎯 Galbraith Outlier Strata", key="sug_galb"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Detect Galbraith Outlier Strata"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Detect Galbraith Outlier Strata", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -423,6 +451,8 @@ with col_right:
                     "Verdict": f.get("verdict_badge", ""),
                     "Confidence": f.get("confidence_score", 0.0),
                     "Higgins_I2": f"{simp.get('i_squared', 0.0):.1f}%" if simp.get("i_squared") is not None else "N/A",
+                    "Higgins_H_Squared": f"{simp.get('higgins_h_squared', 0.0):.2f}" if simp.get("higgins_h_squared") is not None else "N/A",
+                    "Galbraith_Outliers": f"{simp.get('galbraith_outlier_count', 0)}" if simp.get("galbraith_outlier_count") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -438,6 +468,7 @@ with col_right:
                     "Rosenbaum_Gamma_Crit": f"{conf.get('rosenbaum_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_gamma_crit") is not None else "N/A",
                     "Manski_Bound_Low": f"{conf.get('manski_bound_low', 0.0):.3f}" if conf.get("manski_bound_low") is not None else "N/A",
                     "Manski_Bound_High": f"{conf.get('manski_bound_high', 0.0):.3f}" if conf.get("manski_bound_high") is not None else "N/A",
+                    "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
                     "Sobel_p_value": f"{conf.get('sobel_p', 0.0):.3e}" if conf.get("sobel_p") is not None else "N/A",
@@ -451,6 +482,8 @@ with col_right:
                     "Permutation_p": f"{stab.get('permutation_p_value', 0.0):.3e}" if stab.get("permutation_p_value") is not None else "N/A",
                     "Breusch_Pagan_p": f"{stab.get('breusch_pagan_p', 0.0):.3e}" if stab.get("breusch_pagan_p") is not None else "N/A",
                     "White_LM_p": f"{stab.get('white_lm_p', 0.0):.3e}" if stab.get("white_lm_p") is not None else "N/A",
+                    "Chow_F_Stat": f"{stab.get('chow_f_stat', 0.0):.2f}" if stab.get("chow_f_stat") is not None else "N/A",
+                    "Chow_p_value": f"{stab.get('chow_p_value', 0.0):.3e}" if stab.get("chow_p_value") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

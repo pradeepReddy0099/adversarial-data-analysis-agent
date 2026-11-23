@@ -1,8 +1,10 @@
 """Referee Agent: Adjudication and calibrated synthesis of adversarial debate."""
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import List
+import numpy as np
 
 from adversarial_agent.auditor import AuditReport
 from adversarial_agent.explorer import Claim
@@ -97,6 +99,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Breslow-Day Homogeneity Test: χ² = {simpsons.breslow_day_chi2:.2f} (p = {simpsons.breslow_day_p:.3e})")
             if simpsons.vuong_p is not None:
                 rationale["key_evidence"].append(f"Vuong Model Selection Test: z = {simpsons.vuong_z:.2f} (p = {simpsons.vuong_p:.3e}) {'[STRATIFICATION SIGNIFICANTLY FAVORED]' if simpsons.is_stratification_favored else '[EQUIVALENT]'}")
+            if simpsons.higgins_h_squared is not None and simpsons.higgins_h_squared > 1.0:
+                rationale["key_evidence"].append(f"Higgins H² Relative Heterogeneity: H² = {simpsons.higgins_h_squared:.2f} (variance inflation factor H = {np.sqrt(simpsons.higgins_h_squared):.2f})")
+            if simpsons.galbraith_outlier_count > 0:
+                rationale["key_evidence"].append(f"Galbraith Radial Outlier Strata: {simpsons.galbraith_outlier_count} outlying subgroups ({', '.join(simpsons.galbraith_outlier_subgroups)})")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -150,6 +156,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Sensitivity Bound: Γcrit = {confounder.rosenbaum_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_p_upper:.3e}) {'[SENSITIVE TO HIDDEN BIAS]' if confounder.is_rosenbaum_sensitive else '[ROBUST TO HIDDEN BIAS]'}")
             if confounder.manski_bound_low is not None:
                 rationale["key_evidence"].append(f"Manski Non-Parametric Bounds: [{confounder.manski_bound_low:.3f}, {confounder.manski_bound_high:.3f}] {'[CONTAINS ZERO - PARTIALLY IDENTIFIED]' if confounder.manski_contains_zero else '[EXCLUDES ZERO - IDENTIFIED SIGN]'}")
+            if confounder.aet_selection_ratio is not None:
+                rationale["key_evidence"].append(f"Altonji-Elder-Taber Selection Ratio: R_AET = {confounder.aet_selection_ratio:.2f} {'[HIGHLY VULNERABLE TO UNOBSERVABLES - R_AET < 1.0]' if confounder.is_aet_vulnerable else '[ROBUST TO UNOBSERVABLES]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -205,6 +213,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Theil-Sen Robust Slope: β_TS = {stability.theil_sen_slope:.4f} (Discrepancy Δ_TS = {stability.theil_sen_discrepancy:.1%})")
             if stability.bca_ci_low is not None:
                 rationale["key_evidence"].append(f"BCa Bootstrap 95% CI: [{stability.bca_ci_low:.4f}, {stability.bca_ci_high:.4f}] {'[CROSSES ZERO]' if stability.bca_zero_crossing else '[NON-ZERO]'}")
+            if stability.chow_p_value is not None:
+                rationale["key_evidence"].append(f"Chow Structural Break Test: F = {stability.chow_f_stat:.2f} (p = {stability.chow_p_value:.3e}) {'[STRUCTURAL BREAK / REGIME INSTABILITY]' if stability.has_structural_break else '[PARAMETER CONSTANT]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -298,6 +308,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Manski Non-Parametric Bounds: [{confounder.manski_bound_low:.3f}, {confounder.manski_bound_high:.3f}]")
             if stability.white_lm_p is not None:
                 rationale["key_evidence"].append(f"White Heteroscedasticity Test: LM = {stability.white_lm_stat:.2f} (p = {stability.white_lm_p:.3e})")
+            if confounder.aet_selection_ratio is not None:
+                rationale["key_evidence"].append(f"Altonji-Elder-Taber Selection Ratio: R_AET = {confounder.aet_selection_ratio:.2f}")
+            if stability.chow_p_value is not None:
+                rationale["key_evidence"].append(f"Chow Structural Stability: F = {stability.chow_f_stat:.2f} (p = {stability.chow_p_value:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

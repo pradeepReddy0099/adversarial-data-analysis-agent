@@ -794,6 +794,64 @@ class LLMNarrator:
                 )
             return "Manski non-parametric bounds establish the sharp identification region under worst-case unmeasured selection bias."
 
+        if any(w in q_lower for w in ["altonji", "elder", "taber", "aet", "selection ratio", "selection on unobservables"]):
+            aet_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                r_aet = conf.get("aet_selection_ratio")
+                is_vuln = conf.get("is_aet_vulnerable", False)
+                if r_aet is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ Highly Vulnerable to Unobservables (R_AET < 1.0)" if is_vuln else " (Robust to Unobservables R_AET ≥ 1.0)"
+                    aet_items.append(f"• **{v_name}** vs **{c_name}**: Altonji-Elder-Taber R_AET = {r_aet:.2f}{flag}")
+            if aet_items:
+                return (
+                    "**Altonji, Elder & Taber (2005) Selection Ratio on Unobservables (R_AET):**\n"
+                    "Measures how much stronger selection on unmeasured confounders must be relative to observed covariates to attribute the entire effect to selection bias:\n"
+                    + "\n".join(aet_items)
+                )
+            return "Altonji-Elder-Taber selection ratio measures how much stronger selection on unobservables must be relative to observables to nullify the effect."
+
+        if any(w in q_lower for w in ["chow", "structural break", "parameter constancy", "regime shift", "regime instability"]):
+            chow_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                f_c = stab.get("chow_f_stat")
+                p_c = stab.get("chow_p_value")
+                has_b = stab.get("has_structural_break", False)
+                if p_c is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Structural Break / Regime Shift Detected" if has_b else " (Parameter Invariance Maintained)"
+                    chow_items.append(f"• **{v_name}**: Chow F = {f_c:.2f} (p = {p_c:.3e}){flag}")
+            if chow_items:
+                return (
+                    "**Gregory Chow (1960) Structural Break & Parameter Stability Test:**\n"
+                    "Tests parameter equality across partitioned data regimes (median split on x). Rejection detects structural non-stationarity:\n"
+                    + "\n".join(chow_items)
+                )
+            return "Chow test evaluates parameter constancy and structural stability across subsample regimes."
+
+        if any(w in q_lower for w in ["galbraith", "radial outlier", "radial plot", "outlier strata", "higgins h", "excess heterogeneity"]):
+            galb_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                h2 = simp.get("higgins_h_squared")
+                cnt = simp.get("galbraith_outlier_count", 0)
+                outliers = simp.get("galbraith_outlier_subgroups", [])
+                if h2 is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    outlier_str = f" [Outliers: {', '.join(outliers)}]" if cnt > 0 else " [No Outlier Strata]"
+                    galb_items.append(f"• **{v_name}** stratified by **{conf}**: Higgins H² = {h2:.2f}, {cnt} Galbraith outliers{outlier_str}")
+            if galb_items:
+                return (
+                    "**Higgins H² Relative Heterogeneity & Galbraith (1988) Radial Outlier Detection:**\n"
+                    "Quantifies proportional variance inflation (H² = Q / (k-1)) and flags anomalous subgroup strata exerting excessive leverage:\n"
+                    + "\n".join(galb_items)
+                )
+            return "Higgins H² and Galbraith radial diagnostics evaluate total heterogeneity inflation and isolate outlying strata driving paradoxes."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -1006,15 +1064,15 @@ class LLMNarrator:
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
         lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 10 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Higgins I², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), tests small-stratum funnel asymmetry, estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
+        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
         lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
-        lines.append("3. **Rosenbaum (1987, 2002) Sensitivity Bounds (Γ) & Manski (1990, 2003) Non-Parametric Partial Identification:** Calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, and computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection.")
+        lines.append("3. **Altonji-Elder-Taber (AET 2005) Selection Ratio, Rosenbaum (1987, 2002) Sensitivity Bounds (Γ) & Manski (1990, 2003) Non-Parametric Partial Identification:** Evaluates the relative selection ratio ($R_{\\text{AET}}$) on unobservables required to attribute effects to selection bias, calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, and computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection.")
         lines.append("4. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
         lines.append("5. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
         lines.append("6. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
         lines.append("7. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
         lines.append("8. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
-        lines.append("9. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
+        lines.append("9. **Gregory Chow (1960) Structural Break Test, Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
         lines.append("10. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")

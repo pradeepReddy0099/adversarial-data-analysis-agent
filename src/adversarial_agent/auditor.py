@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
@@ -60,6 +60,9 @@ class SimpsonsParadoxAudit:
     vuong_z: Optional[float] = None
     vuong_p: Optional[float] = None
     is_stratification_favored: bool = False
+    higgins_h_squared: Optional[float] = None
+    galbraith_outlier_count: int = 0
+    galbraith_outlier_subgroups: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -108,6 +111,8 @@ class ConfounderAudit:
     manski_bound_low: Optional[float] = None
     manski_bound_high: Optional[float] = None
     manski_contains_zero: bool = False
+    aet_selection_ratio: Optional[float] = None
+    is_aet_vulnerable: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -159,6 +164,9 @@ class StabilityAudit:
     white_lm_stat: Optional[float] = None
     white_lm_p: Optional[float] = None
     is_white_heteroscedastic: bool = False
+    chow_f_stat: Optional[float] = None
+    chow_p_value: Optional[float] = None
+    has_structural_break: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1233,6 +1241,149 @@ def calculate_manski_bounds(
         return None, None, False
 
 
+def calculate_altonji_elder_taber_ratio(
+    r_xy: float,
+    r_xz: float,
+    r_yz: float,
+) -> tuple[Optional[float], bool]:
+    """Calculates Altonji, Elder, and Taber (2005) selection ratio (R_AET) on unobservables.
+    
+    Evaluates how much stronger selection on unmeasured confounders would have to be
+    relative to selection on observed confounders to attribute the entire observed effect to selection bias:
+    R_AET = |beta_full| / |beta_restricted - beta_full|
+    
+    Where in standardized terms:
+      beta_restricted = r_xy
+      beta_full = (r_xy - r_xz * r_yz) / (1 - r_xz^2)
+    
+    If R_AET < 1.0, selection on unobservables would only need to be smaller than selection
+    on the observed confounder to explain away the effect (highly vulnerable to unmeasured confounding).
+    If R_AET >= 3.0, unobservables would need to be 3x more explanatory than the top confounder (robust).
+    """
+    if abs(r_xz) >= 0.999 or abs(r_xy) >= 0.999:
+        return None, False
+    try:
+        denom = abs(r_xz * (r_yz - r_xy * r_xz))
+        num = abs(r_xy - r_xz * r_yz)
+        if denom < 1e-7:
+            # Confounder has virtually zero impact on beta; unobservables need infinite selection
+            return 99.9, False
+        r_aet = float(num / denom)
+        r_aet = min(99.9, max(0.0, r_aet))
+        is_vulnerable = bool(r_aet < 1.0)
+        return r_aet, is_vulnerable
+    except Exception:
+        return None, False
+
+
+def chow_structural_break_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Gregory Chow's (1960) F-test for structural breaks and parameter constancy.
+    
+    Tests H0: beta_1 = beta_2 across partitioned subsamples split at the median of x.
+    F_Chow = ((RSS_pooled - (RSS_1 + RSS_2)) / k) / ((RSS_1 + RSS_2) / (n - 2k)) ~ F(k, n - 2k)
+    where k = 2 (intercept + slope).
+    Rejection (p < 0.05) detects a structural break or regime instability, demonstrating that
+    the claimed relationship fails parameter invariance and is non-stationary.
+    """
+    n = len(x)
+    if n < 20:
+        return None, None, False
+    try:
+        x_mean, y_mean = float(np.mean(x)), float(np.mean(y))
+        sxx = float(np.sum((x - x_mean) ** 2))
+        sxy = float(np.sum((x - x_mean) * (y - y_mean)))
+        if sxx < 1e-12:
+            return None, None, False
+        b1 = sxy / sxx
+        b0 = y_mean - b1 * x_mean
+        rss_pooled = float(np.sum((y - (b0 + b1 * x)) ** 2))
+        
+        med = float(np.median(x))
+        m1, m2 = (x <= med), (x > med)
+        n1, n2 = int(np.sum(m1)), int(np.sum(m2))
+        if n1 < 5 or n2 < 5:
+            return None, None, False
+            
+        def _quick_rss(xs: np.ndarray, ys: np.ndarray) -> float:
+            xm, ym = float(np.mean(xs)), float(np.mean(ys))
+            sx = float(np.sum((xs - xm) ** 2))
+            if sx < 1e-12:
+                return float(np.sum((ys - ym) ** 2))
+            b = float(np.sum((xs - xm) * (ys - ym)) / sx)
+            a = ym - b * xm
+            return float(np.sum((ys - (a + b * xs)) ** 2))
+            
+        rss1 = _quick_rss(x[m1], y[m1])
+        rss2 = _quick_rss(x[m2], y[m2])
+        rss_u = rss1 + rss2
+        
+        k = 2
+        dfn = k
+        dfd = n - 2 * k
+        if dfd <= 0 or rss_u < 1e-12:
+            return 0.0, 1.0, False
+            
+        num = max(0.0, (rss_pooled - rss_u) / dfn)
+        den = max(1e-12, rss_u / dfd)
+        f_stat = float(num / den)
+        p_val = float(stats.f.sf(f_stat, dfn, dfd))
+        has_break = bool(p_val < 0.05)
+        return f_stat, p_val, has_break
+    except Exception:
+        return None, None, False
+
+
+def calculate_higgins_h_and_galbraith_outliers(
+    subgroup_stats: List[float],
+    subgroup_weights: List[int],
+    subgroup_names: List[str],
+    cochrans_q: Optional[float] = None,
+) -> tuple[Optional[float], int, List[str]]:
+    """Calculates Higgins & Thompson (2002) H^2 relative excess heterogeneity index
+    and detects Galbraith (1988) radial plot outlier strata.
+    
+    H^2 = max(1.0, Q / (k - 1)), measuring the multiplicative inflation of total variance
+    relative to within-subgroup sampling variance. H^2 > 1.5 indicates substantive heterogeneity.
+    
+    Galbraith radial standardized residuals:
+    z_i = (theta_i - theta_pooled) / SE_i
+    Subgroups with |z_i| >= 2.0 represent statistically significant outlier strata exerting
+    anomalous leverage on the aggregate estimate.
+    """
+    k = len(subgroup_stats)
+    if k < 2:
+        return 1.0, 0, []
+    try:
+        if cochrans_q is None:
+            w = np.array(subgroup_weights, dtype=float)
+            w_sum = np.sum(w)
+            if w_sum < 1e-9:
+                return 1.0, 0, []
+            pooled = float(np.sum(w * np.array(subgroup_stats)) / w_sum)
+            cochrans_q = float(np.sum(w * (np.array(subgroup_stats) - pooled) ** 2))
+            
+        h2 = max(1.0, float(cochrans_q / max(1, k - 1)))
+        
+        # Standard errors for each subgroup based on sample size
+        se = np.array([1.0 / np.sqrt(max(4, n - 3)) for n in subgroup_weights], dtype=float)
+        prec = 1.0 / np.maximum(1e-6, se)
+        pooled_theta = float(np.sum(prec ** 2 * np.array(subgroup_stats)) / np.sum(prec ** 2))
+        z_scores = (np.array(subgroup_stats) - pooled_theta) / np.maximum(1e-6, se)
+        
+        outliers = []
+        for i, z in enumerate(z_scores):
+            if abs(z) >= 2.0:
+                name = subgroup_names[i] if i < len(subgroup_names) else f"Strata_{i+1}"
+                outliers.append(str(name))
+                
+        return h2, len(outliers), outliers
+    except Exception:
+        return 1.0, 0, []
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -1565,6 +1716,11 @@ class DevilsAdvocateAgent:
             df, source, target, conf_col
         )
 
+        # Advanced Metric 10: Higgins H^2 Relative Heterogeneity & Galbraith Radial Outlier Strata
+        higgins_h2, galb_cnt, galb_outliers = calculate_higgins_h_and_galbraith_outliers(
+            subgroup_stats, subgroup_weights, [b.group_name for b in breakdowns], cochrans_q=cochrans_q
+        )
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if bd_p is not None:
             cmh_note += f" [Breslow-Day: p={bd_p:.3e}]"
@@ -1574,6 +1730,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [E-value: {simpson_e_val:.2f}]"
         if i_sq is not None:
             cmh_note += f" [I² Heterogeneity: {i_sq:.1f}%]"
+        if higgins_h2 is not None and higgins_h2 > 1.0:
+            cmh_note += f" [Higgins H²: {higgins_h2:.2f}]"
+        if galb_cnt > 0:
+            cmh_note += f" [Galbraith Outliers: {galb_cnt} ({', '.join(galb_outliers)})]"
         if begg_p is not None:
             cmh_note += f" [Begg Funnel: τ={begg_tau:.2f}, p={begg_p:.3e}]"
         if tau_sq is not None:
@@ -1631,6 +1791,9 @@ class DevilsAdvocateAgent:
             vuong_z=vuong_z_val,
             vuong_p=vuong_p_val,
             is_stratification_favored=is_strat_fav,
+            higgins_h_squared=higgins_h2,
+            galbraith_outlier_count=galb_cnt,
+            galbraith_outlier_subgroups=galb_outliers,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -1765,12 +1928,25 @@ class DevilsAdvocateAgent:
         val_m = ~(np.isnan(x_arr_m) | np.isnan(y_arr_m))
         manski_l, manski_h, manski_zero = calculate_manski_bounds(x_arr_m[val_m], y_arr_m[val_m])
 
+        # Advanced Econometric Metric: Altonji, Elder & Taber (2005) Selection Ratio on Unobservables
+        aet_val, is_aet_vuln = None, False
+        if top_conf is not None:
+            sub_aet = df[[source, target, top_conf]].dropna()
+            if len(sub_aet) >= 10:
+                try:
+                    r_xz_a, _ = stats.pearsonr(sub_aet[source], sub_aet[top_conf])
+                    r_yz_a, _ = stats.pearsonr(sub_aet[target], sub_aet[top_conf])
+                    aet_val, is_aet_vuln = calculate_altonji_elder_taber_ratio(r_xy, r_xz_a, r_yz_a)
+                except Exception:
+                    pass
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
         rv_str = f", RV={rv_point:.2f} (R²crit={rcrit_val:.2f})"
         rosen_str = f", Rosenbaum Γcrit={gamma_crit:.2f}" if gamma_crit is not None else ""
         manski_str = f", Manski=[{manski_l:.3f}, {manski_h:.3f}]" if manski_l is not None else ""
+        aet_str = f", AET={aet_val:.2f}" if aet_val is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
@@ -1780,9 +1956,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{aet_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{aet_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -1825,6 +2001,8 @@ class DevilsAdvocateAgent:
             manski_bound_low=manski_l,
             manski_bound_high=manski_h,
             manski_contains_zero=manski_zero,
+            aet_selection_ratio=aet_val,
+            is_aet_vulnerable=is_aet_vuln,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -2025,6 +2203,9 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Efron & Tibshirani (1993) BCa Bootstrap 95% Confidence Interval
         bca_low, bca_high, bca_zero = calculate_bca_bootstrap_ci(valid_r, claim.statistic_value, x_vals, y_vals)
 
+        # Advanced Diagnostic: Gregory Chow (1960) Structural Break & Parameter Stability F-Test
+        chow_f, chow_p, has_break = chow_structural_break_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -2033,13 +2214,14 @@ class DevilsAdvocateAgent:
         dfb_str = f", DFBETAS_max={max_dfbetas_val:.3f}" if max_dfbetas_val > 0 else ""
         bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
         white_str = f", White_p={white_p:.3e}" if white_p is not None else ""
+        chow_str = f", Chow_p={chow_p:.3e}" if chow_p is not None else ""
         jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
         dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
         hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -2086,6 +2268,9 @@ class DevilsAdvocateAgent:
             white_lm_stat=white_lm,
             white_lm_p=white_p,
             is_white_heteroscedastic=is_white_hetero,
+            chow_f_stat=chow_f,
+            chow_p_value=chow_p,
+            has_structural_break=has_break,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

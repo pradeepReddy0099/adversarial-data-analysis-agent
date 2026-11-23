@@ -61,6 +61,10 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.breslow_day_chi2 is not None
     assert audit.simpsons_audit.vuong_z is not None
     assert audit.simpsons_audit.vuong_p is not None
+    # Verify Higgins H^2 relative excess heterogeneity and Galbraith radial outliers
+    assert audit.simpsons_audit.higgins_h_squared is not None
+    assert audit.simpsons_audit.higgins_h_squared >= 1.0
+    assert audit.simpsons_audit.galbraith_outlier_count is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -140,6 +144,9 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.manski_bound_low is not None
         assert audit_coffee.confounder_audit.manski_bound_high is not None
         assert audit_coffee.confounder_audit.manski_bound_low <= audit_coffee.confounder_audit.manski_bound_high
+        # Check Altonji-Elder-Taber selection ratio
+        assert audit_coffee.confounder_audit.aet_selection_ratio is not None
+        assert audit_coffee.confounder_audit.aet_selection_ratio >= 0.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -195,6 +202,10 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.bca_ci_low is not None
     assert audit.stability_audit.bca_ci_high is not None
     assert audit.stability_audit.bca_ci_low <= audit.stability_audit.bca_ci_high
+    # Check Chow structural break test
+    assert audit.stability_audit.chow_f_stat is not None
+    assert audit.stability_audit.chow_p_value is not None
+    assert 0.0 <= audit.stability_audit.chow_p_value <= 1.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -327,6 +338,15 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_manski = narrator.answer_query("What are Manski partial identification bounds?", findings)
     assert "Manski" in ans_manski or "Partial Identification" in ans_manski or "Bounds" in ans_manski
+
+    ans_aet = narrator.answer_query("Explain Altonji-Elder-Taber selection ratio", findings)
+    assert "Altonji" in ans_aet or "AET" in ans_aet or "Selection" in ans_aet
+
+    ans_chow = narrator.answer_query("Explain Chow structural break test", findings)
+    assert "Chow" in ans_chow or "Structural Break" in ans_chow or "Stability" in ans_chow
+
+    ans_galb = narrator.answer_query("Explain Galbraith radial outlier strata and Higgins H-squared", findings)
+    assert "Galbraith" in ans_galb or "Higgins" in ans_galb or "Radial" in ans_galb
 
 
 def test_end_to_end_pipeline(tmp_path):
