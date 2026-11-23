@@ -81,6 +81,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Tarone Homogeneity Test: p = {simpsons.tarone_homogeneity_p:.3e} (χ² = {simpsons.tarone_chi2:.2f})")
             if simpsons.e_value is not None:
                 rationale["key_evidence"].append(f"Causal E-value: {simpsons.e_value:.2f}")
+            if simpsons.i_squared is not None:
+                rationale["key_evidence"].append(f"Higgins & Thompson I² Inconsistency: {simpsons.i_squared:.1f}% (Cochran's Q = {simpsons.cochrans_q:.2f})")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -112,6 +114,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"E-value for unmeasured confounding: {confounder.e_value:.2f}")
             if confounder.top_confounder_vif is not None:
                 rationale["key_evidence"].append(f"Confounder VIF collinearity: {confounder.top_confounder_vif:.2f} {'[HIGH COLLINEARITY]' if confounder.is_collinear else '[STABLE]'}")
+            if confounder.robustness_value is not None:
+                rationale["key_evidence"].append(f"Cinelli-Hazlett Robustness Value: RV_q=1 = {confounder.robustness_value:.2f} (RV_α = {confounder.robustness_value_alpha:.2f})")
+            if confounder.sobel_p is not None:
+                rationale["key_evidence"].append(f"Baron-Kenny Sobel Mediation: p = {confounder.sobel_p:.3e} ({confounder.proportion_mediated:.1f}% mediated by '{confounder.top_confounder}')")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -145,6 +151,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Max leverage: {stability.max_leverage:.4f} ({stability.high_leverage_points} high-leverage points)")
             if stability.max_cooks_distance is not None and stability.max_cooks_distance > 0:
                 rationale["key_evidence"].append(f"Cook's distance: D_max = {stability.max_cooks_distance:.3f} ({stability.cooks_outlier_count} influential points, shift = {stability.cooks_statistic_shift:.4f})")
+            if stability.max_dffits is not None and stability.max_dffits > 0:
+                rationale["key_evidence"].append(f"DFFITS Influence: Max |DFFITS| = {stability.max_dffits:.3f} ({stability.dffits_outlier_count} influential observations)")
+            if stability.permutation_p_value is not None:
+                rationale["key_evidence"].append(f"Permutation Shuffle Test: p_perm = {stability.permutation_p_value:.3e}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -206,8 +216,14 @@ class RefereeAgent:
             rationale["key_evidence"].append(f"Sign invariance probability: P(sign) = {stability.sign_invariance_prob:.1%}")
             if stability.max_cooks_distance is not None and stability.max_cooks_distance > 0:
                 rationale["key_evidence"].append(f"Cook's distance: D_max = {stability.max_cooks_distance:.3f} (influence shift = {stability.cooks_statistic_shift:.4f})")
+            if stability.max_dffits is not None and stability.max_dffits > 0:
+                rationale["key_evidence"].append(f"DFFITS Influence: Max |DFFITS| = {stability.max_dffits:.3f}")
+            if stability.permutation_p_value is not None:
+                rationale["key_evidence"].append(f"Permutation Shuffle Test: p_perm = {stability.permutation_p_value:.3e}")
             if claim.fdr_q_value is not None:
                 rationale["key_evidence"].append(f"Benjamini-Hochberg FDR: q = {claim.fdr_q_value:.4e}")
+            if claim.bonferroni_p_value is not None:
+                rationale["key_evidence"].append(f"Bonferroni FWER: p_adj = {claim.bonferroni_p_value:.4e}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

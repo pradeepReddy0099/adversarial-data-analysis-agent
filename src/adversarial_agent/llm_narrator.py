@@ -174,7 +174,24 @@ class LLMNarrator:
                 )
             return "Tarone's test evaluates whether the odds ratio is invariant across subgroups in stratified 2x2xK tables."
 
-        if any(w in q_lower for w in ["cook", "influence", "leverage", "outlier", "d_max"]):
+        if any(w in q_lower for w in ["dffits", "studentized"]):
+            dffits_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                dff = stab.get("max_dffits")
+                cnt = stab.get("dffits_outlier_count", 0)
+                if dff is not None and dff > 0:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    dffits_items.append(f"• **{v_name}**: Max |DFFITS| = {dff:.3f} ({cnt} points exceeding 2√(p/n))")
+            if dffits_items:
+                return (
+                    "**DFFITS Regression Influence Diagnostics:**\n"
+                    "Measures the number of standard deviations that fitted values change when each observation is removed:\n"
+                    + "\n".join(dffits_items)
+                )
+            return "DFFITS diagnostic identifies observations with outsized influence on predicted values."
+
+        if any(w in q_lower for w in ["cook", "cook's", "leverage", "d_max"]):
             cook_items = []
             for f in findings:
                 stab = f.get("audit", {}).get("stability_audit", {})
@@ -241,6 +258,92 @@ class LLMNarrator:
                     + "\n".join(fdr_items)
                 )
             return "Benjamini-Hochberg FDR q-values adjust raw p-values across all discovered candidate claims."
+
+        if any(w in q_lower for w in ["robustness value", "cinelli", "hazlett", "rv"]):
+            rv_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                rv = conf.get("robustness_value")
+                rv_a = conf.get("robustness_value_alpha")
+                if rv is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    rv_items.append(f"• **{v_name}**: RV_q=1 = {rv:.2f} (RV_α=0.05 = {rv_a:.2f})")
+            if rv_items:
+                return (
+                    "**Cinelli & Hazlett (2020) Robustness Value (RV):**\n"
+                    "Quantifies the minimum strength of association (partial R²) an unmeasured confounder must have with both exposure and outcome to overturn the finding:\n"
+                    + "\n".join(rv_items)
+                )
+            return "Cinelli-Hazlett Robustness Values define the minimum confounder association needed to nullify point estimates or significance."
+
+        if any(w in q_lower for w in ["i-squared", "i^2", "heterogeneity", "cochran"]):
+            i2_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                i2 = simp.get("i_squared")
+                q_stat = simp.get("cochrans_q")
+                if i2 is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    i2_items.append(f"• **{v_name}** stratified by **{conf}**: I² = {i2:.1f}% (Cochran's Q = {q_stat:.2f})")
+            if i2_items:
+                return (
+                    "**Higgins & Thompson I² Inconsistency Index & Cochran's Q:**\n"
+                    "Measures the percentage of cross-stratum variation due to genuine heterogeneity rather than random sampling error:\n"
+                    + "\n".join(i2_items)
+                )
+            return "Higgins I² index quantifies cross-stratum effect heterogeneity across conditioning variables."
+
+        if any(w in q_lower for w in ["sobel", "mediation", "baron-kenny", "indirect"]):
+            sobel_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                z_sob = conf.get("sobel_z")
+                p_sob = conf.get("sobel_p")
+                p_med = conf.get("proportion_mediated")
+                if p_sob is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    sobel_items.append(f"• **{v_name}** → **{c_name}**: Sobel z = {z_sob:.2f}, p = {p_sob:.3e} ({p_med:.1f}% mediated)")
+            if sobel_items:
+                return (
+                    "**Baron-Kenny & Sobel Mediation Test:**\n"
+                    "Evaluates whether covariate attenuation is driven by an intermediate causal mechanism (mediation) rather than pure confounding:\n"
+                    + "\n".join(sobel_items)
+                )
+            return "The Sobel test formally evaluates whether a covariate acts as a significant mediating pathway."
+
+        if any(w in q_lower for w in ["permutation", "shuffle"]):
+            perm_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                p_perm = stab.get("permutation_p_value")
+                if p_perm is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    perm_items.append(f"• **{v_name}**: Permutation p = {p_perm:.3e}")
+            if perm_items:
+                return (
+                    "**Exact Random Permutation Shuffle Falsification Tests:**\n"
+                    "Non-parametric null distribution tests assessing whether the observed effect can arise by chance under label shuffling:\n"
+                    + "\n".join(perm_items)
+                )
+            return "Permutation tests simulate the exact empirical null distribution by shuffling exposure values."
+
+        if any(w in q_lower for w in ["bonferroni", "fwer"]):
+            bonf_items = []
+            for f in findings:
+                b_p = f.get("claim", {}).get("bonferroni_p_value")
+                if b_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    p_orig = f.get("claim", {}).get("p_value", 0.0)
+                    bonf_items.append(f"• **{v_name}**: Raw p = {p_orig:.3e} → Bonferroni p_adj = {b_p:.3e}")
+            if bonf_items:
+                return (
+                    "**Bonferroni FWER Multiple Testing Correction:**\n"
+                    "Controls Family-Wise Error Rate (FWER) across m hypotheses: p_adj = min(1.0, m * p):\n"
+                    + "\n".join(bonf_items)
+                )
+            return "Bonferroni correction strictly controls family-wise error rate across multiple hypotheses."
 
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
@@ -454,10 +557,11 @@ class LLMNarrator:
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
         lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 4 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel & Tarone Homogeneity:** Verifies whether stratified odds ratios reverse or vary significantly across confounding strata.")
-        lines.append("2. **VanderWeele-Ding E-values:** Establishes the mathematical bound for unmeasured confounding sensitivity.")
-        lines.append("3. **Non-Parametric Vectorized Bootstrap & Cook's Influence:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), and outlier leverage ($D_i > 4/n$).")
-        lines.append("4. **Benjamini-Hochberg FDR:** Guarantees control over false discovery rate across high-dimensional exploratory hypothesis mining.")
+        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity & Higgins I²:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, and quantifies true heterogeneity percentage ($I^2$).")
+        lines.append("2. **VanderWeele E-Values & Cinelli-Hazlett Robustness Values (RV):** Establishes mathematical bounds and partial $R^2$ strength an unmeasured confounder must achieve to nullify empirical associations.")
+        lines.append("3. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
+        lines.append("4. **Non-Parametric Vectorized Bootstrap, Cook's Distance & DFFITS:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), DFFITS influence, and leverage.")
+        lines.append("5. **Exact Permutation Shuffle & FDR/FWER Correction:** Assesses null hypothesis rejection against 150 random shuffles and controls false discovery rate via Benjamini-Hochberg FDR.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

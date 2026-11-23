@@ -43,6 +43,8 @@ class SimpsonsParadoxAudit:
     tarone_chi2: Optional[float] = None
     e_value: Optional[float] = None
     e_value_interpretation: Optional[str] = None
+    i_squared: Optional[float] = None
+    cochrans_q: Optional[float] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -65,6 +67,11 @@ class ConfounderAudit:
     e_value_interpretation: Optional[str] = None
     top_confounder_vif: Optional[float] = None
     is_collinear: bool = False
+    robustness_value: Optional[float] = None
+    robustness_value_alpha: Optional[float] = None
+    sobel_z: Optional[float] = None
+    sobel_p: Optional[float] = None
+    proportion_mediated: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -90,6 +97,9 @@ class StabilityAudit:
     cooks_outlier_count: int = 0
     cooks_trimmed_statistic: Optional[float] = None
     cooks_statistic_shift: Optional[float] = None
+    max_dffits: Optional[float] = None
+    dffits_outlier_count: int = 0
+    permutation_p_value: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -200,6 +210,98 @@ def tarone_homogeneity_test(tables_2x2: List[tuple[float, float, float, float]],
     tarone_stat = float(max(0.0, bd_stat - (sum_diff ** 2) / sum_var))
     p_val = float(stats.chi2.sf(tarone_stat, df=valid_k - 1))
     return tarone_stat, p_val
+
+
+def calculate_cinelli_hazlett_rv(partial_r: float, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Calculates Cinelli & Hazlett (2020) Robustness Values (RV_q=1 and RV_alpha).
+    
+    RV_q=1: Minimum strength of association (partial R2) an unmeasured confounder must have
+    with both exposure and outcome to reduce the estimated effect to zero.
+    RV_alpha: Minimum strength of association to nullify statistical significance at level alpha.
+    """
+    if n <= 3 or np.isnan(partial_r):
+        return 0.0, 0.0
+    
+    r_abs = min(0.9999, abs(partial_r))
+    df = max(1, n - 3)
+    f = r_abs / np.sqrt(max(1e-9, 1.0 - r_abs ** 2))
+    
+    # RV for point estimate nullification (q = 1)
+    rv_point = float(r_abs)
+    
+    # RV for statistical significance nullification
+    t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df=df))
+    f_crit = t_crit / np.sqrt(df)
+    f_alpha = f - f_crit
+    
+    if f_alpha <= 0.0:
+        rv_alpha = 0.0
+    else:
+        rv_alpha = float(f_alpha / np.sqrt(f_alpha ** 2 + 1.0))
+        
+    return rv_point, rv_alpha
+
+
+def sobel_mediation_test(r_xy: float, r_xz: float, r_yz: float, n: int) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Calculates the Sobel test for mediation vs. confounding.
+    
+    Tests whether the indirect pathway X -> Z -> Y is statistically significant:
+    z_sobel = (a * b) / sqrt(b^2 * SE_a^2 + a^2 * SE_b^2).
+    Returns (z_statistic, p_value, proportion_mediated_pct).
+    """
+    if n < 10 or abs(r_xz) >= 0.999 or np.isnan(r_xy) or np.isnan(r_xz) or np.isnan(r_yz):
+        return None, None, None
+        
+    a = r_xz
+    se_a = np.sqrt(max(1e-9, (1.0 - r_xz ** 2) / max(1, n - 2)))
+    
+    denom_b = max(1e-9, 1.0 - r_xz ** 2)
+    b = (r_yz - r_xy * r_xz) / denom_b
+    
+    r2_yz_x = min(0.999, max(0.0, (r_xy ** 2 + r_yz ** 2 - 2.0 * r_xy * r_yz * r_xz) / denom_b))
+    se_b = np.sqrt(max(1e-9, (1.0 - r2_yz_x) / (max(1, n - 3) * denom_b)))
+    
+    indirect = a * b
+    se_sobel = np.sqrt(b ** 2 * se_a ** 2 + a ** 2 * se_b ** 2)
+    
+    if se_sobel <= 1e-9:
+        return None, None, None
+        
+    z_stat = float(indirect / se_sobel)
+    p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+    
+    prop_med = float((indirect / r_xy) * 100.0) if abs(r_xy) > 1e-6 else 0.0
+    return z_stat, p_val, prop_med
+
+
+def higgins_i_squared_heterogeneity(subgroup_stats: List[float], subgroup_weights: List[int], is_correlation: bool = True) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Cochran's Q and Higgins & Thompson I^2 inconsistency index across strata.
+    
+    I^2 = max(0, (Q - df) / Q) * 100%. Quantifies the percentage of total variation across
+    subgroups due to true heterogeneity rather than sampling error.
+    """
+    K = len(subgroup_stats)
+    if K < 2:
+        return None, None
+        
+    df = K - 1
+    stats_arr = np.array(subgroup_stats, dtype=float)
+    weights_arr = np.array(subgroup_weights, dtype=float)
+    
+    if is_correlation:
+        clipped = np.clip(stats_arr, -0.999, 0.999)
+        z_vals = 0.5 * np.log((1.0 + clipped) / (1.0 - clipped))
+        w = np.maximum(1.0, weights_arr - 3.0)
+        mean_z = np.average(z_vals, weights=w)
+        q_stat = float(np.sum(w * (z_vals - mean_z) ** 2))
+    else:
+        w = weights_arr
+        mean_stat = np.average(stats_arr, weights=w)
+        norm_var = max(1e-6, float(np.var(stats_arr, ddof=1))) if K > 2 else 1.0
+        q_stat = float(np.sum(w * (stats_arr - mean_stat) ** 2) / (np.mean(w) * norm_var) * df)
+        
+    i_sq = max(0.0, float((q_stat - df) / max(1e-9, q_stat) * 100.0))
+    return q_stat, i_sq
 
 
 class DevilsAdvocateAgent:
@@ -499,18 +601,25 @@ class DevilsAdvocateAgent:
                 if s_pooled > 1e-9:
                     cohens_d = float((s1.mean() - s2.mean()) / s_pooled)
 
+        # Advanced Metric 3: Higgins & Thompson I^2 Inconsistency & Cochran's Q for Subgroup Heterogeneity
+        cochrans_q, i_sq = higgins_i_squared_heterogeneity(
+            subgroup_stats, subgroup_weights, is_correlation=(claim.claim_type == "correlation")
+        )
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if tarone_p is not None:
             cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
         if simpson_e_val is not None:
             cmh_note += f" [E-value: {simpson_e_val:.2f}]"
+        if i_sq is not None:
+            cmh_note += f" [I² Heterogeneity: {i_sq:.1f}%]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
             f"{reversal_count}/{valid_groups} ({reversal_pct:.0%}) subgroups. "
             f"Global statistic was {claim.statistic_value:.4f}, but weighted within-group statistic is {weighted_stat:.4f}.{cmh_note}"
             if paradox_detected
-            else f"No paradox under '{conf_col}': {valid_groups - reversal_count}/{valid_groups} subgroups align with global trend."
+            else f"No paradox under '{conf_col}': {valid_groups - reversal_count}/{valid_groups} subgroups align with global trend.{cmh_note}"
         )
 
         return SimpsonsParadoxAudit(
@@ -532,6 +641,8 @@ class DevilsAdvocateAgent:
             tarone_chi2=tarone_stat,
             e_value=simpson_e_val,
             e_value_interpretation=simpson_e_desc,
+            i_squared=i_sq,
+            cochrans_q=cochrans_q,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -594,14 +705,32 @@ class DevilsAdvocateAgent:
         rr_approx = float(np.exp(0.91 * d_approx))
         e_val, e_desc = calculate_e_value(rr_approx)
 
+        # Advanced Causal Sensitivity Metric: Cinelli & Hazlett (2020) Robustness Value (RV_q=1 and RV_alpha)
+        n_obs = len(df[[source, target]].dropna())
+        rv_point, rv_alpha = calculate_cinelli_hazlett_rv(best_partial, n=n_obs)
+
+        # Advanced Mediation Diagnostic: Baron-Kenny & Sobel Mediation Test for Top Confounder
+        sobel_z, sobel_p, prop_med = None, None, None
+        if top_conf is not None:
+            sub_sob = df[[source, target, top_conf]].dropna()
+            if len(sub_sob) >= 10:
+                try:
+                    r_xz_s, _ = stats.pearsonr(sub_sob[source], sub_sob[top_conf])
+                    r_yz_s, _ = stats.pearsonr(sub_sob[target], sub_sob[top_conf])
+                    sobel_z, sobel_p, prop_med = sobel_mediation_test(r_xy, r_xz_s, r_yz_s, n=len(sub_sob))
+                except Exception:
+                    pass
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
+        rv_str = f", RV={rv_point:.2f}"
+        sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -618,6 +747,11 @@ class DevilsAdvocateAgent:
             e_value_interpretation=e_desc,
             top_confounder_vif=top_vif,
             is_collinear=is_collinear,
+            robustness_value=rv_point,
+            robustness_value_alpha=rv_alpha,
+            sobel_z=sobel_z,
+            sobel_p=sobel_p,
+            proportion_mediated=prop_med,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -761,11 +895,36 @@ class DevilsAdvocateAgent:
             cooks_trim_r = float(trim_r)
             cooks_shift = 0.0
 
-        is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90)
+        # Advanced Diagnostic: DFFITS Regression Influence Diagnostic
+        # DFFITS_i = t_i * sqrt(h_ii / (1 - h_ii)), cutoff = 2 * sqrt(p / n)
+        if x_ss > 1e-9 and mse > 1e-12:
+            denom_h = np.maximum(1e-6, 1.0 - h_ii)
+            mse_i = np.maximum(1e-12, ((n - p_params) * mse - (residuals ** 2) / denom_h) / max(1, n - p_params - 1))
+            t_stud = residuals / np.sqrt(mse_i * denom_h)
+            dffits = t_stud * np.sqrt(h_ii / denom_h)
+            max_dffits_val = float(np.max(np.abs(dffits)))
+            dffits_threshold = 2.0 * np.sqrt(p_params / n)
+            dffits_count = int(np.sum(np.abs(dffits) > dffits_threshold))
+        else:
+            max_dffits_val = 0.0
+            dffits_count = 0
+
+        # Advanced Falsification Battery: Non-parametric Exact Permutation Shuffle Test
+        n_perms = 150
+        perm_idx = np.array([self.rng.permutation(n) for _ in range(n_perms)])
+        py_perm = y_vals[perm_idx]
+        py_perm_c = py_perm - py_perm.mean(axis=1, keepdims=True)
+        cov_perm = (x_diff * py_perm_c).sum(axis=1)
+        denom_perm = np.sqrt(np.maximum(1e-12, x_ss * (py_perm_c ** 2).sum(axis=1)))
+        r_perms = cov_perm / denom_perm
+        perm_p = float(np.mean(np.abs(r_perms) >= abs(claim.statistic_value)))
+
+        is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
         cooks_str = f", Cook's D_max={max_cooks:.3f} ({cooks_count} influential)" if max_cooks > 0 else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, {exec_ms:.1f}ms{disc_str}{cooks_str}). Trimmed r = {trim_r:.4f}."
+        dffits_str = f", DFFITS_max={max_dffits_val:.3f}" if max_dffits_val > 0 else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -786,6 +945,9 @@ class DevilsAdvocateAgent:
             cooks_outlier_count=cooks_count,
             cooks_trimmed_statistic=cooks_trim_r,
             cooks_statistic_shift=cooks_shift,
+            max_dffits=max_dffits_val,
+            dffits_outlier_count=dffits_count,
+            permutation_p_value=perm_p,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

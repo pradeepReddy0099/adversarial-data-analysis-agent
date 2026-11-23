@@ -25,6 +25,7 @@ class Claim:
     description: str
     metadata: dict
     fdr_q_value: Optional[float] = None
+    bonferroni_p_value: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,8 +103,10 @@ class ExplorerAgent:
         if claims:
             p_vals = [c.p_value for c in claims]
             q_vals = benjamini_hochberg_fdr(p_vals)
+            m = len(claims)
             for c, q in zip(claims, q_vals):
                 c.fdr_q_value = q
+                c.bonferroni_p_value = min(1.0, float(m * c.p_value))
         return claims
 
     def _is_identifier(self, col: str, df: pd.DataFrame) -> bool:

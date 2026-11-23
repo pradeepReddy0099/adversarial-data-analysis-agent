@@ -41,6 +41,9 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.tarone_homogeneity_p is not None
     assert audit.simpsons_audit.e_value is not None
     assert audit.simpsons_audit.e_value > 1.0
+    # Verify Higgins I^2 and Cochran's Q are computed
+    assert audit.simpsons_audit.i_squared is not None
+    assert audit.simpsons_audit.cochrans_q is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -92,6 +95,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.e_value >= 1.0
         assert audit_coffee.confounder_audit.top_confounder_vif is not None
         assert audit_coffee.confounder_audit.top_confounder_vif >= 1.0
+        # Check Cinelli-Hazlett Robustness Values and Sobel mediation
+        assert audit_coffee.confounder_audit.robustness_value is not None
+        assert audit_coffee.confounder_audit.robustness_value_alpha is not None
+        assert audit_coffee.confounder_audit.sobel_p is not None
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -119,6 +126,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.cooks_trimmed_statistic is not None
     assert exp_claim.fdr_q_value is not None
     assert exp_claim.fdr_q_value <= 1.0
+    # Check DFFITS, permutation p-value, and Bonferroni FWER
+    assert audit.stability_audit.max_dffits is not None
+    assert audit.stability_audit.permutation_p_value is not None
+    assert audit.stability_audit.permutation_p_value < 0.05
+    assert exp_claim.bonferroni_p_value is not None
+    assert exp_claim.bonferroni_p_value <= 1.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -161,6 +174,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_vif = narrator.answer_query("Explain VIF multicollinearity", findings)
     assert "VIF" in ans_vif
+
+    ans_rv = narrator.answer_query("What is the Robustness Value (RV)?", findings)
+    assert "Robustness Value" in ans_rv or "RV" in ans_rv
+
+    ans_i2 = narrator.answer_query("Explain Higgins I-squared heterogeneity", findings)
+    assert "Higgins" in ans_i2 or "I²" in ans_i2
+
+    ans_sobel = narrator.answer_query("What does the Sobel mediation test show?", findings)
+    assert "Sobel" in ans_sobel or "Mediation" in ans_sobel
+
+    ans_dffits = narrator.answer_query("What is DFFITS influence?", findings)
+    assert "DFFITS" in ans_dffits
+
+    ans_perm = narrator.answer_query("Explain permutation test", findings)
+    assert "Permutation" in ans_perm
+
+    ans_bonf = narrator.answer_query("Explain Bonferroni correction", findings)
+    assert "Bonferroni" in ans_bonf
 
 
 def test_end_to_end_pipeline(tmp_path):

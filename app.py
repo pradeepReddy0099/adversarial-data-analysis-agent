@@ -177,6 +177,8 @@ with col_right:
                         st.write(f"- **Significance:** `p = {claim['p_value']:.4e}`")
                         if claim.get("fdr_q_value") is not None:
                             st.write(f"- **Benjamini-Hochberg FDR:** `q = {claim['fdr_q_value']:.4e}`")
+                        if claim.get("bonferroni_p_value") is not None:
+                            st.write(f"- **Bonferroni FWER:** `p_adj = {claim['bonferroni_p_value']:.4e}`")
                         st.write(f"- **Sample Size:** `N = {claim['sample_size']}`")
                         
                     with deb_col2:
@@ -191,6 +193,8 @@ with col_right:
                             st.markdown(f"**Cochran-Mantel-Haenszel Test:** Common OR = `{simpsons['cmh_odds_ratio']:.3f}` (p = `{simpsons.get('cmh_p_value', 0.0):.3e}`)")
                         if simpsons.get("tarone_homogeneity_p") is not None:
                             st.markdown(f"**Tarone Homogeneity Test:** `p = {simpsons['tarone_homogeneity_p']:.3e}` (χ² = `{simpsons.get('tarone_chi2', 0.0):.2f}`)")
+                        if simpsons.get("i_squared") is not None:
+                            st.markdown(f"**Higgins & Thompson I² Heterogeneity:** `{simpsons['i_squared']:.1f}%` (Cochran's Q = `{simpsons.get('cochrans_q', 0.0):.2f}`)")
                         if simpsons.get("e_value") is not None:
                             st.markdown(f"**Causal Sensitivity E-Value:** `{simpsons['e_value']:.2f}`")
 
@@ -200,12 +204,20 @@ with col_right:
                         if conf_aud.get("top_confounder_vif") is not None:
                             vif_flag = " ⚠️ High Collinearity" if conf_aud.get("is_collinear") else ""
                             st.markdown(f"**Confounder VIF Collinearity:** `{conf_aud['top_confounder_vif']:.2f}`{vif_flag}")
+                        if conf_aud.get("robustness_value") is not None:
+                            st.markdown(f"**Cinelli-Hazlett Robustness Value:** RV_q=1 = `{conf_aud['robustness_value']:.2f}` (RV_α = `{conf_aud.get('robustness_value_alpha', 0.0):.2f}`)")
+                        if conf_aud.get("sobel_p") is not None:
+                            st.markdown(f"**Sobel Mediation Test:** `p = {conf_aud['sobel_p']:.3e}` ({conf_aud.get('proportion_mediated', 0.0):.1f}% mediated by `{conf_aud.get('top_confounder')}`)")
 
                         stab_aud = audit.get("stability_audit", {})
                         if stab_aud.get("sign_invariance_prob") is not None:
                             st.markdown(f"**Sign Invariance Probability:** `P(sign) = {stab_aud['sign_invariance_prob']:.1%}`")
                         if stab_aud.get("max_cooks_distance") is not None and stab_aud.get("max_cooks_distance", 0) > 0:
                             st.markdown(f"**Cook's Distance Influence:** Max `D_i = {stab_aud['max_cooks_distance']:.3f}` ({stab_aud.get('cooks_outlier_count', 0)} points > 4/n, shift = `{stab_aud.get('cooks_statistic_shift', 0.0):.4f}`)")
+                        if stab_aud.get("max_dffits") is not None and stab_aud.get("max_dffits", 0) > 0:
+                            st.markdown(f"**DFFITS Regression Influence:** Max |DFFITS| = `{stab_aud['max_dffits']:.3f}` ({stab_aud.get('dffits_outlier_count', 0)} points > 2√(p/n))")
+                        if stab_aud.get("permutation_p_value") is not None:
+                            st.markdown(f"**Permutation Shuffle Test:** `p_perm = {stab_aud['permutation_p_value']:.3e}`")
                         if stab_aud.get("rank_discrepancy") is not None:
                             st.markdown(f"**Spearman Rank Discrepancy:** `Δr = {stab_aud['rank_discrepancy']:.3f}` (ρ = `{stab_aud.get('spearman_rho', 0.0):.3f}`)")
                         if stab_aud.get("max_leverage") is not None and stab_aud.get("max_leverage", 0) > 0:
@@ -342,16 +354,23 @@ with col_right:
                 cl = f.get("claim", {})
                 stab = f.get("audit", {}).get("stability_audit", {})
                 conf = f.get("audit", {}).get("confounder_audit", {})
+                simp = f.get("audit", {}).get("simpsons_audit", {})
                 summary_rows.append({
                     "Variable": cl.get("source_variable", ""),
                     "Target": cl.get("target_variable", ""),
                     "Statistic": f"{cl.get('statistic_name', '')} = {cl.get('statistic_value', 0.0):.4f}",
                     "p_value": f"{cl.get('p_value', 0.0):.4e}",
                     "FDR_q_value": f"{cl.get('fdr_q_value', 0.0):.4e}" if cl.get("fdr_q_value") is not None else "N/A",
+                    "Bonferroni_p": f"{cl.get('bonferroni_p_value', 0.0):.4e}" if cl.get("bonferroni_p_value") is not None else "N/A",
                     "Verdict": f.get("verdict_badge", ""),
                     "Confidence": f.get("confidence_score", 0.0),
+                    "Higgins_I2": f"{simp.get('i_squared', 0.0):.1f}%" if simp.get("i_squared") is not None else "N/A",
+                    "Cinelli_Hazlett_RV": f"{conf.get('robustness_value', 0.0):.2f}" if conf.get("robustness_value") is not None else "N/A",
+                    "Sobel_p_value": f"{conf.get('sobel_p', 0.0):.3e}" if conf.get("sobel_p") is not None else "N/A",
                     "Sign_Invariance_P": f"{stab.get('sign_invariance_prob', 1.0):.1%}",
                     "Cooks_D_Max": f"{stab.get('max_cooks_distance', 0.0):.3f}",
+                    "Max_DFFITS": f"{stab.get('max_dffits', 0.0):.3f}" if stab.get("max_dffits") is not None else "N/A",
+                    "Permutation_p": f"{stab.get('permutation_p_value', 0.0):.3e}" if stab.get("permutation_p_value") is not None else "N/A",
                     "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",
                     "Synthesis": f.get("synthesis_summary", ""),
                     "Takeaway": f.get("actionable_takeaway", ""),
