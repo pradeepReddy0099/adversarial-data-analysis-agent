@@ -89,6 +89,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"DerSimonian-Laird Heterogeneity Variance: τ² = {simpsons.tau_squared:.4f}")
             if simpsons.egger_test_p is not None:
                 rationale["key_evidence"].append(f"Egger Funnel Asymmetry Test: t = {simpsons.egger_test_t:.2f} (p = {simpsons.egger_test_p:.3e})")
+            if simpsons.trim_and_fill_k0 is not None and simpsons.trim_and_fill_k0 > 0:
+                rationale["key_evidence"].append(f"Duval-Tweedie Trim & Fill: k0 = {simpsons.trim_and_fill_k0} missing strata (adjusted stat = {simpsons.trim_and_fill_adjusted_stat:.4f})")
+            if simpsons.hausman_p is not None:
+                rationale["key_evidence"].append(f"Hausman Endogeneity Test: H = {simpsons.hausman_stat:.2f} (p = {simpsons.hausman_p:.3e}) {'[INCONSISTENT / ENDOGENOUS]' if simpsons.is_hausman_inconsistent else '[CONSISTENT]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -130,6 +134,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Ramsey RESET Test: F = {confounder.ramsey_reset_f:.2f} (p = {confounder.ramsey_reset_p:.3e}) {'[MISSPECIFIED / NON-LINEAR]' if confounder.is_reset_misspecified else '[WELL-SPECIFIED]'}")
             if confounder.oster_delta is not None:
                 rationale["key_evidence"].append(f"Oster (2019) Selection Bound: δ* = {confounder.oster_delta:.2f} ({'Robust to unobservables' if abs(confounder.oster_delta) >= 1.0 else 'Sensitive to unobservables'})")
+            if confounder.cohens_f2 is not None:
+                rationale["key_evidence"].append(f"Cohen's f² effect size: f² = {confounder.cohens_f2:.3f} ({'negligible unique variance' if confounder.cohens_f2 < 0.02 else 'substantial variance'})")
+            if confounder.cinelli_hazlett_rcrit is not None:
+                rationale["key_evidence"].append(f"Cinelli-Hazlett Critical Boundary: R²crit = {confounder.cinelli_hazlett_rcrit:.2f}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -175,6 +183,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"DFBETAS Influence: Max |DFBETAS| = {stability.max_dfbetas:.3f} ({stability.dfbetas_outlier_count} influential observations)")
             if stability.jarque_bera_p is not None:
                 rationale["key_evidence"].append(f"Jarque-Bera Normality Test: JB = {stability.jarque_bera_stat:.2f} (p = {stability.jarque_bera_p:.3e}) {'[NON-GAUSSIAN RESIDUALS]' if stability.is_non_normal else '[NORMAL RESIDUALS]'}")
+            if stability.durbin_watson_stat is not None:
+                rationale["key_evidence"].append(f"Durbin-Watson Test: DW = {stability.durbin_watson_stat:.2f} {'[SERIAL CLUSTERING / CORRELATION]' if stability.has_serial_correlation else '[INDEPENDENT RESIDUALS]'}")
+            if stability.hc3_robust_p is not None:
+                rationale["key_evidence"].append(f"MacKinnon-White HC3 Robust Standard Error: SE_HC3 = {stability.hc3_robust_se:.4f} (p_HC3 = {stability.hc3_robust_p:.3e}) {'[SIGNIFICANCE LOST UNDER HC3]' if stability.hc3_significance_lost else '[ROBUST TO HETEROSCEDASTICITY]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"

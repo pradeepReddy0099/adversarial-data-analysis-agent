@@ -529,6 +529,98 @@ class LLMNarrator:
                 )
             return "Jarque-Bera diagnostic tests whether regression residuals satisfy Gaussian normality."
 
+        if any(w in q_lower for w in ["trim and fill", "trim-and-fill", "duval", "publication bias", "adjusted effect"]):
+            tf_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                k0 = simp.get("trim_and_fill_k0")
+                adj = simp.get("trim_and_fill_adjusted_stat")
+                if k0 is not None and k0 > 0:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    tf_items.append(f"• **{v_name}**: {k0} missing strata imputed, adjusted effect = {adj:.4f}")
+            if tf_items:
+                return (
+                    "**Duval & Tweedie (2000) Trim and Fill Asymmetry Algorithm:**\n"
+                    "Imputes suppressed or missing strata on the asymmetric side of the funnel plot to produce a bias-corrected estimate:\n"
+                    + "\n".join(tf_items)
+                )
+            return "Duval & Tweedie Trim and Fill algorithm tests for publication-style or stratum selection asymmetry across subgroups."
+
+        if any(w in q_lower for w in ["hausman", "specification test", "endogeneity", "fixed effects"]):
+            h_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                h_stat = simp.get("hausman_stat")
+                h_p = simp.get("hausman_p")
+                is_incon = simp.get("is_hausman_inconsistent", False)
+                if h_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Inconsistent / Endogenous" if is_incon else " (Consistent)"
+                    h_items.append(f"• **{v_name}**: H = {h_stat:.2f} (p = {h_p:.3e}){flag}")
+            if h_items:
+                return (
+                    "**Hausman (1978) Stratification Specification Test:**\n"
+                    "Tests whether Within-Stratum Fixed Effects deviate systematically from Pooled OLS (rejection confirms endogeneity):\n"
+                    + "\n".join(h_items)
+                )
+            return "Hausman specification test formally verifies whether subgroup-level confounding causes pooled estimates to be inconsistent."
+
+        if any(w in q_lower for w in ["cohen's f2", "cohen f2", "f-squared", "f2", "rcrit", "critical boundary"]):
+            f2_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                f2 = conf.get("cohens_f2")
+                rcrit = conf.get("cinelli_hazlett_rcrit")
+                if f2 is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    f2_s = f"f² = {f2:.3f}"
+                    rcrit_s = f", R²crit = {rcrit:.2f}" if rcrit is not None else ""
+                    f2_items.append(f"• **{v_name}**: {f2_s}{rcrit_s}")
+            if f2_items:
+                return (
+                    "**Cohen's f² Effect Size & Cinelli-Hazlett Critical Boundary:**\n"
+                    "Quantifies the unique effect size added by exposure beyond confounders and the critical partial R² needed to nullify effect:\n"
+                    + "\n".join(f2_items)
+                )
+            return "Cohen's f² measures conditional effect size, and Cinelli-Hazlett R²crit identifies the minimal confounder nullification boundary."
+
+        if any(w in q_lower for w in ["durbin", "watson", "serial correlation", "autocorrelation"]):
+            dw_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                dw = stab.get("durbin_watson_stat")
+                has_s = stab.get("has_serial_correlation", False)
+                if dw is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Serial Correlation Detected" if has_s else " (Independent Residuals)"
+                    dw_items.append(f"• **{v_name}**: DW = {dw:.2f}{flag}")
+            if dw_items:
+                return (
+                    "**Durbin-Watson (1950) Serial Autocorrelation Test:**\n"
+                    "Evaluates first-order residual independence (DW ~ 2.0 indicates independence; DW < 1.5 indicates clustered/ordered sampling):\n"
+                    + "\n".join(dw_items)
+                )
+            return "Durbin-Watson test detects non-independent ordering or spatial/serial clustering in regression residuals."
+
+        if any(w in q_lower for w in ["hc3", "heteroscedasticity-robust", "robust standard error", "mackinnon", "sandwich"]):
+            hc3_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                hc3_se = stab.get("hc3_robust_se")
+                hc3_p = stab.get("hc3_robust_p")
+                lost = stab.get("hc3_significance_lost", False)
+                if hc3_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Significance Lost" if lost else " (Robust to Heteroscedasticity)"
+                    hc3_items.append(f"• **{v_name}**: SE_HC3 = {hc3_se:.4f} (p_HC3 = {hc3_p:.3e}){flag}")
+            if hc3_items:
+                return (
+                    "**MacKinnon & White (1985) HC3 Robust Standard Error Test:**\n"
+                    "Computes jackknife-weighted heteroscedasticity-consistent standard errors to guard against inflated false positive rates:\n"
+                    + "\n".join(hc3_items)
+                )
+            return "MacKinnon-White HC3 test evaluates whether findings retain statistical significance under robust sandwich covariance estimation."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -740,13 +832,13 @@ class LLMNarrator:
 
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
-        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 7 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I², DerSimonian-Laird τ² & Egger/Begg Funnel Tests:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), and tests small-stratum funnel asymmetry via linear regression (Egger) and rank correlation (Begg).")
-        lines.append("2. **VanderWeele E-Values & Cinelli-Hazlett Robustness Values (RV):** Establishes mathematical bounds and partial $R^2$ strength an unmeasured confounder must achieve to nullify empirical associations.")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 8 continuous and categorical stress tests:")
+        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Duval-Tweedie Trim & Fill & Hausman Endogeneity:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), tests small-stratum funnel asymmetry, estimates missing strata via Trim & Fill, and verifies endogeneity via Hausman specification test.")
+        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV) & Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
         lines.append("3. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
         lines.append("4. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
         lines.append("5. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
-        lines.append("6. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan & Jarque-Bera:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, and residual Gaussian normality.")
+        lines.append("6. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, residual Gaussian normality, residual autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
         lines.append("7. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")

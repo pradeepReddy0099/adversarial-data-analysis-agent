@@ -50,6 +50,11 @@ class SimpsonsParadoxAudit:
     tau_squared: Optional[float] = None
     egger_test_t: Optional[float] = None
     egger_test_p: Optional[float] = None
+    trim_and_fill_k0: Optional[int] = None
+    trim_and_fill_adjusted_stat: Optional[float] = None
+    hausman_stat: Optional[float] = None
+    hausman_p: Optional[float] = None
+    is_hausman_inconsistent: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -84,6 +89,8 @@ class ConfounderAudit:
     ramsey_reset_p: Optional[float] = None
     is_reset_misspecified: bool = False
     oster_delta: Optional[float] = None
+    cohens_f2: Optional[float] = None
+    cinelli_hazlett_rcrit: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -122,6 +129,11 @@ class StabilityAudit:
     jarque_bera_stat: Optional[float] = None
     jarque_bera_p: Optional[float] = None
     is_non_normal: bool = False
+    durbin_watson_stat: Optional[float] = None
+    has_serial_correlation: bool = False
+    hc3_robust_se: Optional[float] = None
+    hc3_robust_p: Optional[float] = None
+    hc3_significance_lost: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -603,6 +615,240 @@ def jarque_bera_normality_test(residuals: np.ndarray) -> tuple[Optional[float], 
         return None, None, False
 
 
+def duval_tweedie_trim_and_fill(
+    subgroup_stats: List[float],
+    subgroup_weights: List[int],
+    is_correlation: bool = True,
+) -> tuple[int, float]:
+    """Calculates Duval & Tweedie (2000) Trim and Fill algorithm for publication / stratum selection asymmetry.
+    
+    Estimates the number of suppressed/missing strata (k0) on the funnel side with fewer observations,
+    and returns (k0, adjusted_pooled_statistic).
+    """
+    K = len(subgroup_stats)
+    if K < 3:
+        avg_stat = float(np.average(subgroup_stats, weights=subgroup_weights)) if K > 0 else 0.0
+        return 0, avg_stat
+
+    weights_arr = np.array(subgroup_weights, dtype=float)
+    if is_correlation:
+        clipped = np.clip(np.array(subgroup_stats, dtype=float), -0.999, 0.999)
+        theta = 0.5 * np.log((1.0 + clipped) / (1.0 - clipped))
+        w = np.maximum(1.0, weights_arr - 3.0)
+    else:
+        theta = np.array(subgroup_stats, dtype=float)
+        w = np.maximum(1.0, weights_arr)
+
+    theta_curr = float(np.average(theta, weights=w))
+    k0 = 0
+
+    for _ in range(10):
+        diffs = theta - theta_curr
+        abs_diffs = np.abs(diffs)
+        ranks = stats.rankdata(abs_diffs)
+        
+        pos_rank_sum = float(np.sum(ranks[diffs > 0]))
+        neg_rank_sum = float(np.sum(ranks[diffs < 0]))
+        
+        t_stat = max(pos_rank_sum, neg_rank_sum)
+        l0_est = max(0, int(round((4.0 * t_stat - K * (K + 1.0)) / max(1.0, 2.0 * K - 1.0))))
+        
+        if l0_est == k0:
+            break
+        k0 = min(K, l0_est)
+        
+        if k0 > 0:
+            if pos_rank_sum > neg_rank_sum:
+                keep_idx = np.argsort(theta)[: (K - k0)]
+            else:
+                keep_idx = np.argsort(theta)[k0:]
+            if len(keep_idx) > 0:
+                theta_curr = float(np.average(theta[keep_idx], weights=w[keep_idx]))
+            else:
+                break
+        else:
+            break
+
+    if k0 > 0:
+        if pos_rank_sum > neg_rank_sum:
+            trimmed_theta = np.sort(theta)[-k0:]
+            trimmed_w = np.sort(w)[-k0:]
+        else:
+            trimmed_theta = np.sort(theta)[:k0]
+            trimmed_w = np.sort(w)[:k0]
+        imputed_theta = 2.0 * theta_curr - trimmed_theta
+        all_theta = np.concatenate([theta, imputed_theta])
+        all_w = np.concatenate([w, trimmed_w])
+        adjusted_theta = float(np.average(all_theta, weights=all_w))
+    else:
+        adjusted_theta = theta_curr
+
+    if is_correlation:
+        adjusted_stat = float(np.tanh(adjusted_theta))
+    else:
+        adjusted_stat = float(adjusted_theta)
+
+    return int(k0), float(adjusted_stat)
+
+
+def hausman_specification_test(
+    df: pd.DataFrame,
+    source_col: str,
+    target_col: str,
+    confounder_col: str,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Hausman's (1978) specification test for group-level endogeneity and stratification consistency.
+    
+    H0: Difference in coefficients between Within-Stratum Fixed Effects (FE) and Pooled OLS is not systematic.
+    Rejection (p < 0.05) indicates that subgroup-level heterogeneity causes endogeneity,
+    proving that pooled estimates are inconsistent and confirming Simpson's Paradox / confounding.
+    """
+    sub = df[[source_col, target_col, confounder_col]].dropna()
+    if len(sub) < 20 or sub[confounder_col].nunique() < 2:
+        return None, None, False
+
+    if pd.api.types.is_numeric_dtype(sub[source_col]):
+        x = pd.to_numeric(sub[source_col], errors='coerce')
+    else:
+        x = pd.Series(pd.Categorical(sub[source_col]).codes, index=sub.index, dtype=float)
+
+    if pd.api.types.is_numeric_dtype(sub[target_col]):
+        y = pd.to_numeric(sub[target_col], errors='coerce')
+    else:
+        y = pd.Series(pd.Categorical(sub[target_col]).codes, index=sub.index, dtype=float)
+
+    valid_m = ~(x.isna() | y.isna())
+    if valid_m.sum() < 20:
+        return None, None, False
+
+    x_arr = x[valid_m].to_numpy(dtype=float)
+    y_arr = y[valid_m].to_numpy(dtype=float)
+    groups = sub[confounder_col][valid_m].to_numpy()
+    n = len(x_arr)
+
+    # 1. Pooled OLS
+    x_c = x_arr - np.mean(x_arr)
+    y_c = y_arr - np.mean(y_arr)
+    var_x = np.sum(x_c ** 2)
+    if var_x < 1e-9:
+        return None, None, False
+
+    b_pooled = float(np.sum(x_c * y_c) / var_x)
+    res_pooled = y_c - b_pooled * x_c
+    s2_pooled = float(np.sum(res_pooled ** 2) / max(1, n - 2))
+    var_b_pooled = s2_pooled / var_x
+
+    # 2. Fixed Effects (Within-stratum mean centering)
+    x_fe = np.empty_like(x_arr)
+    y_fe = np.empty_like(y_arr)
+    uniq_groups = np.unique(groups)
+    k_groups = len(uniq_groups)
+
+    for g in uniq_groups:
+        mask = (groups == g)
+        x_fe[mask] = x_arr[mask] - np.mean(x_arr[mask])
+        y_fe[mask] = y_arr[mask] - np.mean(y_arr[mask])
+
+    var_x_fe = np.sum(x_fe ** 2)
+    if var_x_fe < 1e-9:
+        return None, None, False
+
+    b_fe = float(np.sum(x_fe * y_fe) / var_x_fe)
+    res_fe = y_fe - b_fe * x_fe
+    df_fe = max(1, n - k_groups - 1)
+    s2_fe = float(np.sum(res_fe ** 2) / df_fe)
+    var_b_fe = s2_fe / var_x_fe
+
+    diff_b = b_fe - b_pooled
+    var_diff = abs(var_b_fe - var_b_pooled)
+    if var_diff < 1e-12:
+        return 0.0, 1.0, False
+
+    h_stat = float((diff_b ** 2) / var_diff)
+    p_val = float(stats.chi2.sf(h_stat, df=1))
+    is_inconsistent = bool(p_val < 0.05)
+
+    return h_stat, p_val, is_inconsistent
+
+
+def calculate_cohens_f2(r2_full: float, r2_confounder: float) -> float:
+    """Calculates Cohen's f^2 effect size for exposure conditional on confounder.
+    
+    f^2 = (R^2_full - R^2_confounder) / (1 - R^2_full)
+    f^2 < 0.02: negligible unique contribution; >= 0.02: small; >= 0.15: medium; >= 0.35: large.
+    """
+    denom = max(1e-9, 1.0 - min(0.9999, r2_full))
+    num = max(0.0, r2_full - r2_confounder)
+    return float(num / denom)
+
+
+def calculate_cinelli_hazlett_rcrit(partial_r: float) -> float:
+    """Calculates Cinelli & Hazlett (2020) critical confounder boundary R2_crit.
+    
+    The symmetric explanatory power an unmeasured confounder must share with BOTH
+    treatment and outcome (R2_Y~Z|X = R2_X~Z = R2_crit) to completely explain away the effect:
+    R2_crit = |partial_r| / (1 + |partial_r|).
+    """
+    r_abs = min(0.9999, abs(partial_r))
+    return float(r_abs / (1.0 + r_abs))
+
+
+def durbin_watson_test(residuals: np.ndarray) -> tuple[Optional[float], bool]:
+    """Calculates the Durbin-Watson statistic for first-order serial correlation in residuals.
+    
+    DW = sum((e_t - e_{t-1})^2) / sum(e_t^2).
+    DW ~ 2.0: no autocorrelation. DW < 1.5 indicates significant positive serial clustering.
+    """
+    n = len(residuals)
+    if n < 10:
+        return None, False
+    diff = np.diff(residuals)
+    ss_diff = float(np.sum(diff ** 2))
+    ss_tot = float(np.sum(residuals ** 2))
+    if ss_tot < 1e-12:
+        return 2.0, False
+    dw = float(ss_diff / ss_tot)
+    has_serial = bool(dw < 1.5 or dw > 2.5)
+    return dw, has_serial
+
+
+def mackinnon_white_hc3_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    residuals: np.ndarray,
+    h_ii: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates MacKinnon & White (1985) HC3 jackknife-weighted heteroscedasticity-consistent test.
+    
+    Var_HC3(b1) = sum((x_i - x_bar)^2 * (e_i / (1 - h_ii))^2) / (sum((x_i - x_bar)^2))^2.
+    Returns (se_hc3, p_hc3, significance_lost).
+    """
+    n = len(x)
+    if n < 15:
+        return None, None, False
+    x_c = x - np.mean(x)
+    x_ss = float(np.sum(x_c ** 2))
+    if x_ss < 1e-9:
+        return None, None, False
+
+    denom_h = np.maximum(1e-4, 1.0 - h_ii)
+    e_hc3 = residuals / denom_h
+    var_hc3 = float(np.sum((x_c ** 2) * (e_hc3 ** 2)) / (x_ss ** 2))
+    se_hc3 = float(np.sqrt(max(1e-12, var_hc3)))
+
+    b1 = float(np.sum(x_c * (y - np.mean(y))) / x_ss)
+    t_hc3 = float(b1 / max(1e-9, se_hc3))
+    p_hc3 = float(2.0 * stats.t.sf(abs(t_hc3), df=max(1, n - 2)))
+
+    # Evaluate if naive OLS was p < 0.05 but HC3 is p >= 0.05
+    naive_se = np.sqrt(np.sum(residuals ** 2) / max(1, n - 2) / x_ss)
+    t_naive = b1 / max(1e-9, naive_se)
+    p_naive = 2.0 * stats.t.sf(abs(t_naive), df=max(1, n - 2))
+    significance_lost = bool(p_naive < 0.05 and p_hc3 >= 0.05)
+
+    return se_hc3, p_hc3, significance_lost
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -918,6 +1164,16 @@ class DevilsAdvocateAgent:
             subgroup_stats, subgroup_weights, is_correlation=(claim.claim_type == "correlation")
         )
 
+        # Advanced Metric 7: Duval & Tweedie (2000) Trim and Fill Algorithm
+        tf_k0, tf_stat = duval_tweedie_trim_and_fill(
+            subgroup_stats, subgroup_weights, is_correlation=(claim.claim_type == "correlation")
+        )
+
+        # Advanced Metric 8: Hausman (1978) Stratification Endogeneity Specification Test
+        haus_stat, haus_p, is_haus_incon = hausman_specification_test(
+            df, source, target, conf_col
+        )
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if tarone_p is not None:
             cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
@@ -931,6 +1187,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [DerSimonian-Laird τ²: {tau_sq:.4f}]"
         if egger_p is not None:
             cmh_note += f" [Egger Test: t={egger_t:.2f}, p={egger_p:.3e}]"
+        if tf_k0 > 0:
+            cmh_note += f" [Trim & Fill: k0={tf_k0}, adj={tf_stat:.4f}]"
+        if haus_p is not None:
+            cmh_note += f" [Hausman Test: H={haus_stat:.2f}, p={haus_p:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -966,6 +1226,11 @@ class DevilsAdvocateAgent:
             tau_squared=tau_sq,
             egger_test_t=egger_t,
             egger_test_p=egger_p,
+            trim_and_fill_k0=tf_k0,
+            trim_and_fill_adjusted_stat=tf_stat,
+            hausman_stat=haus_stat,
+            hausman_p=haus_p,
+            is_hausman_inconsistent=is_haus_incon,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -1059,6 +1324,7 @@ class DevilsAdvocateAgent:
         # Advanced Specification Diagnostic: Ramsey RESET Test & Oster (2019) Selection Bound
         reset_f, reset_p, is_reset_bad = None, None, False
         oster_delta_val = None
+        f2_val = None
         if top_conf is not None:
             sub_res = df[[source, target, top_conf]].dropna()
             if len(sub_res) >= 20:
@@ -1070,22 +1336,29 @@ class DevilsAdvocateAgent:
                     r_xz_o, _ = stats.pearsonr(x_arr, z_arr)
                     r_yz_o, _ = stats.pearsonr(y_arr, z_arr)
                     oster_delta_val = calculate_oster_delta(r_xy, r_xz_o, r_yz_o, n=len(sub_res))
+                    denom_f2 = max(1e-9, 1.0 - r_xz_o ** 2)
+                    r2_full_f2 = min(0.9999, max(0.0, (r_xy ** 2 + r_yz_o ** 2 - 2.0 * r_xy * r_yz_o * r_xz_o) / denom_f2))
+                    f2_val = calculate_cohens_f2(r2_full_f2, r_yz_o ** 2)
                 except Exception:
                     pass
+
+        # Advanced Causal Sensitivity Metric: Cinelli-Hazlett Critical Confounder Boundary R2_crit
+        rcrit_val = calculate_cinelli_hazlett_rcrit(best_partial)
 
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
-        rv_str = f", RV={rv_point:.2f}"
+        rv_str = f", RV={rv_point:.2f} (R²crit={rcrit_val:.2f})"
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
         oster_str = f", Oster δ*={oster_delta_val:.2f}" if oster_delta_val is not None else ""
+        f2_str = f", Cohen's f²={f2_val:.3f}" if f2_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}{f2_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -1114,6 +1387,8 @@ class DevilsAdvocateAgent:
             ramsey_reset_p=reset_p,
             is_reset_misspecified=is_reset_bad,
             oster_delta=oster_delta_val,
+            cohens_f2=f2_val,
+            cinelli_hazlett_rcrit=rcrit_val,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -1299,6 +1574,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Quantile Discrepancy Index (QDI) across 25th, 50th, 75th percentiles
         qdi_val, qdi_flag = calculate_quantile_discrepancy(x_vals, y_vals)
 
+        # Advanced Diagnostic: Durbin-Watson Autocorrelation Test on Residuals
+        dw_stat, has_serial = durbin_watson_test(residuals)
+
+        # Advanced Diagnostic: MacKinnon-White (1985) HC3 Heteroscedasticity-Consistent Robust Test
+        hc3_se, hc3_p, hc3_sig_lost = mackinnon_white_hc3_test(x_vals, y_vals, residuals, h_ii)
+
         is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -1308,7 +1589,9 @@ class DevilsAdvocateAgent:
         bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
         jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}). Trimmed r = {trim_r:.4f}."
+        dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
+        hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}{dw_str}{hc3_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -1342,6 +1625,11 @@ class DevilsAdvocateAgent:
             jarque_bera_stat=jb_stat,
             jarque_bera_p=jb_p,
             is_non_normal=is_non_norm,
+            durbin_watson_stat=dw_stat,
+            has_serial_correlation=has_serial,
+            hc3_robust_se=hc3_se,
+            hc3_robust_p=hc3_p,
+            hc3_significance_lost=hc3_sig_lost,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

@@ -52,6 +52,10 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.tau_squared >= 0.0
     assert audit.simpsons_audit.egger_test_p is not None
     assert audit.simpsons_audit.egger_test_t is not None
+    # Verify Duval-Tweedie Trim & Fill and Hausman specification test
+    assert audit.simpsons_audit.trim_and_fill_k0 is not None
+    assert audit.simpsons_audit.trim_and_fill_adjusted_stat is not None
+    assert audit.simpsons_audit.hausman_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -115,6 +119,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.ramsey_reset_p is not None
         assert audit_coffee.confounder_audit.ramsey_reset_f is not None
         assert audit_coffee.confounder_audit.oster_delta is not None
+        # Check Cohen's f^2 and Cinelli-Hazlett Rcrit
+        assert audit_coffee.confounder_audit.cohens_f2 is not None
+        assert audit_coffee.confounder_audit.cinelli_hazlett_rcrit is not None
+        assert audit_coffee.confounder_audit.cinelli_hazlett_rcrit >= 0.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -158,6 +166,10 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.max_dfbetas >= 0.0
     assert audit.stability_audit.jarque_bera_stat is not None
     assert audit.stability_audit.jarque_bera_p is not None
+    # Check Durbin-Watson and MacKinnon-White HC3
+    assert audit.stability_audit.durbin_watson_stat is not None
+    assert audit.stability_audit.hc3_robust_se is not None
+    assert audit.stability_audit.hc3_robust_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -248,6 +260,21 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_jb = narrator.answer_query("Explain Jarque-Bera normality", findings)
     assert "Jarque-Bera" in ans_jb or "Normality" in ans_jb
+
+    ans_tf = narrator.answer_query("Explain Duval-Tweedie Trim and Fill", findings)
+    assert "Trim" in ans_tf or "Fill" in ans_tf or "Duval" in ans_tf
+
+    ans_haus = narrator.answer_query("What does the Hausman specification test show?", findings)
+    assert "Hausman" in ans_haus or "Endogeneity" in ans_haus
+
+    ans_f2 = narrator.answer_query("What is Cohen's f2 effect size and Rcrit?", findings)
+    assert "Cohen" in ans_f2 or "f²" in ans_f2 or "Critical" in ans_f2
+
+    ans_dw = narrator.answer_query("Explain Durbin-Watson autocorrelation", findings)
+    assert "Durbin-Watson" in ans_dw or "Autocorrelation" in ans_dw or "Serial" in ans_dw
+
+    ans_hc3 = narrator.answer_query("What does the MacKinnon-White HC3 test show?", findings)
+    assert "HC3" in ans_hc3 or "MacKinnon" in ans_hc3 or "Robust" in ans_hc3
 
 
 def test_end_to_end_pipeline(tmp_path):

@@ -204,6 +204,11 @@ with col_right:
                         if simpsons.get("egger_test_p") is not None:
                             eg_flag = " ⚠️ Asymmetric" if simpsons["egger_test_p"] < 0.05 else " (Symmetric)"
                             st.markdown(f"**Egger Regression Test:** t = `{simpsons.get('egger_test_t', 0.0):.2f}` (p = `{simpsons['egger_test_p']:.3e}`){eg_flag}")
+                        if simpsons.get("trim_and_fill_k0") is not None and simpsons.get("trim_and_fill_k0", 0) > 0:
+                            st.markdown(f"**Duval-Tweedie Trim & Fill:** `{simpsons['trim_and_fill_k0']}` missing strata imputed (adjusted stat = `{simpsons.get('trim_and_fill_adjusted_stat', 0.0):.4f}`)")
+                        if simpsons.get("hausman_p") is not None:
+                            h_flag = " ⚠️ Inconsistent / Endogenous" if simpsons.get("is_hausman_inconsistent") else " (Consistent)"
+                            st.markdown(f"**Hausman Endogeneity Test:** H = `{simpsons.get('hausman_stat', 0.0):.2f}` (p = `{simpsons['hausman_p']:.3e}`){h_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -212,7 +217,11 @@ with col_right:
                             vif_flag = " ⚠️ High Collinearity" if conf_aud.get("is_collinear") else ""
                             st.markdown(f"**Confounder VIF Collinearity:** `{conf_aud['top_confounder_vif']:.2f}`{vif_flag}")
                         if conf_aud.get("robustness_value") is not None:
-                            st.markdown(f"**Cinelli-Hazlett Robustness Value:** RV_q=1 = `{conf_aud['robustness_value']:.2f}` (RV_α = `{conf_aud.get('robustness_value_alpha', 0.0):.2f}`)")
+                            rcrit_s = f" (R²crit = `{conf_aud.get('cinelli_hazlett_rcrit', 0.0):.2f}`)" if conf_aud.get("cinelli_hazlett_rcrit") is not None else ""
+                            st.markdown(f"**Cinelli-Hazlett Robustness Value:** RV_q=1 = `{conf_aud['robustness_value']:.2f}` (RV_α = `{conf_aud.get('robustness_value_alpha', 0.0):.2f}`){rcrit_s}")
+                        if conf_aud.get("cohens_f2") is not None:
+                            f2_flag = " ⚠️ Negligible" if conf_aud["cohens_f2"] < 0.02 else " (Substantial)"
+                            st.markdown(f"**Cohen's f² Partial Effect Size:** f² = `{conf_aud['cohens_f2']:.3f}`{f2_flag}")
                         if conf_aud.get("sobel_p") is not None:
                             st.markdown(f"**Sobel Mediation Test:** `p = {conf_aud['sobel_p']:.3e}` ({conf_aud.get('proportion_mediated', 0.0):.1f}% mediated by `{conf_aud.get('top_confounder')}`)")
                         if conf_aud.get("bayes_factor_bf10") is not None:
@@ -238,6 +247,12 @@ with col_right:
                         if stab_aud.get("breusch_pagan_p") is not None:
                             bp_flag = " ⚠️ Heteroscedastic" if stab_aud.get("is_heteroscedastic") else " (Homoscedastic)"
                             st.markdown(f"**Breusch-Pagan Test:** LM = `{stab_aud.get('breusch_pagan_lm', 0.0):.2f}` (p = `{stab_aud['breusch_pagan_p']:.3e}`){bp_flag}")
+                        if stab_aud.get("hc3_robust_p") is not None:
+                            hc3_flag = " ⚠️ Significance Lost" if stab_aud.get("hc3_significance_lost") else " (Robust)"
+                            st.markdown(f"**MacKinnon-White HC3 Robust Standard Error:** SE_HC3 = `{stab_aud.get('hc3_robust_se', 0.0):.4f}` (p = `{stab_aud['hc3_robust_p']:.3e}`){hc3_flag}")
+                        if stab_aud.get("durbin_watson_stat") is not None:
+                            dw_flag = " ⚠️ Serial Correlation" if stab_aud.get("has_serial_correlation") else " (Independent)"
+                            st.markdown(f"**Durbin-Watson Serial Test:** DW = `{stab_aud['durbin_watson_stat']:.2f}`{dw_flag}")
                         if stab_aud.get("jarque_bera_p") is not None:
                             jb_flag = " ⚠️ Non-Gaussian" if stab_aud.get("is_non_normal") else " (Normal)"
                             st.markdown(f"**Jarque-Bera Normality Test:** JB = `{stab_aud.get('jarque_bera_stat', 0.0):.2f}` (p = `{stab_aud['jarque_bera_p']:.3e}`){jb_flag}")
@@ -392,9 +407,13 @@ with col_right:
                     "Confidence": f.get("confidence_score", 0.0),
                     "Higgins_I2": f"{simp.get('i_squared', 0.0):.1f}%" if simp.get("i_squared") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
+                    "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
+                    "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
                     "Begg_Funnel_p": f"{simp.get('begg_funnel_p', 0.0):.3e}" if simp.get("begg_funnel_p") is not None else "N/A",
                     "Egger_Funnel_p": f"{simp.get('egger_test_p', 0.0):.3e}" if simp.get("egger_test_p") is not None else "N/A",
                     "Cinelli_Hazlett_RV": f"{conf.get('robustness_value', 0.0):.2f}" if conf.get("robustness_value") is not None else "N/A",
+                    "Cinelli_Hazlett_Rcrit": f"{conf.get('cinelli_hazlett_rcrit', 0.0):.2f}" if conf.get("cinelli_hazlett_rcrit") is not None else "N/A",
+                    "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
                     "Sobel_p_value": f"{conf.get('sobel_p', 0.0):.3e}" if conf.get("sobel_p") is not None else "N/A",
                     "Bayes_Factor_BF10": f"{conf.get('bayes_factor_bf10', 0.0):.2f}" if conf.get("bayes_factor_bf10") is not None else "N/A",
                     "Ramsey_RESET_p": f"{conf.get('ramsey_reset_p', 0.0):.3e}" if conf.get("ramsey_reset_p") is not None else "N/A",
@@ -405,6 +424,8 @@ with col_right:
                     "Max_DFBETAS": f"{stab.get('max_dfbetas', 0.0):.3f}" if stab.get("max_dfbetas") is not None else "N/A",
                     "Permutation_p": f"{stab.get('permutation_p_value', 0.0):.3e}" if stab.get("permutation_p_value") is not None else "N/A",
                     "Breusch_Pagan_p": f"{stab.get('breusch_pagan_p', 0.0):.3e}" if stab.get("breusch_pagan_p") is not None else "N/A",
+                    "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
+                    "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
                     "Quantile_Discrepancy_QDI": f"{stab.get('quantile_discrepancy_index', 0.0):.2f}" if stab.get("quantile_discrepancy_index") is not None else "N/A",
                     "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",
