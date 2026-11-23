@@ -116,6 +116,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.moreno_test_p is not None
     assert audit.simpsons_audit.siegel_tukey_stat is not None
     assert audit.simpsons_audit.siegel_tukey_p is not None
+    # Verify Sterne-Egger funnel test and Klotz normal scores scale test
+    assert audit.simpsons_audit.sterne_test_t is not None
+    assert audit.simpsons_audit.sterne_test_p is not None
+    assert audit.simpsons_audit.klotz_scale_stat is not None
+    assert audit.simpsons_audit.klotz_scale_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -244,6 +249,9 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.smd_covariate_balance is not None
         assert audit_coffee.confounder_audit.mahalanobis_distance is not None
         assert audit_coffee.confounder_audit.imbens_normalized_diff is not None
+        # Check Austin covariate variance ratio and Stuart prognostic score discrepancy
+        assert audit_coffee.confounder_audit.austin_variance_ratio is not None
+        assert audit_coffee.confounder_audit.stuart_prognostic_discrepancy is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -352,6 +360,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.anderson_darling_crit is not None
     assert audit.stability_audit.harvey_lm_stat is not None
     assert audit.stability_audit.harvey_lm_p is not None
+    # Check Lilliefors composite normality and Park log-linear heteroskedasticity test
+    assert audit.stability_audit.lilliefors_stat is not None
+    assert audit.stability_audit.lilliefors_p_value is not None
+    assert audit.stability_audit.park_t_stat is not None
+    assert audit.stability_audit.park_p_value is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -661,6 +674,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_harv = narrator.answer_query("Explain Andrew Harvey multiplicative heteroskedasticity LM test", findings)
     assert "Harvey" in ans_harv or "Multiplicative" in ans_harv or "Heteroskedasticity" in ans_harv or "LM" in ans_harv
+
+    ans_sterne = narrator.answer_query("Explain Sterne and Egger standard error funnel plot asymmetry test", findings)
+    assert "Sterne" in ans_sterne or "Funnel" in ans_sterne or "Precision" in ans_sterne
+
+    ans_klotz = narrator.answer_query("Explain Jerome Klotz normal scores rank scale dispersion test", findings)
+    assert "Klotz" in ans_klotz or "Normal" in ans_klotz or "Scores" in ans_klotz or "Dispersion" in ans_klotz
+
+    ans_austin = narrator.answer_query("Explain Peter Austin covariate variance ratio balance metric", findings)
+    assert "Austin" in ans_austin or "Variance" in ans_austin or "Ratio" in ans_austin or "Balance" in ans_austin
+
+    ans_stuart = narrator.answer_query("Explain Elizabeth Stuart prognostic score discrepancy metric", findings)
+    assert "Stuart" in ans_stuart or "Prognostic" in ans_stuart or "Discrepancy" in ans_stuart
+
+    ans_lill = narrator.answer_query("Explain Hubert Lilliefors composite normality goodness of fit test", findings)
+    assert "Lilliefors" in ans_lill or "Normality" in ans_lill or "Goodness" in ans_lill
+
+    ans_park = narrator.answer_query("Explain Richard Park log-linear residual variance heteroskedasticity test", findings)
+    assert "Park" in ans_park or "Log-Linear" in ans_park or "Heteroskedasticity" in ans_park or "Variance" in ans_park
 
 
 def test_end_to_end_pipeline(tmp_path):

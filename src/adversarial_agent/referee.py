@@ -141,6 +141,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Moreno Variance-Weighted Funnel Test: t = {simpsons.moreno_test_t:.2f} (p = {simpsons.moreno_test_p:.3e}) {'[VARIANCE-DEPENDENT REPORTING ASYMMETRY]' if simpsons.is_moreno_asymmetric else '[SYMMETRIC VARIANCE-WEIGHTED PRECISION]'}")
             if simpsons.siegel_tukey_p is not None:
                 rationale["key_evidence"].append(f"Siegel-Tukey Rank Extremes Scale Test: W = {simpsons.siegel_tukey_stat:.2f} (p = {simpsons.siegel_tukey_p:.3e}) {'[EXTREME-RANK SCALE DIVERGENCE]' if simpsons.is_siegel_tukey_heterogeneous else '[EQUIDISPERSED STRATA SPREAD]'}")
+            if simpsons.sterne_test_p is not None:
+                rationale["key_evidence"].append(f"Sterne-Egger Weighted Funnel Test: t = {simpsons.sterne_test_t:.2f} (p = {simpsons.sterne_test_p:.3e}) {'[STANDARD-ERROR REPORTING ASYMMETRY]' if simpsons.is_sterne_asymmetric else '[SYMMETRIC STANDARD-ERROR PRECISION]'}")
+            if simpsons.klotz_scale_p is not None:
+                rationale["key_evidence"].append(f"Klotz Normal Scores Scale Test: Z = {simpsons.klotz_scale_stat:.2f} (p = {simpsons.klotz_scale_p:.3e}) {'[NORMAL-SCORES SCALE DIVERGENCE]' if simpsons.is_klotz_heterogeneous else '[EQUIDISPERSED NORMAL SCORES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -234,6 +238,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum-Rubin SMD Balance: SMD = {confounder.smd_covariate_balance:.3f}, Mahalanobis D² = {confounder.mahalanobis_distance:.3f} {'[SEVERE OBSERVATIONAL COVARIATE IMBALANCE]' if confounder.is_smd_imbalanced else '[BALANCED OBSERVATIONAL COVARIATES]'}")
             if confounder.imbens_normalized_diff is not None:
                 rationale["key_evidence"].append(f"Imbens-Rubin Normalized Difference: Δ_Norm = {confounder.imbens_normalized_diff:.3f} {'[POSITIVITY DEFICIT / TRUNCATED SUPPORT]' if confounder.is_imbens_diff_excessive else '[SATISFACTORY COMMON SUPPORT OVERLAP]'}")
+            if confounder.austin_variance_ratio is not None:
+                rationale["key_evidence"].append(f"Austin Covariate Variance Ratio: VR = {confounder.austin_variance_ratio:.2f} {'[SEVERE OBSERVATIONAL VARIANCE IMBALANCE]' if confounder.is_austin_imbalanced else '[BALANCED OBSERVATIONAL DISPERSION]'}")
+            if confounder.stuart_prognostic_discrepancy is not None:
+                rationale["key_evidence"].append(f"Stuart Prognostic Score Discrepancy: Δ_prog = {confounder.stuart_prognostic_discrepancy:.3f} {'[STRUCTURAL BASELINE RISK DISPARITY]' if confounder.is_prognostic_discrepant else '[SIMILAR PROGNOSTIC BASELINE PROFILES]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -328,6 +336,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Anderson-Darling EDF Normality: A² = {stability.anderson_darling_stat:.3f} (crit 5% = {stability.anderson_darling_crit:.3f}) {'[EMPIRICAL CDF TAIL NON-NORMALITY]' if stability.is_anderson_non_normal else '[NORMAL EMPIRICAL CDF RESIDUALS]'}")
             if stability.harvey_lm_p is not None:
                 rationale["key_evidence"].append(f"Harvey Multiplicative Heteroskedasticity: LM = {stability.harvey_lm_stat:.2f} (p = {stability.harvey_lm_p:.3e}) {'[EXPONENTIAL VARIANCE INFLATION]' if stability.has_harvey_heteroskedasticity else '[HOMOSCEDASTIC MULTIPLICATIVE VARIANCE]'}")
+            if stability.lilliefors_p_value is not None:
+                rationale["key_evidence"].append(f"Lilliefors Composite Normality: D = {stability.lilliefors_stat:.3f} (p = {stability.lilliefors_p_value:.3e}) {'[COMPOSITE EDF RESIDUAL NON-NORMALITY]' if stability.is_lilliefors_non_normal else '[GAUSSIAN EDF RESIDUAL FIT]'}")
+            if stability.park_p_value is not None:
+                rationale["key_evidence"].append(f"Park Log-Linear Heteroskedasticity: t = {stability.park_t_stat:.2f} (p = {stability.park_p_value:.3e}) {'[EXPONENTIAL REGRESSOR-DEPENDENT SPREAD]' if stability.has_park_heteroskedasticity else '[HOMOSCEDASTIC LOG-RESIDUAL VARIANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -523,6 +535,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Anderson-Darling Normality: A² = {stability.anderson_darling_stat:.3f}")
             if stability.harvey_lm_p is not None:
                 rationale["key_evidence"].append(f"Harvey LM Heteroskedasticity: LM = {stability.harvey_lm_stat:.2f} (p = {stability.harvey_lm_p:.3e})")
+            if simpsons.sterne_test_p is not None:
+                rationale["key_evidence"].append(f"Sterne-Egger Funnel Test: t = {simpsons.sterne_test_t:.2f} (p = {simpsons.sterne_test_p:.3e})")
+            if simpsons.klotz_scale_p is not None:
+                rationale["key_evidence"].append(f"Klotz Normal Scores Scale: Z = {simpsons.klotz_scale_stat:.2f} (p = {simpsons.klotz_scale_p:.3e})")
+            if confounder.austin_variance_ratio is not None:
+                rationale["key_evidence"].append(f"Austin Variance Ratio: VR = {confounder.austin_variance_ratio:.2f}")
+            if confounder.stuart_prognostic_discrepancy is not None:
+                rationale["key_evidence"].append(f"Stuart Prognostic Discrepancy: Δ_prog = {confounder.stuart_prognostic_discrepancy:.3f}")
+            if stability.lilliefors_p_value is not None:
+                rationale["key_evidence"].append(f"Lilliefors Normality: D = {stability.lilliefors_stat:.3f} (p = {stability.lilliefors_p_value:.3e})")
+            if stability.park_p_value is not None:
+                rationale["key_evidence"].append(f"Park Heteroskedasticity: t = {stability.park_t_stat:.2f} (p = {stability.park_p_value:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

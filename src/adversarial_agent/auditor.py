@@ -124,6 +124,12 @@ class SimpsonsParadoxAudit:
     siegel_tukey_stat: Optional[float] = None
     siegel_tukey_p: Optional[float] = None
     is_siegel_tukey_heterogeneous: bool = False
+    sterne_test_t: Optional[float] = None
+    sterne_test_p: Optional[float] = None
+    is_sterne_asymmetric: bool = False
+    klotz_scale_stat: Optional[float] = None
+    klotz_scale_p: Optional[float] = None
+    is_klotz_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -228,6 +234,10 @@ class ConfounderAudit:
     is_smd_imbalanced: bool = False
     imbens_normalized_diff: Optional[float] = None
     is_imbens_diff_excessive: bool = False
+    austin_variance_ratio: Optional[float] = None
+    is_austin_imbalanced: bool = False
+    stuart_prognostic_discrepancy: Optional[float] = None
+    is_prognostic_discrepant: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -338,6 +348,12 @@ class StabilityAudit:
     harvey_lm_stat: Optional[float] = None
     harvey_lm_p: Optional[float] = None
     has_harvey_heteroskedasticity: bool = False
+    lilliefors_stat: Optional[float] = None
+    lilliefors_p_value: Optional[float] = None
+    is_lilliefors_non_normal: bool = False
+    park_t_stat: Optional[float] = None
+    park_p_value: Optional[float] = None
+    has_park_heteroskedasticity: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -4445,6 +4461,280 @@ def harvey_multiplicative_heteroskedasticity_test(
         return None, None, False
 
 
+def sterne_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Sterne & Egger's (2000) Inverse-Variance Weighted Funnel Asymmetry Regression Test.
+
+    Regresses standardized stratum effect sizes theta_k / SE_k against precision 1 / SE_k and constant 1:
+      theta_k / SE_k = alpha_0 * (1 / SE_k) + alpha_1 + epsilon_k
+    where weights w_k = 1 / v_k = 1 / SE_k^2 are implicitly incorporated by OLS in transformed coordinates.
+    Evaluates t_Sterne = alpha_hat_1 / SE(alpha_hat_1) ~ t(K - 2).
+    Testing H_0: alpha_1 = 0 identifies reporting/publication asymmetry where effect sizes correlate with standard error.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        theta_vec = []
+        var_vec = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                if len(t) == 4 and not isinstance(t[0], (tuple, list)):
+                    a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+                else:
+                    a, b = float(t[0][0]), float(t[0][1])
+                    c, d = float(t[1][0]), float(t[1][1])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            if a + b > 0 and c + d > 0 and a + c > 0 and b + d > 0:
+                a_c = a + 0.5
+                b_c = b + 0.5
+                c_c = c + 0.5
+                d_c = d + 0.5
+                theta = float(np.log((a_c * d_c) / (b_c * c_c)))
+                v = float(1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c)
+                theta_vec.append(theta)
+                var_vec.append(v)
+        k_val = len(theta_vec)
+        if k_val < 3:
+            return None, None, False
+
+        y = np.array(theta_vec, dtype=float)
+        v = np.array(var_vec, dtype=float)
+        se = np.sqrt(v)
+        y_trans = y / se
+        x1 = 1.0 / se
+        x2 = np.ones(k_val, dtype=float)
+        X_mat = np.column_stack([x1, x2])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_trans, rcond=None)
+        res = y_trans - X_mat @ beta
+        df_e = k_val - 2
+        if df_e <= 0:
+            return None, None, False
+        s2 = float(np.sum(res ** 2) / df_e)
+        cov = s2 * np.linalg.pinv(X_mat.T @ X_mat)
+        se_beta1 = float(np.sqrt(max(1e-12, cov[1, 1])))
+        if se_beta1 < 1e-12:
+            return None, None, False
+        t_stat = float(beta[1] / se_beta1)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < 0.05 and abs(t_stat) >= 1.96)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def klotz_normal_scores_scale_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Jerome Klotz's (1962) Non-Parametric Normal Scores Rank Scale Dispersion Test.
+
+    Evaluates relative dispersion/scale between two conditioning strata without assuming normality.
+    Assigns squared standard normal quantile inverse scores to pooled ranks:
+      a_i = [Phi^{-1}(R_i / (N + 1))]^2
+    The test statistic is K = sum_{i in stratum 1} a_i.
+    Under H_0: E[K] = n1 * mean(a), Var(K) = [n1 * n2 / (N * (N - 1))] * sum((a_i - mean(a))^2).
+    Standardized Z = (K - E[K]) / sqrt(Var(K)) ~ N(0, 1).
+    Rejection (p < 0.05) detects significant scale heterogeneity across strata.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        n1 = len(s1)
+        n2 = len(s2)
+        N = n1 + n2
+
+        combined = np.concatenate([s1, s2])
+        ranks = stats.rankdata(combined)
+        u = ranks / (N + 1.0)
+        u = np.clip(u, 1e-6, 1.0 - 1e-6)
+        scores = stats.norm.ppf(u) ** 2
+
+        k_stat = float(np.sum(scores[:n1]))
+        mean_score = float(np.mean(scores))
+        e_k = float(n1 * mean_score)
+        var_k = float((n1 * n2) / (N * (N - 1.0)) * np.sum((scores - mean_score) ** 2))
+        if var_k < 1e-12:
+            return None, None, False
+        z_stat = float((k_stat - e_k) / np.sqrt(var_k))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def austin_covariate_variance_ratio_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], bool]:
+    """Calculates Peter C. Austin's (2009) Covariate Variance Ratio Balance Metric (VR_Austin).
+
+    Binarizes exposure X at its median into treated (D = 1) and control (D = 0) cohorts.
+    Evaluates the ratio of sample variances of covariate Z across exposure groups:
+      VR = s_1^2 / s_0^2
+    Satisfactory balance requires VR in [0.80, 1.25] (relaxed to [0.50, 2.00] for observational data).
+    Values VR < 0.50 or VR > 2.00 indicate severe covariate dispersion imbalance, risking model extrapolation.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        if np.sum(treated) < 4 or np.sum(~treated) < 4:
+            return None, False
+
+        z1 = z[treated]
+        z0 = z[~treated]
+        var1 = float(np.var(z1, ddof=1))
+        var0 = float(np.var(z0, ddof=1))
+        if var1 < 1e-12 or var0 < 1e-12:
+            return None, False
+
+        vr = float(var1 / var0)
+        is_imbal = bool(vr < 0.50 or vr > 2.00)
+        return vr, is_imbal
+    except Exception:
+        return None, False
+
+
+def stuart_prognostic_score_discrepancy_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], bool]:
+    """Calculates Elizabeth A. Stuart's (2010) Prognostic Score Discrepancy Metric (Delta_prog).
+
+    Models baseline outcome prognosis Psi(Z) = E[Y | Z, D=0] by regressing Y on Z in the control cohort.
+    Projects predicted baseline potential outcomes across both treated and control units:
+      Delta_prog = |mean(Psi_1) - mean(Psi_0)| / SD(Psi_0)
+    Quantifies structural baseline outcome risk divergence between treatment arms.
+    Values Delta_prog > 0.25 indicate severe prognostic disparity guaranteeing residual confounding.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        if np.sum(treated) < 4 or np.sum(~treated) < 4:
+            return None, False
+
+        z_ctrl = z[~treated]
+        y_ctrl = y[~treated]
+        if np.std(z_ctrl) < 1e-9:
+            return None, False
+
+        Z_ctrl_mat = np.column_stack([np.ones(len(z_ctrl)), z_ctrl])
+        b_prog, _, _, _ = np.linalg.lstsq(Z_ctrl_mat, y_ctrl, rcond=None)
+
+        Z_all_mat = np.column_stack([np.ones(n), z])
+        psi_all = Z_all_mat @ b_prog
+        psi_1 = psi_all[treated]
+        psi_0 = psi_all[~treated]
+
+        sd_0 = float(np.std(psi_0, ddof=1))
+        if sd_0 < 1e-9:
+            return None, False
+
+        mean_diff = abs(float(np.mean(psi_1) - np.mean(psi_0)))
+        delta_prog = float(mean_diff / sd_0)
+        is_discrepant = bool(delta_prog > 0.25)
+        return delta_prog, is_discrepant
+    except Exception:
+        return None, False
+
+
+def lilliefors_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Hubert W. Lilliefors' (1967) Composite Normality Goodness-of-Fit Test.
+
+    Evaluates whether standardized OLS residuals depart from Gaussianity when mean and variance are estimated:
+      D = max_{1 <= i <= N} max( |i/N - Phi(z_(i))|, |Phi(z_(i)) - (i-1)/N| )
+    Evaluates exact critical values and p-values using Dallal & Wilkinson (1986) / Stephens (1974) formulations:
+      Crit 5% = 0.886 / sqrt(N).
+    Rejection (p < 0.05) detects empirical distribution function departure from normality.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        s_e = float(np.std(res, ddof=1))
+        if s_e < 1e-12:
+            return None, None, False
+
+        z_sorted = np.sort((res - np.mean(res)) / s_e)
+        i_vec = np.arange(1, n + 1, dtype=float)
+        cdf_vals = stats.norm.cdf(z_sorted)
+        d_plus = np.max(i_vec / n - cdf_vals)
+        d_minus = np.max(cdf_vals - (i_vec - 1.0) / n)
+        d_stat = float(max(d_plus, d_minus))
+
+        crit_5pct = float(0.886 / np.sqrt(n))
+        n_adj = n + 2.78019
+        term1 = -7.01256 * (d_stat ** 2) * n_adj
+        term2 = 2.99587 * d_stat * np.sqrt(n_adj)
+        term3 = -0.122119 + 0.974598 / np.sqrt(n) + 1.67997 / n
+        log_p = term1 + term2 + term3
+        log_p = min(0.0, max(-35.0, log_p))
+        p_val = float(np.exp(log_p))
+        p_val = min(1.0, max(1e-15, p_val))
+        is_non_normal = bool(p_val < 0.05 or d_stat > crit_5pct)
+        return d_stat, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def park_loglinear_heteroskedasticity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Richard E. Park's (1966) Log-Linear Residual Variance Heteroskedasticity Test.
+
+    Models heteroskedastic error variance as a log-linear function of regressor X:
+      ln(e_i^2) = gamma_0 + gamma_1 * x_i + v_i
+    Evaluates t_Park = gamma_hat_1 / SE(gamma_hat_1) ~ t(N - 2).
+    Rejection (|t| >= 1.96, p < 0.05) diagnoses multiplicative / exponential variance expansion.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        res_sq = np.maximum(res ** 2, 1e-12)
+        log_e2 = np.log(res_sq)
+
+        gamma, _, _, _ = np.linalg.lstsq(X_mat, log_e2, rcond=None)
+        v_res = log_e2 - X_mat @ gamma
+        df_e = n - 2
+        if df_e <= 0:
+            return None, None, False
+        s2_v = float(np.sum(v_res ** 2) / df_e)
+        cov = s2_v * np.linalg.pinv(X_mat.T @ X_mat)
+        se_gamma1 = float(np.sqrt(max(1e-12, cov[1, 1])))
+        if se_gamma1 < 1e-12:
+            return None, None, False
+
+        t_stat = float(gamma[1] / se_gamma1)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        has_hetero = bool(p_val < 0.05 and abs(t_stat) >= 1.96)
+        return t_stat, p_val, has_hetero
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -4735,6 +5025,12 @@ class DevilsAdvocateAgent:
         siegel_tukey_w: Optional[float] = None
         siegel_tukey_p: Optional[float] = None
         is_siegel_tukey_hetero: bool = False
+        sterne_t: Optional[float] = None
+        sterne_p: Optional[float] = None
+        is_sterne_asym: bool = False
+        klotz_w: Optional[float] = None
+        klotz_p: Optional[float] = None
+        is_klotz_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -4801,6 +5097,8 @@ class DevilsAdvocateAgent:
                 thompson_sharp_t, thompson_sharp_p, is_thompson_asym = thompson_sharp_funnel_asymmetry_test(tables_2x2)
                 # Moreno et al. (2009) Variance-Weighted Regression Test for Asymmetry
                 moreno_t, moreno_p, is_moreno_asym = moreno_funnel_asymmetry_test(tables_2x2)
+                # Jonathan Sterne & Matthias Egger (2000) Inverse-Variance Weighted Funnel Asymmetry Regression Test
+                sterne_t, sterne_p, is_sterne_asym = sterne_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -4880,6 +5178,8 @@ class DevilsAdvocateAgent:
             ansari_w, ansari_p, is_ansari_hetero = ansari_bradley_scale_test(kw_samples)
             # Sidney Siegel & John W. Tukey (1960) Non-Parametric Rank Extremes Scale Test
             siegel_tukey_w, siegel_tukey_p, is_siegel_tukey_hetero = siegel_tukey_scale_test(kw_samples)
+            # Jerome Klotz (1962) Non-Parametric Normal Scores Rank Scale Dispersion Test
+            klotz_w, klotz_p, is_klotz_hetero = klotz_normal_scores_scale_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -4921,6 +5221,8 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Thompson-Sharp Funnel: t={thompson_sharp_t:.2f}, p={thompson_sharp_p:.3e}]"
         if moreno_p is not None:
             cmh_note += f" [Moreno Funnel: t={moreno_t:.2f}, p={moreno_p:.3e}]"
+        if sterne_p is not None:
+            cmh_note += f" [Sterne Funnel: t={sterne_t:.2f}, p={sterne_p:.3e}]"
         if levene_p is not None:
             cmh_note += f" [Levene Scale: W={levene_stat:.2f}, p={levene_p:.3e}]"
         if bartlett_p is not None:
@@ -4931,6 +5233,8 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Ansari-Bradley Scale: W={ansari_w:.2f}, p={ansari_p:.3e}]"
         if siegel_tukey_p is not None:
             cmh_note += f" [Siegel-Tukey Scale: W={siegel_tukey_w:.2f}, p={siegel_tukey_p:.3e}]"
+        if klotz_p is not None:
+            cmh_note += f" [Klotz Scale: Z={klotz_w:.2f}, p={klotz_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -5052,6 +5356,12 @@ class DevilsAdvocateAgent:
             siegel_tukey_stat=siegel_tukey_w,
             siegel_tukey_p=siegel_tukey_p,
             is_siegel_tukey_heterogeneous=is_siegel_tukey_hetero,
+            sterne_test_t=sterne_t,
+            sterne_test_p=sterne_p,
+            is_sterne_asymmetric=is_sterne_asym,
+            klotz_scale_stat=klotz_w,
+            klotz_scale_p=klotz_p,
+            is_klotz_heterogeneous=is_klotz_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -5207,6 +5517,8 @@ class DevilsAdvocateAgent:
         bm_w, bm_p, has_bm_effect = None, None, False
         smd_val, mahal_val, is_smd_imbal = None, None, False
         imbens_diff_val, is_imbens_excess = None, False
+        austin_vr, is_austin_imbal = None, False
+        stuart_disc, is_stuart_disc = None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -5245,6 +5557,10 @@ class DevilsAdvocateAgent:
                     smd_val, mahal_val, is_smd_imbal = rosenbaum_rubin_smd_balance_test(x_mal, z_mal)
                     # Guido Imbens & Donald Rubin (2015) Normalized Difference Metric
                     imbens_diff_val, is_imbens_excess = imbens_rubin_normalized_difference_test(x_mal, z_mal)
+                    # Peter C. Austin (2009) Covariate Variance Ratio Balance Test
+                    austin_vr, is_austin_imbal = austin_covariate_variance_ratio_test(x_mal, z_mal)
+                    # Elizabeth A. Stuart (2010) Prognostic Score Discrepancy Test
+                    stuart_disc, is_stuart_disc = stuart_prognostic_score_discrepancy_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -5386,6 +5702,10 @@ class DevilsAdvocateAgent:
             is_smd_imbalanced=is_smd_imbal,
             imbens_normalized_diff=imbens_diff_val,
             is_imbens_diff_excessive=is_imbens_excess,
+            austin_variance_ratio=austin_vr,
+            is_austin_imbalanced=is_austin_imbal,
+            stuart_prognostic_discrepancy=stuart_disc,
+            is_prognostic_discrepant=is_stuart_disc,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -5646,6 +5966,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Andrew C. Harvey (1976) Multiplicative Error Variance Heteroskedasticity LM Test
         harvey_lm, harvey_p, has_harvey_hetero = harvey_multiplicative_heteroskedasticity_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Hubert W. Lilliefors (1967) Composite Normality Goodness-of-Fit Test
+        lill_stat, lill_p, is_lill_non_normal = lilliefors_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Richard E. Park (1966) Log-Linear Error Variance Heteroskedasticity Test
+        park_t, park_p, has_park_hetero = park_loglinear_heteroskedasticity_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -5781,6 +6107,12 @@ class DevilsAdvocateAgent:
             harvey_lm_stat=harvey_lm,
             harvey_lm_p=harvey_p,
             has_harvey_heteroskedasticity=has_harvey_hetero,
+            lilliefors_stat=lill_stat,
+            lilliefors_p_value=lill_p,
+            is_lilliefors_non_normal=is_lill_non_normal,
+            park_t_stat=park_t,
+            park_p_value=park_p,
+            has_park_heteroskedasticity=has_park_hetero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
