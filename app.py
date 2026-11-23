@@ -282,6 +282,12 @@ with col_right:
                         if simpsons.get("klotz_scale_p") is not None:
                             klotz_flag = " ⚠️ Unequal Normal Scores Scale (p < 0.05)" if simpsons.get("is_klotz_heterogeneous") else " (Equidispersed Normal Scores)"
                             st.markdown(f"**Klotz Normal Scores Scale:** Z = `{simpsons.get('klotz_scale_stat', 0.0):.2f}` (p = `{simpsons.get('klotz_scale_p', 0.0):.3e}`){klotz_flag}")
+                        if simpsons.get("lfk_index") is not None:
+                            lfk_flag = " ⚠️ Major Funnel Asymmetry (|LFK| > 2.0)" if simpsons.get("is_lfk_asymmetric") else " (Symmetric Precision)"
+                            st.markdown(f"**LFK Funnel Asymmetry Index:** LFK = `{simpsons['lfk_index']:.2f}`{lfk_flag}")
+                        if simpsons.get("conover_p_value") is not None:
+                            con_flag = " ⚠️ Unequal Scale Dispersion (p < 0.05)" if simpsons.get("is_conover_heterogeneous") else " (Equidispersed Squared Ranks)"
+                            st.markdown(f"**Conover Squared Ranks Scale:** Z = `{simpsons.get('conover_stat_z', 0.0):.2f}` (p = `{simpsons.get('conover_p_value', 0.0):.3e}`){con_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -352,6 +358,12 @@ with col_right:
                         if conf_aud.get("stuart_prognostic_discrepancy") is not None:
                             stuart_flag = " ⚠️ Severe Baseline Prognostic Disparity (Δ_prog > 0.25)" if conf_aud.get("is_prognostic_discrepant") else " (Similar Prognostic Profiles)"
                             st.markdown(f"**Stuart Prognostic Score Discrepancy:** Δ_prog = `{conf_aud.get('stuart_prognostic_discrepancy', 0.0):.3f}`{stuart_flag}")
+                        if conf_aud.get("hansen_bowers_p") is not None:
+                            hb_flag = " ⚠️ Multivariate Imbalance (p < 0.05)" if conf_aud.get("is_hansen_bowers_imbalanced") else " (Omnibus Balance Confirmed)"
+                            st.markdown(f"**Hansen-Bowers Omnibus Balance:** χ² = `{conf_aud.get('hansen_bowers_chi2', 0.0):.2f}` (p = `{conf_aud.get('hansen_bowers_p', 0.0):.3e}`){hb_flag}")
+                        if conf_aud.get("caliper_discordance_rate") is not None:
+                            cal_flag = " ⚠️ Severe Caliper Discordance (> 15% off-support)" if conf_aud.get("is_caliper_discordant") else " (Adequate Support Overlap)"
+                            st.markdown(f"**Rosenbaum Caliper Discordance:** `{conf_aud.get('caliper_discordance_rate', 0.0):.1%}` (ε = `{conf_aud.get('caliper_threshold', 0.0):.3f}`){cal_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -476,6 +488,12 @@ with col_right:
                         if stab_aud.get("park_p_value") is not None:
                             park_flag = f" ⚠️ Log-Linear Heteroskedasticity (p = {stab_aud['park_p_value']:.3e})" if stab_aud.get("has_park_heteroskedasticity") else f" (Homoscedastic Log Error Variance, p = {stab_aud['park_p_value']:.3e})"
                             st.markdown(f"**Park Log-Linear Heteroskedasticity:** t = `{stab_aud.get('park_t_stat', 0.0):.2f}` (p = `{stab_aud['park_p_value']:.3e}`){park_flag}")
+                        if stab_aud.get("cramer_von_mises_p") is not None:
+                            cvm_flag = f" ⚠️ Non-Gaussian Residuals (p = {stab_aud['cramer_von_mises_p']:.3e})" if stab_aud.get("is_cvm_non_normal") else f" (Normal Empirical Residuals, p = {stab_aud['cramer_von_mises_p']:.3e})"
+                            st.markdown(f"**Cramér-von Mises Normality:** W² = `{stab_aud.get('cramer_von_mises_w2', 0.0):.3f}` (p = `{stab_aud['cramer_von_mises_p']:.3e}`){cvm_flag}")
+                        if stab_aud.get("cook_weisberg_p") is not None:
+                            cw_flag = f" ⚠️ Fitted-Value Heteroskedasticity (p = {stab_aud['cook_weisberg_p']:.3e})" if stab_aud.get("has_cook_weisberg_heteroskedasticity") else f" (Homoscedastic Fitted Spread, p = {stab_aud['cook_weisberg_p']:.3e})"
+                            st.markdown(f"**Cook-Weisberg Heteroskedasticity:** S = `{stab_aud.get('cook_weisberg_score', 0.0):.2f}` (p = `{stab_aud['cook_weisberg_p']:.3e}`){cw_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -772,6 +790,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Hubert Lilliefors composite normality goodness of fit test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Hubert Lilliefors composite normality goodness of fit test", findings, dataset_name=dataset_name)
 
+            sug_col37, sug_col38, sug_col39 = st.columns(3)
+            with sug_col37:
+                if st.button("📊 LFK Funnel Asymmetry Index", key="sug_lfk"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Luis Furuya-Kanamori and Suhail Doi LFK index of funnel plot asymmetry"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Luis Furuya-Kanamori and Suhail Doi LFK index of funnel plot asymmetry", findings, dataset_name=dataset_name)
+            with sug_col38:
+                if st.button("⚖️ Hansen-Bowers Omnibus Balance", key="sug_hb"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Ben Hansen and Jake Bowers omnibus covariate balance test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Ben Hansen and Jake Bowers omnibus covariate balance test", findings, dataset_name=dataset_name)
+            with sug_col39:
+                if st.button("📐 Cramér-von Mises Normality", key="sug_cvm"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Harald Cramér and Richard von Mises empirical distribution function residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Harald Cramér and Richard von Mises empirical distribution function residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -863,6 +898,9 @@ with col_right:
                     "Sterne_Funnel_p": f"{simp.get('sterne_test_p', 0.0):.3e}" if simp.get("sterne_test_p") is not None else "N/A",
                     "Klotz_Scale_Z": f"{simp.get('klotz_scale_stat', 0.0):.2f}" if simp.get("klotz_scale_stat") is not None else "N/A",
                     "Klotz_Scale_p": f"{simp.get('klotz_scale_p', 0.0):.3e}" if simp.get("klotz_scale_p") is not None else "N/A",
+                    "LFK_Index": f"{simp.get('lfk_index', 0.0):.2f}" if simp.get("lfk_index") is not None else "N/A",
+                    "Conover_Scale_Z": f"{simp.get('conover_stat_z', 0.0):.2f}" if simp.get("conover_stat_z") is not None else "N/A",
+                    "Conover_Scale_p": f"{simp.get('conover_p_value', 0.0):.3e}" if simp.get("conover_p_value") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -911,6 +949,9 @@ with col_right:
                     "Imbens_Normalized_Diff": f"{conf.get('imbens_normalized_diff', 0.0):.3f}" if conf.get("imbens_normalized_diff") is not None else "N/A",
                     "Austin_Variance_Ratio": f"{conf.get('austin_variance_ratio', 0.0):.2f}" if conf.get("austin_variance_ratio") is not None else "N/A",
                     "Stuart_Prognostic_Discrepancy": f"{conf.get('stuart_prognostic_discrepancy', 0.0):.3f}" if conf.get("stuart_prognostic_discrepancy") is not None else "N/A",
+                    "Hansen_Bowers_Chi2": f"{conf.get('hansen_bowers_chi2', 0.0):.2f}" if conf.get("hansen_bowers_chi2") is not None else "N/A",
+                    "Hansen_Bowers_p": f"{conf.get('hansen_bowers_p', 0.0):.3e}" if conf.get("hansen_bowers_p") is not None else "N/A",
+                    "Caliper_Discordance_Rate": f"{conf.get('caliper_discordance_rate', 0.0):.1%}" if conf.get("caliper_discordance_rate") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -964,6 +1005,10 @@ with col_right:
                     "Lilliefors_p": f"{stab.get('lilliefors_p_value', 0.0):.3e}" if stab.get("lilliefors_p_value") is not None else "N/A",
                     "Park_Heteroskedasticity_t": f"{stab.get('park_t_stat', 0.0):.2f}" if stab.get("park_t_stat") is not None else "N/A",
                     "Park_Heteroskedasticity_p": f"{stab.get('park_p_value', 0.0):.3e}" if stab.get("park_p_value") is not None else "N/A",
+                    "Cramer_von_Mises_W2": f"{stab.get('cramer_von_mises_w2', 0.0):.3f}" if stab.get("cramer_von_mises_w2") is not None else "N/A",
+                    "Cramer_von_Mises_p": f"{stab.get('cramer_von_mises_p', 0.0):.3e}" if stab.get("cramer_von_mises_p") is not None else "N/A",
+                    "Cook_Weisberg_Score": f"{stab.get('cook_weisberg_score', 0.0):.2f}" if stab.get("cook_weisberg_score") is not None else "N/A",
+                    "Cook_Weisberg_p": f"{stab.get('cook_weisberg_p', 0.0):.3e}" if stab.get("cook_weisberg_p") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

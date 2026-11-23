@@ -121,6 +121,10 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.sterne_test_p is not None
     assert audit.simpsons_audit.klotz_scale_stat is not None
     assert audit.simpsons_audit.klotz_scale_p is not None
+    # Verify LFK index of funnel plot asymmetry and Conover squared ranks scale test
+    assert audit.simpsons_audit.lfk_index is not None
+    assert audit.simpsons_audit.conover_stat_z is not None
+    assert audit.simpsons_audit.conover_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -252,6 +256,10 @@ def test_confounder_variance_loss_and_leakage():
         # Check Austin covariate variance ratio and Stuart prognostic score discrepancy
         assert audit_coffee.confounder_audit.austin_variance_ratio is not None
         assert audit_coffee.confounder_audit.stuart_prognostic_discrepancy is not None
+        # Check Hansen-Bowers omnibus balance and Rosenbaum caliper discordance
+        assert audit_coffee.confounder_audit.hansen_bowers_chi2 is not None
+        assert audit_coffee.confounder_audit.hansen_bowers_p is not None
+        assert audit_coffee.confounder_audit.caliper_discordance_rate is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -365,6 +373,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.lilliefors_p_value is not None
     assert audit.stability_audit.park_t_stat is not None
     assert audit.stability_audit.park_p_value is not None
+    # Check Cramér-von Mises EDF normality and Cook-Weisberg heteroskedasticity test
+    assert audit.stability_audit.cramer_von_mises_w2 is not None
+    assert audit.stability_audit.cramer_von_mises_p is not None
+    assert audit.stability_audit.cook_weisberg_score is not None
+    assert audit.stability_audit.cook_weisberg_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -692,6 +705,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_park = narrator.answer_query("Explain Richard Park log-linear residual variance heteroskedasticity test", findings)
     assert "Park" in ans_park or "Log-Linear" in ans_park or "Heteroskedasticity" in ans_park or "Variance" in ans_park
+
+    ans_lfk = narrator.answer_query("Explain Luis Furuya-Kanamori and Suhail Doi LFK index of funnel plot asymmetry", findings)
+    assert "LFK" in ans_lfk or "Funnel" in ans_lfk or "Doi" in ans_lfk
+
+    ans_conover = narrator.answer_query("Explain W. J. Conover and Ronald Iman squared ranks scale dispersion test", findings)
+    assert "Conover" in ans_conover or "Squared Ranks" in ans_conover or "Scale" in ans_conover or "Dispersion" in ans_conover
+
+    ans_hb = narrator.answer_query("Explain Ben Hansen and Jake Bowers omnibus covariate balance test", findings)
+    assert "Hansen" in ans_hb or "Bowers" in ans_hb or "Balance" in ans_hb or "Covariate" in ans_hb
+
+    ans_caliper = narrator.answer_query("Explain Paul Rosenbaum propensity score caliper discordance metric", findings)
+    assert "Rosenbaum" in ans_caliper or "Caliper" in ans_caliper or "Discordance" in ans_caliper or "Support" in ans_caliper
+
+    ans_cvm = narrator.answer_query("Explain Harald Cramér and Richard von Mises empirical distribution function residual normality test", findings)
+    assert "Cramér" in ans_cvm or "Cramer" in ans_cvm or "Mises" in ans_cvm or "Normality" in ans_cvm
+
+    ans_cw = narrator.answer_query("Explain Cook-Weisberg fitted-value scale heteroskedasticity score test", findings)
+    assert "Cook" in ans_cw or "Weisberg" in ans_cw or "Heteroskedasticity" in ans_cw or "Score" in ans_cw
 
 
 def test_end_to_end_pipeline(tmp_path):

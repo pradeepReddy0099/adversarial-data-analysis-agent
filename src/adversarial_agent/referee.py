@@ -145,6 +145,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Sterne-Egger Weighted Funnel Test: t = {simpsons.sterne_test_t:.2f} (p = {simpsons.sterne_test_p:.3e}) {'[STANDARD-ERROR REPORTING ASYMMETRY]' if simpsons.is_sterne_asymmetric else '[SYMMETRIC STANDARD-ERROR PRECISION]'}")
             if simpsons.klotz_scale_p is not None:
                 rationale["key_evidence"].append(f"Klotz Normal Scores Scale Test: Z = {simpsons.klotz_scale_stat:.2f} (p = {simpsons.klotz_scale_p:.3e}) {'[NORMAL-SCORES SCALE DIVERGENCE]' if simpsons.is_klotz_heterogeneous else '[EQUIDISPERSED NORMAL SCORES]'}")
+            if simpsons.lfk_index is not None:
+                rationale["key_evidence"].append(f"LFK Funnel Asymmetry Index: LFK = {simpsons.lfk_index:.2f} {'[MAJOR REPORTING ASYMMETRY / DOI PLOT DISTORTION]' if simpsons.is_lfk_asymmetric else '[SYMMETRIC DOI PLOT PRECISION]'}")
+            if simpsons.conover_p_value is not None:
+                rationale["key_evidence"].append(f"Conover Squared Ranks Scale Test: Z = {simpsons.conover_stat_z:.2f} (p = {simpsons.conover_p_value:.3e}) {'[NON-PARAMETRIC SCALE SPREAD HETEROGENEITY]' if simpsons.is_conover_heterogeneous else '[EQUIDISPERSED SQUARED RANKS]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -242,6 +246,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Austin Covariate Variance Ratio: VR = {confounder.austin_variance_ratio:.2f} {'[SEVERE OBSERVATIONAL VARIANCE IMBALANCE]' if confounder.is_austin_imbalanced else '[BALANCED OBSERVATIONAL DISPERSION]'}")
             if confounder.stuart_prognostic_discrepancy is not None:
                 rationale["key_evidence"].append(f"Stuart Prognostic Score Discrepancy: Δ_prog = {confounder.stuart_prognostic_discrepancy:.3f} {'[STRUCTURAL BASELINE RISK DISPARITY]' if confounder.is_prognostic_discrepant else '[SIMILAR PROGNOSTIC BASELINE PROFILES]'}")
+            if confounder.hansen_bowers_p is not None:
+                rationale["key_evidence"].append(f"Hansen-Bowers Omnibus Balance: χ² = {confounder.hansen_bowers_chi2:.2f} (p = {confounder.hansen_bowers_p:.3e}) {'[MULTIVARIATE JOINT COVARIATE IMBALANCE]' if confounder.is_hansen_bowers_imbalanced else '[OMNIBUS COVARIATE BALANCE CONFIRMED]'}")
+            if confounder.caliper_discordance_rate is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Caliper Discordance: {confounder.caliper_discordance_rate:.1%} (Caliper = {confounder.caliper_threshold:.3f}) {'[SEVERE OFF-SUPPORT EXTRAPOLATION RISK]' if confounder.is_caliper_discordant else '[SATISFACTORY COMMON SUPPORT MATCHING]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -547,6 +555,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Lilliefors Normality: D = {stability.lilliefors_stat:.3f} (p = {stability.lilliefors_p_value:.3e})")
             if stability.park_p_value is not None:
                 rationale["key_evidence"].append(f"Park Heteroskedasticity: t = {stability.park_t_stat:.2f} (p = {stability.park_p_value:.3e})")
+            if simpsons.lfk_index is not None:
+                rationale["key_evidence"].append(f"LFK Funnel Index: LFK = {simpsons.lfk_index:.2f}")
+            if simpsons.conover_p_value is not None:
+                rationale["key_evidence"].append(f"Conover Squared Ranks Scale: Z = {simpsons.conover_stat_z:.2f} (p = {simpsons.conover_p_value:.3e})")
+            if confounder.hansen_bowers_p is not None:
+                rationale["key_evidence"].append(f"Hansen-Bowers Balance: χ² = {confounder.hansen_bowers_chi2:.2f} (p = {confounder.hansen_bowers_p:.3e})")
+            if confounder.caliper_discordance_rate is not None:
+                rationale["key_evidence"].append(f"Caliper Discordance: {confounder.caliper_discordance_rate:.1%} (ε = {confounder.caliper_threshold:.3f})")
+            if stability.cramer_von_mises_p is not None:
+                rationale["key_evidence"].append(f"Cramér-von Mises Normality: W² = {stability.cramer_von_mises_w2:.3f} (p = {stability.cramer_von_mises_p:.3e})")
+            if stability.cook_weisberg_p is not None:
+                rationale["key_evidence"].append(f"Cook-Weisberg Heteroskedasticity: S = {stability.cook_weisberg_score:.2f} (p = {stability.cook_weisberg_p:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

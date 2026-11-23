@@ -130,6 +130,11 @@ class SimpsonsParadoxAudit:
     klotz_scale_stat: Optional[float] = None
     klotz_scale_p: Optional[float] = None
     is_klotz_heterogeneous: bool = False
+    lfk_index: Optional[float] = None
+    is_lfk_asymmetric: bool = False
+    conover_stat_z: Optional[float] = None
+    conover_p_value: Optional[float] = None
+    is_conover_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -238,6 +243,12 @@ class ConfounderAudit:
     is_austin_imbalanced: bool = False
     stuart_prognostic_discrepancy: Optional[float] = None
     is_prognostic_discrepant: bool = False
+    hansen_bowers_chi2: Optional[float] = None
+    hansen_bowers_p: Optional[float] = None
+    is_hansen_bowers_imbalanced: bool = False
+    caliper_discordance_rate: Optional[float] = None
+    caliper_threshold: Optional[float] = None
+    is_caliper_discordant: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -354,6 +365,12 @@ class StabilityAudit:
     park_t_stat: Optional[float] = None
     park_p_value: Optional[float] = None
     has_park_heteroskedasticity: bool = False
+    cramer_von_mises_w2: Optional[float] = None
+    cramer_von_mises_p: Optional[float] = None
+    is_cvm_non_normal: bool = False
+    cook_weisberg_score: Optional[float] = None
+    cook_weisberg_p: Optional[float] = None
+    has_cook_weisberg_heteroskedasticity: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -4735,6 +4752,301 @@ def park_loglinear_heteroskedasticity_test(
         return None, None, False
 
 
+def lfk_index_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], bool]:
+    """Calculates Luis Furuya-Kanamori & Suhail A. R. Doi's (2018) LFK Index of Funnel Plot Asymmetry.
+
+    Evaluates publication and selection bias across binary stratified contingency strata on the Doi plot.
+    Converts stratum log-odds ratios into standardized Z-scores relative to the precision-weighted pooled effect.
+    Computes empirical area discrepancy between right (A_R) and left (A_L) halves of the distribution:
+      LFK = 5 * (A_R - A_L) / (A_R + A_L)
+    Interpretation:
+      |LFK| <= 1.0: No asymmetry (symmetric precision)
+      1.0 < |LFK| <= 2.0: Minor asymmetry
+      |LFK| > 2.0: Major asymmetry (reporting bias / small-stratum distortion)
+    """
+    if len(tables_2x2) < 3:
+        return None, False
+    try:
+        theta_vec = []
+        var_vec = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                if len(t) == 4 and not isinstance(t[0], (tuple, list)):
+                    a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+                else:
+                    a, b = float(t[0][0]), float(t[0][1])
+                    c, d = float(t[1][0]), float(t[1][1])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            if a + b > 0 and c + d > 0 and a + c > 0 and b + d > 0:
+                a_c = a + 0.5
+                b_c = b + 0.5
+                c_c = c + 0.5
+                d_c = d + 0.5
+                theta = float(np.log((a_c * d_c) / (b_c * c_c)))
+                v = float(1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c)
+                theta_vec.append(theta)
+                var_vec.append(v)
+        k_val = len(theta_vec)
+        if k_val < 3:
+            return None, False
+
+        y = np.array(theta_vec, dtype=float)
+        v = np.array(var_vec, dtype=float)
+        w = 1.0 / v
+        pooled_theta = float(np.sum(w * y) / np.sum(w))
+        z_scores = (y - pooled_theta) / np.sqrt(v)
+
+        right_mask = (z_scores > 0)
+        left_mask = (z_scores < 0)
+        a_r = float(np.sum(z_scores[right_mask] * np.sqrt(w[right_mask]))) if np.any(right_mask) else 0.0
+        a_l = float(np.sum(np.abs(z_scores[left_mask]) * np.sqrt(w[left_mask]))) if np.any(left_mask) else 0.0
+
+        denom = a_r + a_l
+        if denom < 1e-9:
+            return 0.0, False
+        lfk_val = float(5.0 * (a_r - a_l) / denom)
+        is_asym = bool(abs(lfk_val) > 2.0)
+        return lfk_val, is_asym
+    except Exception:
+        return None, False
+
+
+def conover_squared_ranks_scale_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates W. J. Conover & Ronald L. Iman's (1981) Squared Ranks Scale Dispersion Test.
+
+    Evaluates relative dispersion/scale between two conditioning strata without assuming normality.
+    Computes absolute deviations from group medians: D_ij = |X_ij - median(X_j)|.
+    Ranks pooled absolute deviations across both strata: R_i = rank(D_i).
+    Assigns squared ranks: S_i = R_i^2.
+    Test statistic T = sum_{i in stratum 1} S_i.
+    Under H_0: E[T] = n1 * mean(S), Var(T) = [n1 * n2 / (N * (N - 1))] * sum((S_i - mean(S))^2).
+    Standardized Z = (T - E[T]) / sqrt(Var(T)) ~ N(0, 1).
+    Rejection (p < 0.05) detects significant non-parametric scale spread heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        n1 = len(s1)
+        n2 = len(s2)
+        N = n1 + n2
+
+        dev1 = np.abs(s1 - np.median(s1))
+        dev2 = np.abs(s2 - np.median(s2))
+        combined_dev = np.concatenate([dev1, dev2])
+        ranks = stats.rankdata(combined_dev)
+        sq_ranks = ranks ** 2
+
+        t_stat = float(np.sum(sq_ranks[:n1]))
+        mean_sq = float(np.mean(sq_ranks))
+        e_t = float(n1 * mean_sq)
+        var_t = float((n1 * n2) / (N * (N - 1.0)) * np.sum((sq_ranks - mean_sq) ** 2))
+        if var_t < 1e-12:
+            return None, None, False
+        z_stat = float((t_stat - e_t) / np.sqrt(var_t))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def hansen_bowers_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Ben B. Hansen & Jake Bowers' (2008) Omnibus Covariate Balance Test.
+
+    Binarizes exposure X at its median into treated (D = 1) and control (D = 0) cohorts.
+    Evaluates standardized mean difference vector across primary and higher-order covariate moments [Z, Z^2].
+    Computes omnibus quadratic form chi2 = d^T [Var(d)]^{-1} d ~ chi2(p).
+    Rejection (p < 0.05) certifies multivariate covariate balance failure under the unconfoundedness model.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        n1 = int(np.sum(treated))
+        n0 = int(np.sum(~treated))
+        if n1 < 6 or n0 < 6:
+            return None, None, False
+
+        z_norm = (z - np.mean(z)) / max(1e-9, float(np.std(z)))
+        W_mat = np.column_stack([z_norm, z_norm ** 2])
+        p_dim = W_mat.shape[1]
+
+        w1 = W_mat[treated]
+        w0 = W_mat[~treated]
+        mean_diff = np.mean(w1, axis=0) - np.mean(w0, axis=0)
+
+        cov1 = np.cov(w1, rowvar=False)
+        cov0 = np.cov(w0, rowvar=False)
+        pooled_cov = ((n1 - 1.0) * cov1 + (n0 - 1.0) * cov0) / (n1 + n0 - 2.0)
+        var_d = (1.0 / n1 + 1.0 / n0) * pooled_cov
+
+        inv_var_d = np.linalg.pinv(var_d)
+        chi2_val = float(mean_diff.T @ inv_var_d @ mean_diff)
+        chi2_val = max(0.0, chi2_val)
+        p_val = float(stats.chi2.sf(chi2_val, df=p_dim))
+        is_imbal = bool(p_val < 0.05)
+        return chi2_val, p_val, is_imbal
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_rubin_caliper_discordance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum & Donald B. Rubin's (1985) Propensity Score Caliper Discordance Metric.
+
+    Binarizes exposure X at its median into treated (D = 1) and control (D = 0) cohorts.
+    Fits logistic propensity model P(D = 1 | Z) and evaluates logit propensity scores ell = ln(e / (1 - e)).
+    Applies Austin (2011) / Rosenbaum optimal caliper radius epsilon = 0.20 * SD(ell).
+    Quantifies fraction of treated units lacking any control counterpart within epsilon:
+      delta_caliper = (1 / n1) * sum_{i in treated} I(min_{j in control} |ell_i - ell_j| > epsilon).
+    Values delta_caliper > 0.15 indicate severe common support discordance and extrapolation risk.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x).astype(float)
+        n1 = int(np.sum(treated == 1.0))
+        n0 = int(np.sum(treated == 0.0))
+        if n1 < 6 or n0 < 6:
+            return None, None, False
+
+        z_std = (z - np.mean(z)) / max(1e-9, float(np.std(z)))
+        Z_mat = np.column_stack([np.ones(n), z_std])
+
+        beta = np.zeros(2)
+        for _ in range(15):
+            p_hat = 1.0 / (1.0 + np.exp(-np.clip(Z_mat @ beta, -25.0, 25.0)))
+            p_hat = np.clip(p_hat, 1e-5, 1.0 - 1e-5)
+            W_diag = p_hat * (1.0 - p_hat)
+            grad = Z_mat.T @ (treated - p_hat)
+            Hess = Z_mat.T @ (Z_mat * W_diag[:, None])
+            try:
+                step = np.linalg.solve(Hess, grad)
+                beta += step
+                if np.max(np.abs(step)) < 1e-5:
+                    break
+            except Exception:
+                break
+
+        eta = Z_mat @ beta
+        sd_eta = float(np.std(eta))
+        if sd_eta < 1e-9:
+            return 0.0, 0.0, False
+
+        caliper_radius = float(0.20 * sd_eta)
+        eta_1 = eta[treated == 1.0]
+        eta_0 = eta[treated == 0.0]
+
+        diff_matrix = np.abs(eta_1[:, None] - eta_0[None, :])
+        min_dists = np.min(diff_matrix, axis=1)
+        discordant_count = int(np.sum(min_dists > caliper_radius))
+        discordance_rate = float(discordant_count / n1)
+        is_discordant = bool(discordance_rate > 0.15)
+        return discordance_rate, caliper_radius, is_discordant
+    except Exception:
+        return None, None, False
+
+
+def cramer_von_mises_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Harald Cramér (1928) & Richard von Mises' (1928) EDF Residual Normality Test.
+
+    Evaluates integrated quadratic deviation between empirical residual CDF and theoretical normal CDF:
+      W^2 = 1 / (12 * N) + sum_{i=1}^N [Phi(z_(i)) - (2i - 1) / (2N)]^2
+    Applies Stephens' (1974) finite-sample adjustment for estimated mean and variance:
+      W^{*2} = W^2 * (1 + 0.5 / N).
+    Critical value at alpha = 0.05 is 0.126.
+    Rejection (W^{*2} > 0.126, p < 0.05) detects empirical residual departure from Gaussianity.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        s_e = float(np.std(res, ddof=1))
+        if s_e < 1e-12:
+            return None, None, False
+
+        z_sorted = np.sort((res - np.mean(res)) / s_e)
+        i_vec = np.arange(1, n + 1, dtype=float)
+        cdf_vals = stats.norm.cdf(z_sorted)
+
+        diffs = cdf_vals - (2.0 * i_vec - 1.0) / (2.0 * n)
+        w2_raw = float(1.0 / (12.0 * n) + np.sum(diffs ** 2))
+        w2_adj = float(w2_raw * (1.0 + 0.5 / n))
+
+        if w2_adj <= 0.0275:
+            p_val = 1.0 - 0.5 * np.exp(-1.0 * (0.0275 - w2_adj) * 40.0)
+        else:
+            p_val = float(np.exp(0.505 - 5.926 * w2_adj - 6.995 * (w2_adj ** 2)))
+        p_val = min(1.0, max(1e-15, p_val))
+        is_non_normal = bool(p_val < 0.05 or w2_adj > 0.126)
+        return w2_adj, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def cook_weisberg_heteroskedasticity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates R. Dennis Cook & Sanford Weisberg's (1983) Fitted-Value Heteroskedasticity Score Test.
+
+    Models error variance as an exponential function of fitted values: sigma_i^2 = sigma^2 * exp(lambda * y_hat_i).
+    Evaluates scaled squared residuals u_i = e_i^2 / sigma_hat^2.
+    Computes score statistic:
+      S_CW = 0.5 * [sum((u_i - 1) * (y_hat_i - mean(y_hat)))]^2 / sum((y_hat_i - mean(y_hat))^2) ~ chi2(1).
+    Rejection (S_CW >= 3.841, p < 0.05) detects fitted-value variance scaling.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        y_hat = X_mat @ beta
+        res = y - y_hat
+        sigma2 = float(np.mean(res ** 2))
+        if sigma2 < 1e-12:
+            return None, None, False
+
+        u_i = (res ** 2) / sigma2
+        y_hat_dev = y_hat - np.mean(y_hat)
+        denom = float(np.sum(y_hat_dev ** 2))
+        if denom < 1e-12:
+            return None, None, False
+
+        numer = float(np.sum((u_i - 1.0) * y_hat_dev))
+        score_cw = float(0.5 * (numer ** 2) / denom)
+        p_val = float(stats.chi2.sf(score_cw, df=1))
+        has_hetero = bool(score_cw >= 3.841 or p_val < 0.05)
+        return score_cw, p_val, has_hetero
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -5031,6 +5343,11 @@ class DevilsAdvocateAgent:
         klotz_w: Optional[float] = None
         klotz_p: Optional[float] = None
         is_klotz_hetero: bool = False
+        lfk_val: Optional[float] = None
+        is_lfk_asym: bool = False
+        conover_stat: Optional[float] = None
+        conover_p: Optional[float] = None
+        is_conover_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -5099,6 +5416,8 @@ class DevilsAdvocateAgent:
                 moreno_t, moreno_p, is_moreno_asym = moreno_funnel_asymmetry_test(tables_2x2)
                 # Jonathan Sterne & Matthias Egger (2000) Inverse-Variance Weighted Funnel Asymmetry Regression Test
                 sterne_t, sterne_p, is_sterne_asym = sterne_funnel_asymmetry_test(tables_2x2)
+                # Luis Furuya-Kanamori & Suhail A. R. Doi (2018) LFK Index of Funnel Plot Asymmetry
+                lfk_val, is_lfk_asym = lfk_index_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -5180,6 +5499,8 @@ class DevilsAdvocateAgent:
             siegel_tukey_w, siegel_tukey_p, is_siegel_tukey_hetero = siegel_tukey_scale_test(kw_samples)
             # Jerome Klotz (1962) Non-Parametric Normal Scores Rank Scale Dispersion Test
             klotz_w, klotz_p, is_klotz_hetero = klotz_normal_scores_scale_test(kw_samples)
+            # W. J. Conover & Ronald L. Iman (1981) Squared Ranks Scale Dispersion Test
+            conover_stat, conover_p, is_conover_hetero = conover_squared_ranks_scale_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -5235,6 +5556,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Siegel-Tukey Scale: W={siegel_tukey_w:.2f}, p={siegel_tukey_p:.3e}]"
         if klotz_p is not None:
             cmh_note += f" [Klotz Scale: Z={klotz_w:.2f}, p={klotz_p:.3e}]"
+        if lfk_val is not None:
+            cmh_note += f" [LFK Index: {lfk_val:.2f}{' (Asym)' if is_lfk_asym else ''}]"
+        if conover_p is not None:
+            cmh_note += f" [Conover Scale: Z={conover_stat:.2f}, p={conover_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -5362,6 +5687,11 @@ class DevilsAdvocateAgent:
             klotz_scale_stat=klotz_w,
             klotz_scale_p=klotz_p,
             is_klotz_heterogeneous=is_klotz_hetero,
+            lfk_index=lfk_val,
+            is_lfk_asymmetric=is_lfk_asym,
+            conover_stat_z=conover_stat,
+            conover_p_value=conover_p,
+            is_conover_heterogeneous=is_conover_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -5519,6 +5849,8 @@ class DevilsAdvocateAgent:
         imbens_diff_val, is_imbens_excess = None, False
         austin_vr, is_austin_imbal = None, False
         stuart_disc, is_stuart_disc = None, False
+        hb_chi2, hb_p, is_hb_imbal = None, None, False
+        caliper_rate, caliper_rad, is_caliper_disc = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -5561,6 +5893,10 @@ class DevilsAdvocateAgent:
                     austin_vr, is_austin_imbal = austin_covariate_variance_ratio_test(x_mal, z_mal)
                     # Elizabeth A. Stuart (2010) Prognostic Score Discrepancy Test
                     stuart_disc, is_stuart_disc = stuart_prognostic_score_discrepancy_test(x_mal, z_mal, y_mal)
+                    # Ben B. Hansen & Jake Bowers (2008) Omnibus Covariate Balance Test
+                    hb_chi2, hb_p, is_hb_imbal = hansen_bowers_balance_test(x_mal, z_mal)
+                    # Paul R. Rosenbaum & Donald B. Rubin (1985) Caliper Discordance Metric
+                    caliper_rate, caliper_rad, is_caliper_disc = rosenbaum_rubin_caliper_discordance_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -5706,6 +6042,12 @@ class DevilsAdvocateAgent:
             is_austin_imbalanced=is_austin_imbal,
             stuart_prognostic_discrepancy=stuart_disc,
             is_prognostic_discrepant=is_stuart_disc,
+            hansen_bowers_chi2=hb_chi2,
+            hansen_bowers_p=hb_p,
+            is_hansen_bowers_imbalanced=is_hb_imbal,
+            caliper_discordance_rate=caliper_rate,
+            caliper_threshold=caliper_rad,
+            is_caliper_discordant=is_caliper_disc,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -5972,6 +6314,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Richard E. Park (1966) Log-Linear Error Variance Heteroskedasticity Test
         park_t, park_p, has_park_hetero = park_loglinear_heteroskedasticity_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Harald Cramér (1928) & Richard von Mises (1928) EDF Residual Normality Test
+        cvm_w2, cvm_p, is_cvm_non_normal = cramer_von_mises_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: R. Dennis Cook & Sanford Weisberg (1983) Fitted-Value Heteroskedasticity Score Test
+        cw_score, cw_p, has_cw_hetero = cook_weisberg_heteroskedasticity_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -6113,6 +6461,12 @@ class DevilsAdvocateAgent:
             park_t_stat=park_t,
             park_p_value=park_p,
             has_park_heteroskedasticity=has_park_hetero,
+            cramer_von_mises_w2=cvm_w2,
+            cramer_von_mises_p=cvm_p,
+            is_cvm_non_normal=is_cvm_non_normal,
+            cook_weisberg_score=cw_score,
+            cook_weisberg_p=cw_p,
+            has_cook_weisberg_heteroskedasticity=has_cw_hetero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
