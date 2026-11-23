@@ -86,6 +86,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.harbord_p_value is not None
     assert audit.simpsons_audit.brown_forsythe_stat is not None
     assert audit.simpsons_audit.brown_forsythe_p is not None
+    # Verify Peters regression asymmetry test and Leslie Kish design effect
+    assert audit.simpsons_audit.peters_test_t is not None
+    assert audit.simpsons_audit.peters_test_p is not None
+    assert audit.simpsons_audit.kish_design_effect is not None
+    assert audit.simpsons_audit.stratified_variance_ratio is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -187,6 +192,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.bkw_condition_index >= 1.0
         assert audit_coffee.confounder_audit.sargan_j_stat is not None
         assert audit_coffee.confounder_audit.sargan_p_value is not None
+        # Check Crump propensity overlap and Bruce Hansen threshold test
+        assert audit_coffee.confounder_audit.crump_overlap_ratio is not None
+        assert audit_coffee.confounder_audit.hansen_threshold_f is not None
+        assert audit_coffee.confounder_audit.hansen_threshold_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -265,6 +274,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.harvey_collier_p is not None
     assert audit.stability_audit.huber_m_slope is not None
     assert audit.stability_audit.huber_slope_discrepancy is not None
+    # Check CUSUMSQ variance constancy and Rousseeuw Least Trimmed Squares (LTS)
+    assert audit.stability_audit.cusumsq_stat is not None
+    assert audit.stability_audit.cusumsq_critical_val is not None
+    assert audit.stability_audit.lts_slope is not None
+    assert audit.stability_audit.lts_slope_discrepancy is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -466,6 +480,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_huber = narrator.answer_query("Explain Huber M-estimator robust regression discrepancy", findings)
     assert "Huber" in ans_huber or "Discrepancy" in ans_huber or "Robust" in ans_huber
+
+    ans_peters = narrator.answer_query("Explain Peters regression test for funnel plot asymmetry", findings)
+    assert "Peters" in ans_peters or "Asymmetry" in ans_peters or "Funnel" in ans_peters
+
+    ans_kish = narrator.answer_query("Explain Leslie Kish design effect and variance ratio", findings)
+    assert "Kish" in ans_kish or "Design Effect" in ans_kish or "Variance" in ans_kish
+
+    ans_crump = narrator.answer_query("Explain Crump propensity score overlap test", findings)
+    assert "Crump" in ans_crump or "Overlap" in ans_crump or "Common Support" in ans_crump
+
+    ans_hansen = narrator.answer_query("Explain Bruce Hansen structural threshold test", findings)
+    assert "Hansen" in ans_hansen or "Threshold" in ans_hansen or "Regime" in ans_hansen
+
+    ans_cusumsq = narrator.answer_query("Explain Brown-Durbin-Evans CUSUMSQ test for variance stability", findings)
+    assert "CUSUMSQ" in ans_cusumsq or "Variance" in ans_cusumsq or "Ploberger" in ans_cusumsq
+
+    ans_lts = narrator.answer_query("Explain Least Trimmed Squares LTS high-breakdown robust slope", findings)
+    assert "Trimmed Squares" in ans_lts or "LTS" in ans_lts or "Breakdown" in ans_lts or "Rousseeuw" in ans_lts
 
 
 def test_end_to_end_pipeline(tmp_path):

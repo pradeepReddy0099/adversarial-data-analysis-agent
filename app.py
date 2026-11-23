@@ -240,6 +240,12 @@ with col_right:
                         if simpsons.get("brown_forsythe_p") is not None:
                             bf_flag = " ⚠️ Heterogeneous Variances" if simpsons.get("is_brown_forsythe_heterogeneous") else " (Homoscedastic Strata)"
                             st.markdown(f"**Brown-Forsythe Scale Homogeneity:** W = `{simpsons.get('brown_forsythe_stat', 0.0):.2f}` (p = `{simpsons.get('brown_forsythe_p', 0.0):.3e}`){bf_flag}")
+                        if simpsons.get("peters_test_p") is not None:
+                            peters_flag = " ⚠️ Funnel Asymmetry (p < 0.05)" if simpsons.get("is_peters_asymmetric") else " (Symmetric Strata)"
+                            st.markdown(f"**Peters Regression Asymmetry Test:** t = `{simpsons.get('peters_test_t', 0.0):.2f}` (p = `{simpsons.get('peters_test_p', 0.0):.3e}`){peters_flag}")
+                        if simpsons.get("kish_design_effect") is not None:
+                            vr_flag = " (Variance Reduction)" if simpsons.get("stratified_variance_ratio", 1.0) < 1.0 else " (Variance Inflation)"
+                            st.markdown(f"**Kish Stratification Design Effect:** D_Kish = `{simpsons.get('kish_design_effect', 0.0):.2f}` (Var Ratio = `{simpsons.get('stratified_variance_ratio', 0.0):.2f}`{vr_flag})")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -268,6 +274,12 @@ with col_right:
                         if conf_aud.get("sargan_p_value") is not None:
                             sarg_flag = " ⚠️ Restrictions Violated (p < 0.05)" if conf_aud.get("is_sargan_rejected") else " (Valid Overidentifying Restrictions)"
                             st.markdown(f"**Sargan-Hansen Overidentification:** J = `{conf_aud.get('sargan_j_stat', 0.0):.2f}` (p = `{conf_aud.get('sargan_p_value', 0.0):.3e}`){sarg_flag}")
+                        if conf_aud.get("crump_overlap_ratio") is not None:
+                            crump_flag = f" ⚠️ Severe Lack of Common Support ({conf_aud['crump_overlap_ratio']:.1%} Off-Support)" if conf_aud.get("is_crump_overlap_deficient") else f" (Adequate Overlap, {conf_aud['crump_overlap_ratio']:.1%} Off-Support)"
+                            st.markdown(f"**Crump Propensity Score Overlap:** `{conf_aud['crump_overlap_ratio']:.1%}`{crump_flag}")
+                        if conf_aud.get("hansen_threshold_p") is not None:
+                            hansen_flag = f" ⚠️ Threshold Regime Shift (p = {conf_aud['hansen_threshold_p']:.3e})" if conf_aud.get("has_hansen_threshold_regime") else f" (Linear Response Adequate, p = {conf_aud['hansen_threshold_p']:.3e})"
+                            st.markdown(f"**Hansen Structural Threshold Test:** Sup F = `{conf_aud.get('hansen_threshold_f', 0.0):.2f}` (p = `{conf_aud['hansen_threshold_p']:.3e}`){hansen_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -350,6 +362,12 @@ with col_right:
                         if stab_aud.get("huber_slope_discrepancy") is not None:
                             hub_flag = " ⚠️ High Outlier Contamination" if stab_aud.get("is_huber_outlier_distorted") else " (Robust to Outliers)"
                             st.markdown(f"**Huber Robust M-Slope Discrepancy:** β_Huber = `{stab_aud.get('huber_m_slope', 0.0):.4f}` (Δ = `{stab_aud.get('huber_slope_discrepancy', 0.0):.1%}`){hub_flag}")
+                        if stab_aud.get("cusumsq_stat") is not None:
+                            cusumsq_flag = f" ⚠️ Variance Instability (W > {stab_aud.get('cusumsq_critical_val', 0.0):.3f})" if stab_aud.get("has_cusumsq_instability") else f" (Variance Constancy, W ≤ {stab_aud.get('cusumsq_critical_val', 0.0):.3f})"
+                            st.markdown(f"**CUSUM of Squares Test:** W = `{stab_aud.get('cusumsq_stat', 0.0):.3f}` (crit = `{stab_aud.get('cusumsq_critical_val', 0.0):.3f}`){cusumsq_flag}")
+                        if stab_aud.get("lts_slope_discrepancy") is not None:
+                            lts_flag = " ⚠️ High-Breakdown Leverage Distortion" if stab_aud.get("is_lts_outlier_distorted") else " (Resistant to Outliers)"
+                            st.markdown(f"**Least Trimmed Squares (LTS) Slope:** β_LTS = `{stab_aud.get('lts_slope', 0.0):.4f}` (Δ_LTS = `{stab_aud.get('lts_slope_discrepancy', 0.0):.1%}`){lts_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -527,6 +545,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Huber M-estimator robust regression discrepancy"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Huber M-estimator robust regression discrepancy", findings, dataset_name=dataset_name)
 
+            sug_col16, sug_col17, sug_col18 = st.columns(3)
+            with sug_col16:
+                if st.button("📊 Peters Asymmetry Test", key="sug_peters"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Peters regression test for funnel plot asymmetry in binary data"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Peters regression test for funnel plot asymmetry in binary data", findings, dataset_name=dataset_name)
+            with sug_col17:
+                if st.button("📈 Hansen Threshold Regime", key="sug_hansen"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Bruce Hansen structural threshold non-linearity test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Bruce Hansen structural threshold non-linearity test", findings, dataset_name=dataset_name)
+            with sug_col18:
+                if st.button("🛡️ Least Trimmed Squares (LTS)", key="sug_lts"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Least Trimmed Squares (LTS) high-breakdown robust slope"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Least Trimmed Squares (LTS) high-breakdown robust slope", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -590,6 +625,10 @@ with col_right:
                     "Harbord_Score_t": f"{simp.get('harbord_t_stat', 0.0):.2f}" if simp.get("harbord_t_stat") is not None else "N/A",
                     "Harbord_p_value": f"{simp.get('harbord_p_value', 0.0):.3e}" if simp.get("harbord_p_value") is not None else "N/A",
                     "Brown_Forsythe_p": f"{simp.get('brown_forsythe_p', 0.0):.3e}" if simp.get("brown_forsythe_p") is not None else "N/A",
+                    "Peters_Score_t": f"{simp.get('peters_test_t', 0.0):.2f}" if simp.get("peters_test_t") is not None else "N/A",
+                    "Peters_p_value": f"{simp.get('peters_test_p', 0.0):.3e}" if simp.get("peters_test_p") is not None else "N/A",
+                    "Kish_Design_Effect": f"{simp.get('kish_design_effect', 0.0):.2f}" if simp.get("kish_design_effect") is not None else "N/A",
+                    "Stratified_Variance_Ratio": f"{simp.get('stratified_variance_ratio', 0.0):.2f}" if simp.get("stratified_variance_ratio") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -617,6 +656,9 @@ with col_right:
                     "BKW_Condition_Index": f"{conf.get('bkw_condition_index', 0.0):.2f}" if conf.get("bkw_condition_index") is not None else "N/A",
                     "Sargan_J_Stat": f"{conf.get('sargan_j_stat', 0.0):.2f}" if conf.get("sargan_j_stat") is not None else "N/A",
                     "Sargan_p_value": f"{conf.get('sargan_p_value', 0.0):.3e}" if conf.get("sargan_p_value") is not None else "N/A",
+                    "Crump_Overlap_Ratio": f"{conf.get('crump_overlap_ratio', 0.0):.1%}" if conf.get("crump_overlap_ratio") is not None else "N/A",
+                    "Hansen_Threshold_F": f"{conf.get('hansen_threshold_f', 0.0):.2f}" if conf.get("hansen_threshold_f") is not None else "N/A",
+                    "Hansen_Threshold_p": f"{conf.get('hansen_threshold_p', 0.0):.3e}" if conf.get("hansen_threshold_p") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -638,12 +680,16 @@ with col_right:
                     "Andrews_Break_p": f"{stab.get('andrews_p_value', 0.0):.3e}" if stab.get("andrews_p_value") is not None else "N/A",
                     "CUSUM_Stat": f"{stab.get('cusum_stat', 0.0):.3f}" if stab.get("cusum_stat") is not None else "N/A",
                     "CUSUM_Drift_Flag": str(stab.get("has_cusum_instability", False)),
+                    "CUSUMSQ_Stat": f"{stab.get('cusumsq_stat', 0.0):.3f}" if stab.get("cusumsq_stat") is not None else "N/A",
+                    "CUSUMSQ_Critical_Val": f"{stab.get('cusumsq_critical_val', 0.0):.3f}" if stab.get("cusumsq_critical_val") is not None else "N/A",
                     "Koenker_Studentized_LM": f"{stab.get('koenker_lm_stat', 0.0):.2f}" if stab.get("koenker_lm_stat") is not None else "N/A",
                     "Koenker_p_value": f"{stab.get('koenker_p_value', 0.0):.3e}" if stab.get("koenker_p_value") is not None else "N/A",
                     "Harvey_Collier_t": f"{stab.get('harvey_collier_t', 0.0):.2f}" if stab.get("harvey_collier_t") is not None else "N/A",
                     "Harvey_Collier_p": f"{stab.get('harvey_collier_p', 0.0):.3e}" if stab.get("harvey_collier_p") is not None else "N/A",
                     "Huber_M_Slope": f"{stab.get('huber_m_slope', 0.0):.4f}" if stab.get("huber_m_slope") is not None else "N/A",
                     "Huber_Slope_Discrepancy": f"{stab.get('huber_slope_discrepancy', 0.0):.1%}" if stab.get("huber_slope_discrepancy") is not None else "N/A",
+                    "LTS_Slope": f"{stab.get('lts_slope', 0.0):.4f}" if stab.get("lts_slope") is not None else "N/A",
+                    "LTS_Slope_Discrepancy": f"{stab.get('lts_slope_discrepancy', 0.0):.1%}" if stab.get("lts_slope_discrepancy") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

@@ -117,6 +117,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Harbord Modified Score Asymmetry: t = {simpsons.harbord_t_stat:.2f} (p = {simpsons.harbord_p_value:.3e}) {'[SPARSE-STRATUM ASYMMETRY / SMALL-STUDY BIAS]' if simpsons.is_harbord_asymmetric else '[SYMMETRIC STRATA]'}")
             if simpsons.brown_forsythe_p is not None:
                 rationale["key_evidence"].append(f"Brown-Forsythe Robust Scale Homogeneity: W = {simpsons.brown_forsythe_stat:.2f} (p = {simpsons.brown_forsythe_p:.3e}) {'[CONDITIONAL SCALE HETEROGENEITY]' if simpsons.is_brown_forsythe_heterogeneous else '[HOMOSCEDASTIC STRATA SPREAD]'}")
+            if simpsons.peters_test_p is not None:
+                rationale["key_evidence"].append(f"Peters Asymmetry Regression Test: t = {simpsons.peters_test_t:.2f} (p = {simpsons.peters_test_p:.3e}) {'[SPARSE-STRATUM ASYMMETRY / PUBLICATION BIAS]' if simpsons.is_peters_asymmetric else '[SYMMETRIC STRATA]'}")
+            if simpsons.kish_design_effect is not None:
+                rationale["key_evidence"].append(f"Kish Stratification Design Effect: D_Kish = {simpsons.kish_design_effect:.2f} (Var Ratio = {simpsons.stratified_variance_ratio:.2f}) {'[STRATIFICATION VARIANCE REDUCTION]' if simpsons.stratified_variance_ratio < 1.0 else '[STRATIFICATION VARIANCE INFLATION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -186,6 +190,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Belsley-Kuh-Welsch Condition Index: κ = {confounder.bkw_condition_index:.2f} (Max Var Prop = {confounder.bkw_max_variance_prop:.1%}) {'[SEVERE MULTICOLLINEARITY - κ >= 15]' if confounder.is_bkw_collinear else '[STABLE CONDITIONING]'}")
             if confounder.sargan_p_value is not None:
                 rationale["key_evidence"].append(f"Sargan-Hansen Overidentification Test: J = {confounder.sargan_j_stat:.2f} (p = {confounder.sargan_p_value:.3e}) {'[EXCLUSION RESTRICTION VIOLATED - INVALID INSTRUMENT]' if confounder.is_sargan_rejected else '[VALID OVERIDENTIFYING RESTRICTIONS]'}")
+            if confounder.crump_overlap_ratio is not None:
+                rationale["key_evidence"].append(f"Crump Propensity Common Support: Off-Support = {confounder.crump_overlap_ratio:.1%} {'[SEVERE LACK OF COMMON SUPPORT - OVERLAP DEFICIENT]' if confounder.is_crump_overlap_deficient else '[ADEQUATE COVARIATE OVERLAP]'}")
+            if confounder.hansen_threshold_p is not None:
+                rationale["key_evidence"].append(f"Hansen Structural Threshold Test: F = {confounder.hansen_threshold_f:.2f} (p = {confounder.hansen_threshold_p:.3e}) {'[STRUCTURAL THRESHOLD REGIME DETECTED]' if confounder.has_hansen_threshold_regime else '[LINEAR CONTINUOUS RESPONSE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -256,6 +264,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Harvey-Collier Linearity Test: t = {stability.harvey_collier_t:.2f} (p = {stability.harvey_collier_p:.3e}) {'[FUNCTIONAL NON-LINEARITY / CURVATURE DETECTED]' if stability.has_harvey_collier_nonlinearity else '[LINEAR SPECIFICATION ADEQUATE]'}")
             if stability.huber_slope_discrepancy is not None:
                 rationale["key_evidence"].append(f"Huber Robust M-Estimator Discrepancy: Δ_Huber = {stability.huber_slope_discrepancy:.1%} (β_Huber = {stability.huber_m_slope:.4f}) {'[HEAVY OUTLIER CONTAMINATION]' if stability.is_huber_outlier_distorted else '[ROBUST TO OUTLIERS]'}")
+            if stability.cusumsq_stat is not None:
+                rationale["key_evidence"].append(f"CUSUMSQ Variance Stability: W = {stability.cusumsq_stat:.3f} (crit = {stability.cusumsq_critical_val:.3f}) {'[STRUCTURAL VARIANCE INSTABILITY / SHIFT DETECTED]' if stability.has_cusumsq_instability else '[HOMOSCEDASTIC VARIANCE CONSTANCY]'}")
+            if stability.lts_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Least Trimmed Squares Robust Slope: β_LTS = {stability.lts_slope:.4f} (Discrepancy Δ_LTS = {stability.lts_slope_discrepancy:.1%}) {'[HIGH-BREAKDOWN LEVERAGE DISTORTION]' if stability.is_lts_outlier_distorted else '[RESISTANT TO OUTLIER MASKING]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -379,6 +391,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Harvey-Collier Linearity: t = {stability.harvey_collier_t:.2f} (p = {stability.harvey_collier_p:.3e})")
             if stability.huber_slope_discrepancy is not None:
                 rationale["key_evidence"].append(f"Huber Robust M-Slope: β = {stability.huber_m_slope:.4f} (Δ = {stability.huber_slope_discrepancy:.1%})")
+            if simpsons.peters_test_p is not None:
+                rationale["key_evidence"].append(f"Peters Asymmetry Regression Test: t = {simpsons.peters_test_t:.2f} (p = {simpsons.peters_test_p:.3e})")
+            if simpsons.kish_design_effect is not None:
+                rationale["key_evidence"].append(f"Kish Stratification Design Effect: D_Kish = {simpsons.kish_design_effect:.2f}")
+            if confounder.crump_overlap_ratio is not None:
+                rationale["key_evidence"].append(f"Crump Propensity Overlap: Off-Support = {confounder.crump_overlap_ratio:.1%}")
+            if confounder.hansen_threshold_p is not None:
+                rationale["key_evidence"].append(f"Hansen Threshold Invariance: F = {confounder.hansen_threshold_f:.2f} (p = {confounder.hansen_threshold_p:.3e})")
+            if stability.cusumsq_stat is not None:
+                rationale["key_evidence"].append(f"CUSUMSQ Variance Constancy: W = {stability.cusumsq_stat:.3f} (crit = {stability.cusumsq_critical_val:.3f})")
+            if stability.lts_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Least Trimmed Squares Robust Slope: β_LTS = {stability.lts_slope:.4f} (Δ_LTS = {stability.lts_slope_discrepancy:.1%})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
