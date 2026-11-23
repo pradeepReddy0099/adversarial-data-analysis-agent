@@ -105,6 +105,12 @@ class SimpsonsParadoxAudit:
     bartlett_stat: Optional[float] = None
     bartlett_p: Optional[float] = None
     is_bartlett_heterogeneous: bool = False
+    deeks_test_t: Optional[float] = None
+    deeks_test_p: Optional[float] = None
+    is_deeks_asymmetric: bool = False
+    mood_stat_z: Optional[float] = None
+    mood_p_value: Optional[float] = None
+    is_mood_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -193,6 +199,11 @@ class ConfounderAudit:
     leamer_bound_min: Optional[float] = None
     leamer_bound_max: Optional[float] = None
     is_leamer_fragile: bool = False
+    dml_treatment_effect: Optional[float] = None
+    dml_discrepancy: Optional[float] = None
+    is_dml_confounded: bool = False
+    cinelli_k_multiplier: Optional[float] = None
+    is_cinelli_fragile: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -285,6 +296,12 @@ class StabilityAudit:
     kendall_tau_b: Optional[float] = None
     kendall_discrepancy: Optional[float] = None
     is_kendall_distorted: bool = False
+    goldfeld_quandt_f: Optional[float] = None
+    goldfeld_quandt_p: Optional[float] = None
+    has_goldfeld_quandt_heteroskedasticity: bool = False
+    shapiro_francia_w: Optional[float] = None
+    shapiro_francia_p: Optional[float] = None
+    is_shapiro_francia_non_normal: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -3542,6 +3559,331 @@ def kendall_tau_b_test(
         return None, None, False
 
 
+def deeks_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Jon Deeks, Peter Macaskill, & Les Irwig's (2005) Diagnostic Odds Ratio (DOR)
+    Regression Test for Funnel Plot Asymmetry in Stratified 2x2xK Tables.
+
+    Regresses stratum log-diagnostic odds ratio theta_k = ln(DOR_k) on 1 / sqrt(ESS_k),
+    where effective sample size ESS_k = 4 * (a+b) * (c+d) / (a+b+c+d), weighted by ESS_k:
+      sqrt(ESS_k) * theta_k = alpha * sqrt(ESS_k) + beta + epsilon_k*
+    Test statistic:
+      t_Deeks = beta_hat / SE(beta_hat) ~ t(K - 2).
+    Rejection (p < 0.05) detects significant stratified publication or selection asymmetry.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        ln_dor_vec = []
+        inv_sqrt_ess_vec = []
+        ess_vec = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                if len(t) == 4 and not isinstance(t[0], (tuple, list)):
+                    a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+                else:
+                    a, b = float(t[0][0]), float(t[0][1])
+                    c, d = float(t[1][0]), float(t[1][1])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            n_tot = a + b + c + d
+            n1 = a + b
+            n2 = c + d
+            if n_tot > 0 and n1 > 0 and n2 > 0:
+                a_c = a + 0.5
+                b_c = b + 0.5
+                c_c = c + 0.5
+                d_c = d + 0.5
+                ln_dor = float(np.log((a_c * d_c) / (b_c * c_c)))
+                ess = float((4.0 * n1 * n2) / n_tot)
+                if ess > 1e-6:
+                    ln_dor_vec.append(ln_dor)
+                    inv_sqrt_ess_vec.append(1.0 / np.sqrt(ess))
+                    ess_vec.append(ess)
+
+        k_valid = len(ln_dor_vec)
+        if k_valid < 3:
+            return None, None, False
+
+        y = np.array(ln_dor_vec, dtype=float)
+        x = np.array(inv_sqrt_ess_vec, dtype=float)
+        w = np.array(ess_vec, dtype=float)
+
+        sw = np.sqrt(w)
+        X_mat = np.column_stack([sw, sw * x])
+        Y_trans = sw * y
+        beta, _, _, _ = np.linalg.lstsq(X_mat, Y_trans, rcond=None)
+        res = Y_trans - X_mat @ beta
+        df_e = k_valid - 2
+        if df_e <= 0:
+            return None, None, False
+
+        s2 = float(np.sum(res ** 2) / df_e)
+        cov = s2 * np.linalg.pinv(X_mat.T @ X_mat)
+        se_slope = float(np.sqrt(max(1e-12, cov[1, 1])))
+        if se_slope < 1e-12:
+            return None, None, False
+
+        t_stat = float(beta[1] / se_slope)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def mood_dispersion_scale_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Alexander M. Mood's (1954) Non-Parametric Median-Rank Dispersion Scale Test.
+
+    Evaluates whether subgroup dispersions differ without requiring Gaussianity or symmetry.
+    For two conditioning strata of sizes n1 and n2 (N = n1 + n2), ranks pooled observations:
+      M = sum_{i in sample 1} (R_i - (N + 1) / 2)^2
+      E[M] = n1 * (N^2 - 1) / 12
+      Var(M) = n1 * n2 * (N + 1) * (N^2 - 4) / 180
+      Z_Mood = (M - E[M]) / sqrt(Var(M)) ~ N(0, 1).
+    Rejection (|Z_Mood| >= 1.96, p < 0.05) detects significant scale heterogeneity across strata.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        n1 = len(s1)
+        n2 = len(s2)
+        N = n1 + n2
+        if N < 8:
+            return None, None, False
+
+        pooled = np.concatenate([s1, s2])
+        ranks = stats.rankdata(pooled)
+        ranks_s1 = ranks[:n1]
+
+        mid = (N + 1.0) / 2.0
+        m_stat = float(np.sum((ranks_s1 - mid) ** 2))
+        e_m = float(n1 * (N ** 2 - 1.0) / 12.0)
+        var_m = float(n1 * n2 * (N + 1.0) * (N ** 2 - 4.0) / 180.0)
+        if var_m < 1e-12:
+            return None, None, False
+
+        z_stat = float((m_stat - e_m) / np.sqrt(var_m))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def double_machine_learning_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Chernozhukov, Chetverikov, Demirer, Duflo, Hansen, Newey, & Robins (2018)
+    Double Machine Learning (DML) / Neyman-Orthogonalized Treatment Effect Discrepancy.
+
+    Constructs Neyman-orthogonal partialing-out residuals:
+      x_tilde = X - E[X | Z]
+      y_tilde = Y - E[Y | Z]
+    Computes orthogonalized causal slope:
+      beta_DML = <x_tilde, y_tilde> / ||x_tilde||^2
+    Evaluates relative discrepancy against naive bivariate slope beta_raw = Cov(X, Y) / Var(X):
+      Delta_DML = |beta_raw - beta_DML| / max(1e-6, |beta_raw|)
+    Flags observational confounding when Delta_DML > 0.25 (25% divergence).
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        Z_mat = np.column_stack([np.ones(n), z])
+        # Residualize X on Z
+        b_x, _, _, _ = np.linalg.lstsq(Z_mat, x, rcond=None)
+        x_tilde = x - Z_mat @ b_x
+        # Residualize Y on Z
+        b_y, _, _, _ = np.linalg.lstsq(Z_mat, y, rcond=None)
+        y_tilde = y - Z_mat @ b_y
+
+        var_x_tilde = float(np.sum(x_tilde ** 2))
+        if var_x_tilde < 1e-12:
+            return None, None, False
+
+        beta_dml = float(np.sum(x_tilde * y_tilde) / var_x_tilde)
+
+        # Naive bivariate slope
+        var_x = float(np.var(x))
+        if var_x < 1e-12:
+            return None, None, False
+        cov_xy = float(np.cov(x, y)[0, 1])
+        beta_raw = float(cov_xy / var_x)
+
+        denom = max(1e-6, abs(beta_raw))
+        discrepancy = float(abs(beta_raw - beta_dml) / denom)
+        is_confounded = bool(discrepancy > 0.25)
+        return beta_dml, discrepancy, is_confounded
+    except Exception:
+        return None, None, False
+
+
+def cinelli_extreme_confounder_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    rv_q: Optional[float],
+) -> tuple[Optional[float], bool]:
+    """Calculates Carlos Cinelli & Chad Hazlett's (2020) Extreme Confounder Benchmark Multiplier.
+
+    Evaluates how many multiples (k) of the top observed confounder's explanatory power
+    would be required to completely overturn the estimated treatment relationship:
+      Pi = R^2_{X ~ Z} * R^2_{Y ~ Z | X}
+      k_Cinelli = RV_q^2 / max(1e-6, Pi)
+    If k_Cinelli < 1.0, an unobserved confounder WEAKER than the observed covariate Z
+    can completely wipe out the effect (declared FRAGILE). If k_Cinelli >= 1.0, unobserved
+    confounders must be stronger than observed controls (declared ROBUST).
+    """
+    n = len(x)
+    if rv_q is None or n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, False
+    try:
+        # Bivariate R^2 of X on Z
+        r_xz, _ = stats.pearsonr(x, z)
+        r2_xz = float(r_xz ** 2)
+
+        # Partial R^2 of Y on Z given X:
+        # Residualize Y on X and Z on X
+        X_mat = np.column_stack([np.ones(n), x])
+        b_yx, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res_yx = y - X_mat @ b_yx
+
+        b_zx, _, _, _ = np.linalg.lstsq(X_mat, z, rcond=None)
+        res_zx = z - X_mat @ b_zx
+
+        if np.std(res_yx) < 1e-9 or np.std(res_zx) < 1e-9:
+            return None, False
+
+        r_part, _ = stats.pearsonr(res_yx, res_zx)
+        r2_yz_given_x = float(r_part ** 2)
+
+        product = max(1e-6, r2_xz * r2_yz_given_x)
+        k_mult = float((rv_q ** 2) / product)
+        is_fragile = bool(k_mult < 1.0)
+        return k_mult, is_fragile
+    except Exception:
+        return None, False
+
+
+def goldfeld_quandt_heteroskedasticity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    omit_fraction: float = 0.20,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Stephen M. Goldfeld & Richard E. Quandt's (1965) Split-Regime Parametric Variance Ratio Test.
+
+    Sorts sample along regressor X and omits central c = floor(omit_fraction * N) observations.
+    Fits OLS regressions on lower regime (n1) and upper regime (n2) sub-samples:
+      F_GQ = max(MSE_2 / MSE_1, MSE_1 / MSE_2) ~ F(df2, df1).
+    Rejection (two-sided p < 0.05) detects systematic regressor-dependent regime heteroskedasticity.
+    """
+    n = len(x)
+    if n < 30 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        idx = np.argsort(x)
+        x_s = x[idx]
+        y_s = y[idx]
+
+        c = int(np.floor(omit_fraction * n))
+        n1 = int((n - c) // 2)
+        n2 = n1
+        if n1 < 6:
+            return None, None, False
+
+        # Lower regime
+        x1, y1 = x_s[:n1], y_s[:n1]
+        X1 = np.column_stack([np.ones(n1), x1])
+        b1, _, _, _ = np.linalg.lstsq(X1, y1, rcond=None)
+        res1 = y1 - X1 @ b1
+        df1 = n1 - 2
+        mse1 = float(np.sum(res1 ** 2) / df1)
+
+        # Upper regime
+        x2, y2 = x_s[n - n2:], y_s[n - n2:]
+        X2 = np.column_stack([np.ones(n2), x2])
+        b2, _, _, _ = np.linalg.lstsq(X2, y2, rcond=None)
+        res2 = y2 - X2 @ b2
+        df2 = n2 - 2
+        mse2 = float(np.sum(res2 ** 2) / df2)
+
+        if mse1 < 1e-12 or mse2 < 1e-12:
+            return None, None, False
+
+        if mse2 >= mse1:
+            f_stat = float(mse2 / mse1)
+            p_val = float(2.0 * min(1.0, stats.f.sf(f_stat, df2, df1)))
+        else:
+            f_stat = float(mse1 / mse2)
+            p_val = float(2.0 * min(1.0, stats.f.sf(f_stat, df1, df2)))
+
+        has_hetero = bool(p_val < 0.05)
+        return f_stat, p_val, has_hetero
+    except Exception:
+        return None, None, False
+
+
+def shapiro_francia_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates S. S. Shapiro & R. S. Francia's (1972) Normality Test for Regression Residuals.
+
+    Evaluates squared correlation between ordered OLS residuals e_(i) and standard normal order scores m_i:
+      m_i = Phi^{-1}((i - 3/8) / (N + 1/4))
+      W' = (sum m_i e_(i))^2 / [ (sum m_i^2) * sum (e_i - e_bar)^2 ]
+    Computes Royston's (1983) normalizing transformation for W' ~ N(0, 1).
+    Rejection (p < 0.05) diagnoses significant residual non-Gaussianity, invalidating standard OLS inference.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        res_sorted = np.sort(res)
+        res_centered = res - np.mean(res)
+        ss_res = float(np.sum(res_centered ** 2))
+        if ss_res < 1e-12:
+            return None, None, False
+
+        i_vec = np.arange(1, n + 1, dtype=float)
+        p_ranks = (i_vec - 0.375) / (n + 0.25)
+        m_vec = stats.norm.ppf(p_ranks)
+        ss_m = float(np.sum(m_vec ** 2))
+        if ss_m < 1e-12:
+            return None, None, False
+
+        num = float(np.sum(m_vec * res_sorted)) ** 2
+        w_prime = float(num / (ss_m * ss_res))
+        w_prime = min(1.0, max(0.001, w_prime))
+
+        # Royston's normalizing transformation for W'
+        log_n = np.log(n)
+        nu = np.log(max(1e-9, 1.0 - w_prime))
+        mu = -0.375 + 1.082 * log_n - 0.0886 * (log_n ** 2)
+        sigma = np.exp(-0.485 - 0.048 * log_n)
+
+        z_sf = float((nu - mu) / sigma)
+        p_val = float(stats.norm.sf(z_sf))
+        is_non_normal = bool(p_val < 0.05)
+        return w_prime, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -3814,6 +4156,12 @@ class DevilsAdvocateAgent:
         bartlett_stat: Optional[float] = None
         bartlett_p: Optional[float] = None
         is_bartlett_hetero: bool = False
+        deeks_t: Optional[float] = None
+        deeks_p: Optional[float] = None
+        is_deeks_asym: bool = False
+        mood_z: Optional[float] = None
+        mood_p: Optional[float] = None
+        is_mood_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -3874,6 +4222,8 @@ class DevilsAdvocateAgent:
                 rucker_t, rucker_p, is_rucker_asym = rucker_arcsine_asymmetry_test(tables_2x2)
                 # Macaskill, Walter, & Irwig (2001) Sample-Size Weighted Regression Test for Asymmetry
                 macaskill_t, macaskill_p, is_macaskill_asym = macaskill_regression_asymmetry_test(tables_2x2)
+                # Jon Deeks, Peter Macaskill, & Les Irwig (2005) Diagnostic Odds Ratio (DOR) Asymmetry Regression Test
+                deeks_t, deeks_p, is_deeks_asym = deeks_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -3947,6 +4297,8 @@ class DevilsAdvocateAgent:
             levene_stat, levene_p, is_levene_hetero = levene_homogeneity_test(kw_samples)
             # Maurice Bartlett (1937) Likelihood Ratio Scale Homogeneity Test
             bartlett_stat, bartlett_p, is_bartlett_hetero = bartlett_homogeneity_test(kw_samples)
+            # Alexander M. Mood (1954) Non-Parametric Median-Rank Dispersion Scale Test
+            mood_z, mood_p, is_mood_hetero = mood_dispersion_scale_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -3982,10 +4334,14 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Rücker Arcsine: t={rucker_t:.2f}, p={rucker_p:.3e}]"
         if macaskill_p is not None:
             cmh_note += f" [Macaskill Funnel: t={macaskill_t:.2f}, p={macaskill_p:.3e}]"
+        if deeks_p is not None:
+            cmh_note += f" [Deeks DOR Funnel: t={deeks_t:.2f}, p={deeks_p:.3e}]"
         if levene_p is not None:
             cmh_note += f" [Levene Scale: W={levene_stat:.2f}, p={levene_p:.3e}]"
         if bartlett_p is not None:
             cmh_note += f" [Bartlett Scale: B={bartlett_stat:.2f}, p={bartlett_p:.3e}]"
+        if mood_p is not None:
+            cmh_note += f" [Mood Scale: Z={mood_z:.2f}, p={mood_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -4089,6 +4445,12 @@ class DevilsAdvocateAgent:
             bartlett_stat=bartlett_stat,
             bartlett_p=bartlett_p,
             is_bartlett_heterogeneous=is_bartlett_hetero,
+            deeks_test_t=deeks_t,
+            deeks_test_p=deeks_p,
+            is_deeks_asymmetric=is_deeks_asym,
+            mood_stat_z=mood_z,
+            mood_p_value=mood_p,
+            is_mood_heterogeneous=is_mood_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -4238,6 +4600,8 @@ class DevilsAdvocateAgent:
         hac_se, hac_ratio, is_hac_inf = None, None, False
         aipw_tau, aipw_disc, is_aipw_conf = None, None, False
         leamer_b_min, leamer_b_max, is_leamer_frag = None, None, False
+        dml_tau, dml_disc, is_dml_conf = None, None, False
+        cinelli_k, is_cinelli_frag = None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -4264,6 +4628,10 @@ class DevilsAdvocateAgent:
                     hac_se, hac_ratio, is_hac_inf = newey_west_hac_test(x_mal, z_mal, y_mal)
                     # Robins-Rotnitzky-Zhao (1994) & Imbens (2004) AIPW Doubly Robust Treatment Effect
                     aipw_tau, aipw_disc, is_aipw_conf = aipw_doubly_robust_test(x_mal, z_mal, y_mal)
+                    # Chernozhukov et al. (2018) Double Machine Learning (DML) Neyman-Orthogonalized Treatment Effect
+                    dml_tau, dml_disc, is_dml_conf = double_machine_learning_test(x_mal, z_mal, y_mal)
+                    # Carlos Cinelli & Chad Hazlett (2020) Extreme Confounder Relative Strength Multiplier
+                    cinelli_k, is_cinelli_frag = cinelli_extreme_confounder_test(x_mal, z_mal, y_mal, rv_point)
                 except Exception:
                     pass
 
@@ -4290,6 +4658,8 @@ class DevilsAdvocateAgent:
         hl_str = f", Hosmer-Lemeshow χ²={hl_chi2:.2f} (p={hl_p:.3e})" if hl_p is not None else ""
         hac_str = f", HAC SE ratio={hac_ratio:.2f}" if hac_ratio is not None else ""
         aipw_str = f", AIPW τ={aipw_tau:.3f} (Δ={aipw_disc:.1%})" if aipw_disc is not None else ""
+        dml_str = f", DML τ={dml_tau:.3f} (Δ={dml_disc:.1%})" if dml_disc is not None else ""
+        cinelli_str = f", Cinelli k={cinelli_k:.2f}x" if cinelli_k is not None else ""
         leamer_str = f", Leamer EBA=[{leamer_b_min:.3f}, {leamer_b_max:.3f}]" if leamer_b_min is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
@@ -4300,9 +4670,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{leamer_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{leamer_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{leamer_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{leamer_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -4385,6 +4755,11 @@ class DevilsAdvocateAgent:
             leamer_bound_min=leamer_b_min,
             leamer_bound_max=leamer_b_max,
             is_leamer_fragile=is_leamer_frag,
+            dml_treatment_effect=dml_tau,
+            dml_discrepancy=dml_disc,
+            is_dml_confounded=is_dml_conf,
+            cinelli_k_multiplier=cinelli_k,
+            is_cinelli_fragile=is_cinelli_frag,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -4627,6 +5002,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Maurice Kendall (1938) Tau-b Rank Concordance Discrepancy
         kendall_tau, kendall_disc, is_kendall_distorted = kendall_tau_b_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Stephen M. Goldfeld & Richard E. Quandt (1965) Split-Regime Heteroskedasticity Test
+        gq_f, gq_p, has_gq_hetero = goldfeld_quandt_heteroskedasticity_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: S. S. Shapiro & R. S. Francia (1972) Residual Normality Test
+        sf_w, sf_p, is_sf_non_normal = shapiro_francia_normality_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -4650,9 +5031,11 @@ class DevilsAdvocateAgent:
         bg_str = f", BG_p={bg_p:.3e}" if bg_p is not None else ""
         runs_str = f", Runs_Z={runs_z:.2f} (p={runs_p:.3e})" if runs_z is not None else ""
         kendall_str = f", Δ_Kendall={kendall_disc:.1%}" if kendall_disc is not None else ""
+        gq_str = f", GQ_p={gq_p:.3e}" if gq_p is not None else ""
+        sf_str = f", SF_W={sf_w:.3f} (p={sf_p:.3e})" if sf_w is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
         type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{qdi_str}{dw_str}{bg_str}{runs_str}{hc3_str}{ts_str}{lts_str}{siegel_str}{kendall_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{gq_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{sf_str}{qdi_str}{dw_str}{bg_str}{runs_str}{hc3_str}{ts_str}{lts_str}{siegel_str}{kendall_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -4740,6 +5123,12 @@ class DevilsAdvocateAgent:
             kendall_tau_b=kendall_tau,
             kendall_discrepancy=kendall_disc,
             is_kendall_distorted=is_kendall_distorted,
+            goldfeld_quandt_f=gq_f,
+            goldfeld_quandt_p=gq_p,
+            has_goldfeld_quandt_heteroskedasticity=has_gq_hetero,
+            shapiro_francia_w=sf_w,
+            shapiro_francia_p=sf_p,
+            is_shapiro_francia_non_normal=is_sf_non_normal,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

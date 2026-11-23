@@ -101,6 +101,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.macaskill_test_p is not None
     assert audit.simpsons_audit.bartlett_stat is not None
     assert audit.simpsons_audit.bartlett_p is not None
+    # Verify Deeks DOR funnel asymmetry test and Mood median-rank dispersion test
+    assert audit.simpsons_audit.deeks_test_t is not None
+    assert audit.simpsons_audit.deeks_test_p is not None
+    assert audit.simpsons_audit.mood_stat_z is not None
+    assert audit.simpsons_audit.mood_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -216,6 +221,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.aipw_discrepancy is not None
         assert audit_coffee.confounder_audit.leamer_bound_min is not None
         assert audit_coffee.confounder_audit.leamer_bound_max is not None
+        # Check DML Neyman-orthogonal effect and Cinelli extreme confounder multiplier
+        assert audit_coffee.confounder_audit.dml_treatment_effect is not None
+        assert audit_coffee.confounder_audit.dml_discrepancy is not None
+        assert audit_coffee.confounder_audit.cinelli_k_multiplier is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -309,6 +318,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.runs_test_p is not None
     assert audit.stability_audit.kendall_tau_b is not None
     assert audit.stability_audit.kendall_discrepancy is not None
+    # Check Goldfeld-Quandt split-regime heteroskedasticity and Shapiro-Francia residual normality
+    assert audit.stability_audit.goldfeld_quandt_f is not None
+    assert audit.stability_audit.goldfeld_quandt_p is not None
+    assert audit.stability_audit.shapiro_francia_w is not None
+    assert audit.stability_audit.shapiro_francia_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -564,6 +578,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_kendall = narrator.answer_query("Explain Maurice Kendall Tau-b rank concordance discrepancy", findings)
     assert "Kendall" in ans_kendall or "Tau" in ans_kendall or "Concordance" in ans_kendall or "Rank" in ans_kendall
+
+    ans_deeks = narrator.answer_query("Explain Jon Deeks diagnostic odds ratio asymmetry test", findings)
+    assert "Deeks" in ans_deeks or "DOR" in ans_deeks or "Funnel" in ans_deeks or "Diagnostic" in ans_deeks
+
+    ans_mood = narrator.answer_query("Explain Alexander Mood median-rank dispersion scale test", findings)
+    assert "Mood" in ans_mood or "Dispersion" in ans_mood or "Rank" in ans_mood or "Scale" in ans_mood
+
+    ans_dml = narrator.answer_query("Explain Chernozhukov Double Machine Learning DML causal effect", findings)
+    assert "DML" in ans_dml or "Double Machine Learning" in ans_dml or "Chernozhukov" in ans_dml or "Orthogonal" in ans_dml
+
+    ans_cinelli = narrator.answer_query("Explain Carlos Cinelli extreme confounder multiplier benchmark", findings)
+    assert "Cinelli" in ans_cinelli or "Multiplier" in ans_cinelli or "Confounder" in ans_cinelli
+
+    ans_gq = narrator.answer_query("Explain Stephen Goldfeld and Richard Quandt split-regime heteroskedasticity test", findings)
+    assert "Goldfeld" in ans_gq or "Quandt" in ans_gq or "Heteroskedasticity" in ans_gq or "Regime" in ans_gq
+
+    ans_sf = narrator.answer_query("Explain Shapiro-Francia test for regression residual Gaussian normality", findings)
+    assert "Shapiro" in ans_sf or "Francia" in ans_sf or "Normality" in ans_sf or "Gaussian" in ans_sf
 
 
 def test_end_to_end_pipeline(tmp_path):

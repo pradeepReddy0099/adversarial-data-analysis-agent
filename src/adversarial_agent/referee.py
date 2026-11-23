@@ -129,6 +129,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Macaskill Funnel Asymmetry Test: t = {simpsons.macaskill_test_t:.2f} (p = {simpsons.macaskill_test_p:.3e}) {'[SMALL-STRATUM SELECTION BIAS / ASYMMETRY]' if simpsons.is_macaskill_asymmetric else '[SYMMETRIC STRATA PRECISION]'}")
             if simpsons.bartlett_p is not None:
                 rationale["key_evidence"].append(f"Bartlett Scale Homogeneity: B = {simpsons.bartlett_stat:.2f} (p = {simpsons.bartlett_p:.3e}) {'[CONDITIONAL VARIANCE HETEROGENEITY]' if simpsons.is_bartlett_heterogeneous else '[HOMOSCEDASTIC STRATA VARIANCE]'}")
+            if simpsons.deeks_test_p is not None:
+                rationale["key_evidence"].append(f"Deeks DOR Funnel Asymmetry Test: t = {simpsons.deeks_test_t:.2f} (p = {simpsons.deeks_test_p:.3e}) {'[DIAGNOSTIC ODDS RATIO FUNNEL ASYMMETRY]' if simpsons.is_deeks_asymmetric else '[SYMMETRIC DOR PRECISION]'}")
+            if simpsons.mood_p_value is not None:
+                rationale["key_evidence"].append(f"Mood Median-Rank Scale Dispersion: Z = {simpsons.mood_stat_z:.2f} (p = {simpsons.mood_p_value:.3e}) {'[NON-PARAMETRIC SCALE HETEROGENEITY]' if simpsons.is_mood_heterogeneous else '[HOMOSCEDASTIC MEDIAN SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -210,6 +214,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"AIPW Doubly Robust Treatment Effect: τ_AIPW = {confounder.aipw_treatment_effect:.4f} (Discrepancy Δ_AIPW = {confounder.aipw_discrepancy:.1%}) {'[TREATMENT SELECTION CONVOLUTION / CONFOUNDING]' if confounder.is_aipw_confounded else '[ROBUST DOUBLY IDENTIFIED]'}")
             if confounder.leamer_bound_min is not None:
                 rationale["key_evidence"].append(f"Leamer Extreme Bounds Analysis: β ∈ [{confounder.leamer_bound_min:.4f}, {confounder.leamer_bound_max:.4f}] {'[LEAMER FRAGILE - 0 IN EBA BOUNDS]' if confounder.is_leamer_fragile else '[LEAMER ROBUST - BOUNDS EXCLUDE 0]'}")
+            if confounder.dml_discrepancy is not None:
+                rationale["key_evidence"].append(f"Double Machine Learning (DML) Orthogonal Effect: β_DML = {confounder.dml_treatment_effect:.4f} (Discrepancy Δ_DML = {confounder.dml_discrepancy:.1%}) {'[NEYMAN ORTHOGONAL CONFOUNDING BIAS]' if confounder.is_dml_confounded else '[ROBUST DML IDENTIFIED]'}")
+            if confounder.cinelli_k_multiplier is not None:
+                rationale["key_evidence"].append(f"Cinelli-Hazlett Extreme Confounder Multiplier: k = {confounder.cinelli_k_multiplier:.2f}x {'[FRAGILE TO WEAK UNOBSERVED CONFOUNDING]' if confounder.is_cinelli_fragile else '[ROBUST - CONFOUNDER MUST EXCEED OBSERVED]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -292,6 +300,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Wald-Wolfowitz Runs Test for Residual Independence: Z = {stability.runs_test_z:.2f} (p = {stability.runs_test_p:.3e}) {'[NON-RANDOM RESIDUAL CLUSTERING / DRIFT]' if stability.has_runs_nonrandomness else '[INDEPENDENT RANDOM RESIDUALS]'}")
             if stability.kendall_discrepancy is not None:
                 rationale["key_evidence"].append(f"Kendall Tau-b Rank Concordance: τ_b = {stability.kendall_tau_b:.4f} (Discrepancy Δ_Kendall = {stability.kendall_discrepancy:.1%}) {'[GROSS LEVERAGE DISTORTION / RANK CONFLICT]' if stability.is_kendall_distorted else '[ROBUST RANK CONCORDANCE]'}")
+            if stability.goldfeld_quandt_p is not None:
+                rationale["key_evidence"].append(f"Goldfeld-Quandt Split Heteroskedasticity: F = {stability.goldfeld_quandt_f:.2f} (p = {stability.goldfeld_quandt_p:.3e}) {'[REGIME-SHIFT VARIANCE HETEROSKEDASTICITY]' if stability.has_goldfeld_quandt_heteroskedasticity else '[HOMOSCEDASTIC SPLIT REGIMES]'}")
+            if stability.shapiro_francia_p is not None:
+                rationale["key_evidence"].append(f"Shapiro-Francia Residual Normality: W' = {stability.shapiro_francia_w:.4f} (p = {stability.shapiro_francia_p:.3e}) {'[RESIDUAL GAUSSIAN VIOLATION - NON-NORMAL]' if stability.is_shapiro_francia_non_normal else '[NORMAL GAUSSIAN RESIDUALS]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -451,6 +463,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Wald-Wolfowitz Runs Test: Z = {stability.runs_test_z:.2f} (p = {stability.runs_test_p:.3e})")
             if stability.kendall_discrepancy is not None:
                 rationale["key_evidence"].append(f"Kendall Tau-b Rank Concordance: τ_b = {stability.kendall_tau_b:.4f} (Δ_Kendall = {stability.kendall_discrepancy:.1%})")
+            if simpsons.deeks_test_p is not None:
+                rationale["key_evidence"].append(f"Deeks DOR Funnel Asymmetry Test: t = {simpsons.deeks_test_t:.2f} (p = {simpsons.deeks_test_p:.3e})")
+            if simpsons.mood_p_value is not None:
+                rationale["key_evidence"].append(f"Mood Scale Homogeneity: Z = {simpsons.mood_stat_z:.2f} (p = {simpsons.mood_p_value:.3e})")
+            if confounder.dml_discrepancy is not None:
+                rationale["key_evidence"].append(f"Double Machine Learning (DML) Effect: β_DML = {confounder.dml_treatment_effect:.4f} (Δ_DML = {confounder.dml_discrepancy:.1%})")
+            if confounder.cinelli_k_multiplier is not None:
+                rationale["key_evidence"].append(f"Cinelli-Hazlett Multiplier: k = {confounder.cinelli_k_multiplier:.2f}x")
+            if stability.goldfeld_quandt_p is not None:
+                rationale["key_evidence"].append(f"Goldfeld-Quandt Heteroskedasticity: F = {stability.goldfeld_quandt_f:.2f} (p = {stability.goldfeld_quandt_p:.3e})")
+            if stability.shapiro_francia_p is not None:
+                rationale["key_evidence"].append(f"Shapiro-Francia Residual Normality: W' = {stability.shapiro_francia_w:.4f} (p = {stability.shapiro_francia_p:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
