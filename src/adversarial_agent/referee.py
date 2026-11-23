@@ -149,6 +149,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"LFK Funnel Asymmetry Index: LFK = {simpsons.lfk_index:.2f} {'[MAJOR REPORTING ASYMMETRY / DOI PLOT DISTORTION]' if simpsons.is_lfk_asymmetric else '[SYMMETRIC DOI PLOT PRECISION]'}")
             if simpsons.conover_p_value is not None:
                 rationale["key_evidence"].append(f"Conover Squared Ranks Scale Test: Z = {simpsons.conover_stat_z:.2f} (p = {simpsons.conover_p_value:.3e}) {'[NON-PARAMETRIC SCALE SPREAD HETEROGENEITY]' if simpsons.is_conover_heterogeneous else '[EQUIDISPERSED SQUARED RANKS]'}")
+            if simpsons.pet_test_p is not None:
+                rationale["key_evidence"].append(f"PET-PEESE Meta-Regression: t_PET = {simpsons.pet_test_t:.2f} (p = {simpsons.pet_test_p:.3e}), t_PEESE = {simpsons.peese_test_t:.2f} {'[SMALL-STRATUM SELECTION ASYMMETRY]' if simpsons.is_pet_asymmetric else '[GENUINE INFINITE-PRECISION LIMIT]'}")
+            if simpsons.sukhatme_p_value is not None:
+                rationale["key_evidence"].append(f"Sukhatme Rank-Order Scale Test: Z = {simpsons.sukhatme_stat_z:.2f} (p = {simpsons.sukhatme_p_value:.3e}) {'[NON-PARAMETRIC SCALE SPREAD DIVERGENCE]' if simpsons.is_sukhatme_heterogeneous else '[HOMOGENEOUS STRATUM SCALE DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -250,6 +254,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Hansen-Bowers Omnibus Balance: χ² = {confounder.hansen_bowers_chi2:.2f} (p = {confounder.hansen_bowers_p:.3e}) {'[MULTIVARIATE JOINT COVARIATE IMBALANCE]' if confounder.is_hansen_bowers_imbalanced else '[OMNIBUS COVARIATE BALANCE CONFIRMED]'}")
             if confounder.caliper_discordance_rate is not None:
                 rationale["key_evidence"].append(f"Rosenbaum Caliper Discordance: {confounder.caliper_discordance_rate:.1%} (Caliper = {confounder.caliper_threshold:.3f}) {'[SEVERE OFF-SUPPORT EXTRAPOLATION RISK]' if confounder.is_caliper_discordant else '[SATISFACTORY COMMON SUPPORT MATCHING]'}")
+            if confounder.gps_balance_p is not None:
+                rationale["key_evidence"].append(f"Imai-van Dyk GPS Covariate Balance: r_GPS = {confounder.gps_balance_r:.3f} (t = {confounder.gps_balance_t:.2f}, p = {confounder.gps_balance_p:.3e}) {'[RESIDUAL COVARIATE DEPENDENCE / PROPENSITY IMBALANCE]' if confounder.is_gps_imbalanced else '[GENERALIZED PROPENSITY BALANCE CONFIRMED]'}")
+            if confounder.austin_ks_p_value is not None:
+                rationale["key_evidence"].append(f"Austin Kolmogorov-Smirnov Distributional Balance: D_KS = {confounder.austin_ks_stat:.3f} (p = {confounder.austin_ks_p_value:.3e}) {'[HIGHER-MOMENT COVARIATE IMBALANCE]' if confounder.is_austin_ks_imbalanced else '[SATISFACTORY DISTRIBUTIONAL OVERLAP]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -348,6 +356,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Lilliefors Composite Normality: D = {stability.lilliefors_stat:.3f} (p = {stability.lilliefors_p_value:.3e}) {'[COMPOSITE EDF RESIDUAL NON-NORMALITY]' if stability.is_lilliefors_non_normal else '[GAUSSIAN EDF RESIDUAL FIT]'}")
             if stability.park_p_value is not None:
                 rationale["key_evidence"].append(f"Park Log-Linear Heteroskedasticity: t = {stability.park_t_stat:.2f} (p = {stability.park_p_value:.3e}) {'[EXPONENTIAL REGRESSOR-DEPENDENT SPREAD]' if stability.has_park_heteroskedasticity else '[HOMOSCEDASTIC LOG-RESIDUAL VARIANCE]'}")
+            if stability.cramer_von_mises_p is not None:
+                rationale["key_evidence"].append(f"Cramér-von Mises EDF Normality: W² = {stability.cramer_von_mises_w2:.3f} (p = {stability.cramer_von_mises_p:.3e}) {'[COMPOSITE EDF RESIDUAL NON-NORMALITY]' if stability.is_cvm_non_normal else '[GAUSSIAN EDF RESIDUAL FIT]'}")
+            if stability.cook_weisberg_p is not None:
+                rationale["key_evidence"].append(f"Cook-Weisberg Score Heteroskedasticity: S = {stability.cook_weisberg_score:.2f} (p = {stability.cook_weisberg_p:.3e}) {'[FITTED-VALUE VARIANCE EXPANSION]' if stability.has_cook_weisberg_heteroskedasticity else '[HOMOSCEDASTIC FITTED RESIDUALS]'}")
+            if stability.kuiper_p_value is not None:
+                rationale["key_evidence"].append(f"Kuiper Invariant EDF Normality: V = {stability.kuiper_v_stat:.3f} (V* = {stability.kuiper_v_star:.3f}, p = {stability.kuiper_p_value:.3e}) {'[CYCLIC/TAIL EDF RESIDUAL NON-NORMALITY]' if stability.is_kuiper_non_normal else '[INVARIANT EDF GAUSSIAN RESIDUALS]'}")
+            if stability.max_covratio_dev is not None:
+                rationale["key_evidence"].append(f"Belsley COVRATIO Covariance Influence: Max |COVRATIO - 1| = {stability.max_covratio_dev:.3f} ({stability.covratio_outlier_count} influential) {'[COVARIANCE PRECISION DEGRADATION]' if stability.is_covratio_influential else '[STABLE COVARIANCE DETERMINANT]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -567,6 +583,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Cramér-von Mises Normality: W² = {stability.cramer_von_mises_w2:.3f} (p = {stability.cramer_von_mises_p:.3e})")
             if stability.cook_weisberg_p is not None:
                 rationale["key_evidence"].append(f"Cook-Weisberg Heteroskedasticity: S = {stability.cook_weisberg_score:.2f} (p = {stability.cook_weisberg_p:.3e})")
+            if simpsons.pet_test_p is not None:
+                rationale["key_evidence"].append(f"PET Asymmetry Test: t = {simpsons.pet_test_t:.2f} (p = {simpsons.pet_test_p:.3e})")
+            if simpsons.sukhatme_p_value is not None:
+                rationale["key_evidence"].append(f"Sukhatme Scale Test: Z = {simpsons.sukhatme_stat_z:.2f} (p = {simpsons.sukhatme_p_value:.3e})")
+            if confounder.gps_balance_p is not None:
+                rationale["key_evidence"].append(f"Imai-van Dyk GPS Balance: r_GPS = {confounder.gps_balance_r:.3f} (p = {confounder.gps_balance_p:.3e})")
+            if confounder.austin_ks_p_value is not None:
+                rationale["key_evidence"].append(f"Austin KS Balance: D_KS = {confounder.austin_ks_stat:.3f} (p = {confounder.austin_ks_p_value:.3e})")
+            if stability.kuiper_p_value is not None:
+                rationale["key_evidence"].append(f"Kuiper Invariant Normality: V* = {stability.kuiper_v_star:.3f} (p = {stability.kuiper_p_value:.3e})")
+            if stability.max_covratio_dev is not None:
+                rationale["key_evidence"].append(f"COVRATIO Influence: Max Dev = {stability.max_covratio_dev:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -135,6 +135,14 @@ class SimpsonsParadoxAudit:
     conover_stat_z: Optional[float] = None
     conover_p_value: Optional[float] = None
     is_conover_heterogeneous: bool = False
+    pet_test_t: Optional[float] = None
+    pet_test_p: Optional[float] = None
+    peese_test_t: Optional[float] = None
+    peese_test_p: Optional[float] = None
+    is_pet_asymmetric: bool = False
+    sukhatme_stat_z: Optional[float] = None
+    sukhatme_p_value: Optional[float] = None
+    is_sukhatme_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -249,6 +257,13 @@ class ConfounderAudit:
     caliper_discordance_rate: Optional[float] = None
     caliper_threshold: Optional[float] = None
     is_caliper_discordant: bool = False
+    gps_balance_r: Optional[float] = None
+    gps_balance_t: Optional[float] = None
+    gps_balance_p: Optional[float] = None
+    is_gps_imbalanced: bool = False
+    austin_ks_stat: Optional[float] = None
+    austin_ks_p_value: Optional[float] = None
+    is_austin_ks_imbalanced: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -371,6 +386,13 @@ class StabilityAudit:
     cook_weisberg_score: Optional[float] = None
     cook_weisberg_p: Optional[float] = None
     has_cook_weisberg_heteroskedasticity: bool = False
+    kuiper_v_stat: Optional[float] = None
+    kuiper_v_star: Optional[float] = None
+    kuiper_p_value: Optional[float] = None
+    is_kuiper_non_normal: bool = False
+    max_covratio_dev: Optional[float] = None
+    covratio_outlier_count: int = 0
+    is_covratio_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5047,6 +5069,285 @@ def cook_weisberg_heteroskedasticity_test(
         return None, None, False
 
 
+def pet_peese_meta_regression_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Stanley & Doucouliagos (2012, 2014) PET-PEESE Meta-Regression Falsification Test.
+
+    Evaluates whether genuine empirical effects survive when standard error approaches zero (infinite precision).
+    Computes stratum log-odds ratios and standard errors via Haldane-Anscombe continuity corrections:
+      theta_k = ln((a_k + 0.5)(d_k + 0.5) / ((b_k + 0.5)(c_k + 0.5)))
+      v_k = 1 / (a_k + 0.5) + 1 / (b_k + 0.5) + 1 / (c_k + 0.5) + 1 / (d_k + 0.5),  SE_k = sqrt(v_k).
+    1. Precision-Effect Test (PET):
+       WLS regression theta_k = alpha_0 + beta_1 * SE_k + e_k with weights w_k = 1 / v_k.
+       Transformed: theta_k / SE_k = alpha_0 * (1 / SE_k) + beta_1 + e_k^*.
+       t_PET = beta_1_hat / SE(beta_1_hat) tests asymmetry H_0: beta_1 = 0 (df = K - 2).
+    2. Precision-Effect Estimate with Standard Error (PEESE):
+       WLS regression theta_k = alpha_0 + beta_1 * SE_k^2 + e_k.
+       Transformed: theta_k / SE_k = alpha_0 * (1 / SE_k) + beta_1 * SE_k + e_k^*.
+       alpha_0_hat is the bias-corrected limit estimate as precision approaches infinity.
+    Rejection (pet_p < 0.05 or |t_PET| > 2.0) flags small-stratum publication/reporting bias.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, None, None, False
+    try:
+        theta_list = []
+        se_list = []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+            else:
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            a += 0.5
+            b += 0.5
+            c += 0.5
+            d += 0.5
+            lor = float(np.log((a * d) / (b * c)))
+            v = float(1.0 / a + 1.0 / b + 1.0 / c + 1.0 / d)
+            theta_list.append(lor)
+            se_list.append(np.sqrt(v))
+
+        y = np.array(theta_list, dtype=float)
+        se = np.array(se_list, dtype=float)
+        K = len(y)
+        if K < 3 or np.any(se < 1e-9):
+            return None, None, None, None, False
+
+        # PET: y / se = alpha_0 * (1 / se) + beta_1
+        y_trans = y / se
+        X_pet = np.column_stack([1.0 / se, np.ones(K)])
+        beta_pet, _, _, _ = np.linalg.lstsq(X_pet, y_trans, rcond=None)
+        residuals_pet = y_trans - X_pet @ beta_pet
+        mse_pet = float(np.sum(residuals_pet ** 2) / max(1, K - 2))
+        cov_pet = mse_pet * np.linalg.pinv(X_pet.T @ X_pet)
+        se_beta1_pet = float(np.sqrt(max(1e-12, cov_pet[1, 1])))
+        t_pet = float(beta_pet[1] / se_beta1_pet)
+        p_pet = float(2.0 * stats.t.sf(abs(t_pet), df=K - 2))
+
+        # PEESE: y / se = alpha_0 * (1 / se) + beta_1 * se
+        X_peese = np.column_stack([1.0 / se, se])
+        beta_peese, _, _, _ = np.linalg.lstsq(X_peese, y_trans, rcond=None)
+        residuals_peese = y_trans - X_peese @ beta_peese
+        mse_peese = float(np.sum(residuals_peese ** 2) / max(1, K - 2))
+        cov_peese = mse_peese * np.linalg.pinv(X_peese.T @ X_peese)
+        se_alpha0_peese = float(np.sqrt(max(1e-12, cov_peese[0, 0])))
+        t_peese = float(beta_peese[0] / se_alpha0_peese)
+        p_peese = float(2.0 * stats.t.sf(abs(t_peese), df=K - 2))
+
+        is_asym = bool(p_pet < 0.05 or abs(t_pet) > 2.0)
+        return t_pet, p_pet, t_peese, p_peese, is_asym
+    except Exception:
+        return None, None, None, None, False
+
+
+def sukhatme_scale_dispersion_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates B. V. Sukhatme's (1957, 1958) Non-Parametric Rank-Order Scale Dispersion Test.
+
+    Evaluates scale/variance equality between two independent conditioning strata with differing medians:
+      Let u_i = X_i - median(X), v_j = Y_j - median(Y).
+      Sukhatme's test statistic T counts co-occurring quadrants:
+        T = sum_{i=1}^m sum_{j=1}^n [I(u_i > 0 and v_j > 0) + I(u_i < 0 and v_j < 0)].
+      Under H_0: sigma_X = sigma_Y:
+        E[T] = (m * n) / 4,  Var(T) = [m * n * (m + n + 1)] / 48.
+        Z_Sukh = (T - E[T]) / sqrt(Var(T)) ~ N(0, 1).
+    Rejection (|Z_Sukh| >= 1.96, p < 0.05) detects significant scale dispersion heterogeneity between cohorts.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        m = len(s1)
+        n = len(s2)
+
+        u = s1 - np.median(s1)
+        v = s2 - np.median(s2)
+
+        u_pos = float(np.sum(u > 0))
+        u_neg = float(np.sum(u < 0))
+        v_pos = float(np.sum(v > 0))
+        v_neg = float(np.sum(v < 0))
+
+        t_stat = float(u_pos * v_pos + u_neg * v_neg)
+        e_t = float(m * n / 4.0)
+        var_t = float((m * n * (m + n + 1.0)) / 48.0)
+        if var_t < 1e-12:
+            return None, None, False
+
+        z_stat = float((t_stat - e_t) / np.sqrt(var_t))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def imai_van_dyk_gps_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Kosuke Imai & David A. van Dyk's (2004) Generalized Propensity Score Covariate Balance Test.
+
+    Evaluates whether conditioning on continuous generalized propensity scores eliminates residual covariate dependence.
+    Fits quadratic GPS model e_hat(Z) = E[X | Z] = alpha_0 + alpha_1 * Z + alpha_2 * Z^2.
+    Evaluates residual exposure X_tilde = X - e_hat(Z).
+    Calculates Pearson correlation r_GPS = Corr(X_tilde, Z) and t-statistic:
+      t_GPS = r_GPS * sqrt(n - 2) / sqrt(1 - r_GPS^2) ~ t(n - 2).
+    A significant residual correlation (p < 0.05 and |r_GPS| > 0.10) indicates that propensity adjustment
+    fails to balance the candidate confounder.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, None, False
+    try:
+        z_norm = (z - np.mean(z)) / max(1e-9, float(np.std(z)))
+        Z_mat = np.column_stack([np.ones(n), z_norm, z_norm ** 2])
+        beta, _, _, _ = np.linalg.lstsq(Z_mat, x, rcond=None)
+        x_tilde = x - Z_mat @ beta
+
+        if np.std(x_tilde) < 1e-9:
+            return 0.0, 0.0, 1.0, False
+
+        r_gps, _ = stats.pearsonr(x_tilde, z)
+        r_gps = float(r_gps)
+        if abs(r_gps) >= 0.9999:
+            return r_gps, 99.0, 1e-15, True
+
+        t_gps = float(r_gps * np.sqrt(n - 2) / np.sqrt(max(1e-12, 1.0 - r_gps ** 2)))
+        p_gps = float(2.0 * stats.t.sf(abs(t_gps), df=n - 2))
+        is_imbal = bool(p_gps < 0.05 and abs(r_gps) > 0.10)
+        return r_gps, t_gps, p_gps, is_imbal
+    except Exception:
+        return None, None, None, False
+
+
+def austin_ks_covariate_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Peter C. Austin's (2008, 2011) Kolmogorov-Smirnov Distributional Covariate Balance Test.
+
+    Evaluates complete distributional balance of candidate confounder Z across exposure cohorts.
+    Dichotomizes exposure X at its median into treated (D = 1) and control (D = 0) cohorts.
+    Computes two-sample Kolmogorov-Smirnov statistic D_KS = sup_z |F_1(z) - F_0(z)|.
+    Rejection (D_KS > 0.10 and p < 0.05) certifies distributional imbalance across higher-order moments.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        z1 = z[treated]
+        z0 = z[~treated]
+        if len(z1) < 6 or len(z0) < 6:
+            return None, None, False
+
+        res = stats.ks_2samp(z1, z0)
+        ks_stat = float(res.statistic)
+        ks_p = float(res.pvalue)
+        is_imbal = bool(ks_stat > 0.10 and ks_p < 0.05)
+        return ks_stat, ks_p, is_imbal
+    except Exception:
+        return None, None, False
+
+
+def kuiper_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Nicolaas H. Kuiper's (1960) Invariant EDF Residual Normality Test.
+
+    Evaluates supremum empirical distribution function discrepancies in both directions:
+      D^+ = max_{1 <= i <= n} (i / n - Phi(z_(i)))
+      D^- = max_{1 <= i <= n} (Phi(z_(i)) - (i - 1) / n)
+      V = D^+ + D^-.
+    Applies Stephens' (1970) finite-sample modified statistic:
+      V^* = V * (sqrt(n) + 0.155 + 0.24 / sqrt(n)).
+    Critical value at alpha = 0.05 is 1.747.
+    Rejection (V^* > 1.747, p < 0.05) detects empirical residual departure from Gaussianity with equal
+    sensitivity in both tails and the median.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        s_e = float(np.std(res, ddof=1))
+        if s_e < 1e-12:
+            return None, None, None, False
+
+        z_sorted = np.sort((res - np.mean(res)) / s_e)
+        i_vec = np.arange(1, n + 1, dtype=float)
+        cdf_vals = stats.norm.cdf(z_sorted)
+
+        d_plus = float(np.max(i_vec / n - cdf_vals))
+        d_minus = float(np.max(cdf_vals - (i_vec - 1.0) / n))
+        v_stat = float(d_plus + d_minus)
+        v_star = float(v_stat * (np.sqrt(n) + 0.155 + 0.24 / np.sqrt(n)))
+
+        # Stephens (1970) approximation formula for Kuiper p-value
+        k_terms = np.arange(1, 11, dtype=float)
+        p_val = float(2.0 * np.sum((4.0 * (k_terms ** 2) * (v_star ** 2) - 1.0) * np.exp(-2.0 * (k_terms ** 2) * (v_star ** 2))))
+        p_val = min(1.0, max(1e-15, p_val))
+        is_non_normal = bool(v_star > 1.747 or p_val < 0.05)
+        return v_stat, v_star, p_val, is_non_normal
+    except Exception:
+        return None, None, None, False
+
+
+def covratio_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates David A. Belsley, Edwin Kuh, & Roy E. Welsch's (1980) COVRATIO Covariance Influence Diagnostic.
+
+    Evaluates observation influence on the determinant of the estimated parameter covariance matrix:
+      COVRATIO_i = (1 / (1 - h_ii)) * [(n - p - e_i^{*2}) / (n - p - 1)]^p
+    where h_ii is leverage and e_i^* is internally studentized residual.
+    Cutoff threshold: |COVRATIO_i - 1| > 3 * p / n.
+    Values deviating significantly identify observations exerting disproportionate leverage on estimator precision.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 2 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        mse = float(np.sum(res ** 2) / (n - p))
+        if mse < 1e-12:
+            return 0.0, 0, False
+
+        # Internally studentized residuals squared
+        e_star_sq = (res ** 2) / (mse * (1.0 - h_diag))
+        e_star_sq = np.clip(e_star_sq, 0.0, float(n - p - 1.01))
+
+        # COVRATIO
+        ratio_term = (n - p - e_star_sq) / max(1e-6, float(n - p - 1.0))
+        covratio = (1.0 / (1.0 - h_diag)) * (ratio_term ** p)
+
+        threshold = 3.0 * p / n
+        deviations = np.abs(covratio - 1.0)
+        max_dev = float(np.max(deviations))
+        outlier_count = int(np.sum(deviations > threshold))
+        is_influential = bool(outlier_count > 0 and max_dev > threshold)
+        return max_dev, outlier_count, is_influential
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -5418,10 +5719,13 @@ class DevilsAdvocateAgent:
                 sterne_t, sterne_p, is_sterne_asym = sterne_funnel_asymmetry_test(tables_2x2)
                 # Luis Furuya-Kanamori & Suhail A. R. Doi (2018) LFK Index of Funnel Plot Asymmetry
                 lfk_val, is_lfk_asym = lfk_index_asymmetry_test(tables_2x2)
+                # Stanley & Doucouliagos (2012, 2014) PET-PEESE Meta-Regression Falsification Test
+                pet_t, pet_p, peese_t, peese_p, is_pet_asym = pet_peese_meta_regression_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
             bd_stat, bd_p = None, None
+            pet_t, pet_p, peese_t, peese_p, is_pet_asym = None, None, None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -5501,6 +5805,8 @@ class DevilsAdvocateAgent:
             klotz_w, klotz_p, is_klotz_hetero = klotz_normal_scores_scale_test(kw_samples)
             # W. J. Conover & Ronald L. Iman (1981) Squared Ranks Scale Dispersion Test
             conover_stat, conover_p, is_conover_hetero = conover_squared_ranks_scale_test(kw_samples)
+            # B. V. Sukhatme (1957, 1958) Non-Parametric Rank-Order Scale Dispersion Test
+            sukhatme_z, sukhatme_p, is_sukhatme_hetero = sukhatme_scale_dispersion_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -5560,6 +5866,12 @@ class DevilsAdvocateAgent:
             cmh_note += f" [LFK Index: {lfk_val:.2f}{' (Asym)' if is_lfk_asym else ''}]"
         if conover_p is not None:
             cmh_note += f" [Conover Scale: Z={conover_stat:.2f}, p={conover_p:.3e}]"
+        if pet_p is not None:
+            cmh_note += f" [PET Asymmetry: t={pet_t:.2f}, p={pet_p:.3e}]"
+        if peese_p is not None:
+            cmh_note += f" [PEESE Limit: t={peese_t:.2f}, p={peese_p:.3e}]"
+        if sukhatme_p is not None:
+            cmh_note += f" [Sukhatme Scale: Z={sukhatme_z:.2f}, p={sukhatme_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -5692,6 +6004,14 @@ class DevilsAdvocateAgent:
             conover_stat_z=conover_stat,
             conover_p_value=conover_p,
             is_conover_heterogeneous=is_conover_hetero,
+            pet_test_t=pet_t,
+            pet_test_p=pet_p,
+            peese_test_t=peese_t,
+            peese_test_p=peese_p,
+            is_pet_asymmetric=is_pet_asym,
+            sukhatme_stat_z=sukhatme_z,
+            sukhatme_p_value=sukhatme_p,
+            is_sukhatme_heterogeneous=is_sukhatme_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -5851,6 +6171,8 @@ class DevilsAdvocateAgent:
         stuart_disc, is_stuart_disc = None, False
         hb_chi2, hb_p, is_hb_imbal = None, None, False
         caliper_rate, caliper_rad, is_caliper_disc = None, None, False
+        gps_r, gps_t, gps_p, is_gps_imbal = None, None, None, False
+        austin_ks_d, austin_ks_p, is_austin_ks_imbal = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -5897,6 +6219,10 @@ class DevilsAdvocateAgent:
                     hb_chi2, hb_p, is_hb_imbal = hansen_bowers_balance_test(x_mal, z_mal)
                     # Paul R. Rosenbaum & Donald B. Rubin (1985) Caliper Discordance Metric
                     caliper_rate, caliper_rad, is_caliper_disc = rosenbaum_rubin_caliper_discordance_test(x_mal, z_mal)
+                    # Kosuke Imai & David A. van Dyk (2004) Generalized Propensity Score Balance Test
+                    gps_r, gps_t, gps_p, is_gps_imbal = imai_van_dyk_gps_balance_test(x_mal, z_mal)
+                    # Peter C. Austin (2008, 2011) Kolmogorov-Smirnov Distributional Covariate Balance Test
+                    austin_ks_d, austin_ks_p, is_austin_ks_imbal = austin_ks_covariate_balance_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -6048,6 +6374,13 @@ class DevilsAdvocateAgent:
             caliper_discordance_rate=caliper_rate,
             caliper_threshold=caliper_rad,
             is_caliper_discordant=is_caliper_disc,
+            gps_balance_r=gps_r,
+            gps_balance_t=gps_t,
+            gps_balance_p=gps_p,
+            is_gps_imbalanced=is_gps_imbal,
+            austin_ks_stat=austin_ks_d,
+            austin_ks_p_value=austin_ks_p,
+            is_austin_ks_imbalanced=is_austin_ks_imbal,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -6320,6 +6653,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: R. Dennis Cook & Sanford Weisberg (1983) Fitted-Value Heteroskedasticity Score Test
         cw_score, cw_p, has_cw_hetero = cook_weisberg_heteroskedasticity_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Nicolaas H. Kuiper (1960) Invariant EDF Residual Normality Test
+        kuiper_v, kuiper_v_star, kuiper_p, is_kuiper_non_normal = kuiper_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Belsley, Kuh, & Welsch (1980) COVRATIO Covariance Determinant Influence Diagnostic
+        covratio_max_dev, covratio_cnt, is_covratio_infl = covratio_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -6467,6 +6806,13 @@ class DevilsAdvocateAgent:
             cook_weisberg_score=cw_score,
             cook_weisberg_p=cw_p,
             has_cook_weisberg_heteroskedasticity=has_cw_hetero,
+            kuiper_v_stat=kuiper_v,
+            kuiper_v_star=kuiper_v_star,
+            kuiper_p_value=kuiper_p,
+            is_kuiper_non_normal=is_kuiper_non_normal,
+            max_covratio_dev=covratio_max_dev,
+            covratio_outlier_count=covratio_cnt,
+            is_covratio_influential=is_covratio_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

@@ -125,6 +125,13 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.lfk_index is not None
     assert audit.simpsons_audit.conover_stat_z is not None
     assert audit.simpsons_audit.conover_p_value is not None
+    # Verify Stanley-Doucouliagos PET-PEESE meta-regression and Sukhatme rank-order scale dispersion
+    assert audit.simpsons_audit.pet_test_t is not None
+    assert audit.simpsons_audit.pet_test_p is not None
+    assert audit.simpsons_audit.peese_test_t is not None
+    assert audit.simpsons_audit.peese_test_p is not None
+    assert audit.simpsons_audit.sukhatme_stat_z is not None
+    assert audit.simpsons_audit.sukhatme_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -260,6 +267,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.hansen_bowers_chi2 is not None
         assert audit_coffee.confounder_audit.hansen_bowers_p is not None
         assert audit_coffee.confounder_audit.caliper_discordance_rate is not None
+        # Check Imai-van Dyk GPS balance and Austin KS distributional balance
+        assert audit_coffee.confounder_audit.gps_balance_r is not None
+        assert audit_coffee.confounder_audit.gps_balance_p is not None
+        assert audit_coffee.confounder_audit.austin_ks_stat is not None
+        assert audit_coffee.confounder_audit.austin_ks_p_value is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -378,6 +390,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.cramer_von_mises_p is not None
     assert audit.stability_audit.cook_weisberg_score is not None
     assert audit.stability_audit.cook_weisberg_p is not None
+    # Check Kuiper invariant EDF normality and Belsley COVRATIO covariance influence
+    assert audit.stability_audit.kuiper_v_stat is not None
+    assert audit.stability_audit.kuiper_v_star is not None
+    assert audit.stability_audit.kuiper_p_value is not None
+    assert audit.stability_audit.max_covratio_dev is not None
+    assert audit.stability_audit.max_covratio_dev >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -723,6 +741,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_cw = narrator.answer_query("Explain Cook-Weisberg fitted-value scale heteroskedasticity score test", findings)
     assert "Cook" in ans_cw or "Weisberg" in ans_cw or "Heteroskedasticity" in ans_cw or "Score" in ans_cw
+
+    ans_pet = narrator.answer_query("Explain Stanley and Doucouliagos PET-PEESE meta-regression", findings)
+    assert "PET" in ans_pet or "PEESE" in ans_pet or "Stanley" in ans_pet
+
+    ans_sukh = narrator.answer_query("Explain B. V. Sukhatme rank-order scale dispersion test", findings)
+    assert "Sukhatme" in ans_sukh or "Scale" in ans_sukh or "Dispersion" in ans_sukh
+
+    ans_gps = narrator.answer_query("Explain Kosuke Imai and David van Dyk generalized propensity score balance", findings)
+    assert "Imai" in ans_gps or "GPS" in ans_gps or "Propensity" in ans_gps or "Balance" in ans_gps
+
+    ans_aks = narrator.answer_query("Explain Peter Austin Kolmogorov-Smirnov distributional balance test", findings)
+    assert "Austin" in ans_aks or "KS" in ans_aks or "Kolmogorov" in ans_aks or "Distributional" in ans_aks
+
+    ans_kuiper = narrator.answer_query("Explain Nicolaas Kuiper invariant empirical distribution function residual normality test", findings)
+    assert "Kuiper" in ans_kuiper or "Normality" in ans_kuiper or "EDF" in ans_kuiper
+
+    ans_covr = narrator.answer_query("Explain David Belsley COVRATIO covariance influence diagnostic", findings)
+    assert "COVRATIO" in ans_covr or "Belsley" in ans_covr or "Influence" in ans_covr or "Determinant" in ans_covr
 
 
 def test_end_to_end_pipeline(tmp_path):
