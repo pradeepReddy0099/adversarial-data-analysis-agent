@@ -121,6 +121,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Peters Asymmetry Regression Test: t = {simpsons.peters_test_t:.2f} (p = {simpsons.peters_test_p:.3e}) {'[SPARSE-STRATUM ASYMMETRY / PUBLICATION BIAS]' if simpsons.is_peters_asymmetric else '[SYMMETRIC STRATA]'}")
             if simpsons.kish_design_effect is not None:
                 rationale["key_evidence"].append(f"Kish Stratification Design Effect: D_Kish = {simpsons.kish_design_effect:.2f} (Var Ratio = {simpsons.stratified_variance_ratio:.2f}) {'[STRATIFICATION VARIANCE REDUCTION]' if simpsons.stratified_variance_ratio < 1.0 else '[STRATIFICATION VARIANCE INFLATION]'}")
+            if simpsons.rucker_test_p is not None:
+                rationale["key_evidence"].append(f"Rücker Arcsine Asymmetry Test: t = {simpsons.rucker_test_t:.2f} (p = {simpsons.rucker_test_p:.3e}) {'[SPARSE-STRATUM ARCSINE ASYMMETRY]' if simpsons.is_rucker_asymmetric else '[SYMMETRIC ARCSINE PRECISION]'}")
+            if simpsons.levene_p is not None:
+                rationale["key_evidence"].append(f"Levene Scale Homogeneity: W = {simpsons.levene_stat:.2f} (p = {simpsons.levene_p:.3e}) {'[CONDITIONAL SCALE HETEROGENEITY]' if simpsons.is_levene_heterogeneous else '[HOMOSCEDASTIC STRATA SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -194,6 +198,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Crump Propensity Common Support: Off-Support = {confounder.crump_overlap_ratio:.1%} {'[SEVERE LACK OF COMMON SUPPORT - OVERLAP DEFICIENT]' if confounder.is_crump_overlap_deficient else '[ADEQUATE COVARIATE OVERLAP]'}")
             if confounder.hansen_threshold_p is not None:
                 rationale["key_evidence"].append(f"Hansen Structural Threshold Test: F = {confounder.hansen_threshold_f:.2f} (p = {confounder.hansen_threshold_p:.3e}) {'[STRUCTURAL THRESHOLD REGIME DETECTED]' if confounder.has_hansen_threshold_regime else '[LINEAR CONTINUOUS RESPONSE]'}")
+            if confounder.hosmer_lemeshow_p is not None:
+                rationale["key_evidence"].append(f"Hosmer-Lemeshow Propensity Calibration: χ² = {confounder.hosmer_lemeshow_chi2:.2f} (p = {confounder.hosmer_lemeshow_p:.3e}) {'[PROPENSITY MODEL MISCALIBRATED]' if confounder.is_propensity_miscalibrated else '[WELL-CALIBRATED PROPENSITY]'}")
+            if confounder.hac_se_ratio is not None:
+                rationale["key_evidence"].append(f"Newey-West HAC Variance Ratio: ρ_HAC = {confounder.hac_se_ratio:.2f} (SE = {confounder.newey_west_hac_se:.4f}) {'[AUTOCORRELATION INFLATION - SE UNDERESTIMATED]' if confounder.is_hac_inflated else '[STABLE HAC INFERENCE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -268,6 +276,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"CUSUMSQ Variance Stability: W = {stability.cusumsq_stat:.3f} (crit = {stability.cusumsq_critical_val:.3f}) {'[STRUCTURAL VARIANCE INSTABILITY / SHIFT DETECTED]' if stability.has_cusumsq_instability else '[HOMOSCEDASTIC VARIANCE CONSTANCY]'}")
             if stability.lts_slope_discrepancy is not None:
                 rationale["key_evidence"].append(f"Least Trimmed Squares Robust Slope: β_LTS = {stability.lts_slope:.4f} (Discrepancy Δ_LTS = {stability.lts_slope_discrepancy:.1%}) {'[HIGH-BREAKDOWN LEVERAGE DISTORTION]' if stability.is_lts_outlier_distorted else '[RESISTANT TO OUTLIER MASKING]'}")
+            if stability.siegel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Siegel Repeated Medians Robust Slope: β_Siegel = {stability.siegel_slope:.4f} (Discrepancy Δ_Siegel = {stability.siegel_slope_discrepancy:.1%}) {'[50% BREAKDOWN OUTLIER DISTORTION]' if stability.is_siegel_outlier_distorted else '[RESISTANT TO GROSS OUTLIERS]'}")
+            if stability.breusch_godfrey_p is not None:
+                rationale["key_evidence"].append(f"Breusch-Godfrey Higher-Order Autocorrelation: LM = {stability.breusch_godfrey_lm:.2f} (p = {stability.breusch_godfrey_p:.3e}) {'[HIGHER-ORDER SERIAL CORRELATION DETECTED]' if stability.has_higher_order_autocorrelation else '[INDEPENDENT RESIDUALS]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -403,6 +415,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"CUSUMSQ Variance Constancy: W = {stability.cusumsq_stat:.3f} (crit = {stability.cusumsq_critical_val:.3f})")
             if stability.lts_slope_discrepancy is not None:
                 rationale["key_evidence"].append(f"Least Trimmed Squares Robust Slope: β_LTS = {stability.lts_slope:.4f} (Δ_LTS = {stability.lts_slope_discrepancy:.1%})")
+            if simpsons.rucker_test_p is not None:
+                rationale["key_evidence"].append(f"Rücker Arcsine Asymmetry Test: t = {simpsons.rucker_test_t:.2f} (p = {simpsons.rucker_test_p:.3e})")
+            if simpsons.levene_p is not None:
+                rationale["key_evidence"].append(f"Levene Scale Homogeneity: W = {simpsons.levene_stat:.2f} (p = {simpsons.levene_p:.3e})")
+            if confounder.hosmer_lemeshow_p is not None:
+                rationale["key_evidence"].append(f"Hosmer-Lemeshow Propensity Calibration: χ² = {confounder.hosmer_lemeshow_chi2:.2f} (p = {confounder.hosmer_lemeshow_p:.3e})")
+            if confounder.hac_se_ratio is not None:
+                rationale["key_evidence"].append(f"Newey-West HAC Variance Ratio: ρ_HAC = {confounder.hac_se_ratio:.2f}")
+            if stability.siegel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Siegel Repeated Medians Robust Slope: β_Siegel = {stability.siegel_slope:.4f} (Δ_Siegel = {stability.siegel_slope_discrepancy:.1%})")
+            if stability.breusch_godfrey_p is not None:
+                rationale["key_evidence"].append(f"Breusch-Godfrey Autocorrelation LM: LM = {stability.breusch_godfrey_lm:.2f} (p = {stability.breusch_godfrey_p:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -91,6 +91,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.peters_test_p is not None
     assert audit.simpsons_audit.kish_design_effect is not None
     assert audit.simpsons_audit.stratified_variance_ratio is not None
+    # Verify Rücker arcsine asymmetry test and Levene scale test
+    assert audit.simpsons_audit.rucker_test_t is not None
+    assert audit.simpsons_audit.rucker_test_p is not None
+    assert audit.simpsons_audit.levene_stat is not None
+    assert audit.simpsons_audit.levene_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -196,6 +201,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.crump_overlap_ratio is not None
         assert audit_coffee.confounder_audit.hansen_threshold_f is not None
         assert audit_coffee.confounder_audit.hansen_threshold_p is not None
+        # Check Hosmer-Lemeshow calibration and Newey-West HAC variance ratio
+        assert audit_coffee.confounder_audit.hosmer_lemeshow_chi2 is not None
+        assert audit_coffee.confounder_audit.hosmer_lemeshow_p is not None
+        assert audit_coffee.confounder_audit.newey_west_hac_se is not None
+        assert audit_coffee.confounder_audit.hac_se_ratio is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -279,6 +289,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.cusumsq_critical_val is not None
     assert audit.stability_audit.lts_slope is not None
     assert audit.stability_audit.lts_slope_discrepancy is not None
+    # Check Siegel Repeated Medians and Breusch-Godfrey serial correlation test
+    assert audit.stability_audit.siegel_slope is not None
+    assert audit.stability_audit.siegel_slope_discrepancy is not None
+    assert audit.stability_audit.breusch_godfrey_lm is not None
+    assert audit.stability_audit.breusch_godfrey_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -498,6 +513,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_lts = narrator.answer_query("Explain Least Trimmed Squares LTS high-breakdown robust slope", findings)
     assert "Trimmed Squares" in ans_lts or "LTS" in ans_lts or "Breakdown" in ans_lts or "Rousseeuw" in ans_lts
+
+    ans_rucker = narrator.answer_query("Explain Rücker arcsine test for funnel plot asymmetry", findings)
+    assert "Rücker" in ans_rucker or "Rucker" in ans_rucker or "Arcsine" in ans_rucker or "Asymmetry" in ans_rucker
+
+    ans_levene = narrator.answer_query("Explain Howard Levene scale homogeneity test", findings)
+    assert "Levene" in ans_levene or "Scale" in ans_levene or "Variances" in ans_levene
+
+    ans_hl = narrator.answer_query("Explain Hosmer-Lemeshow propensity calibration test", findings)
+    assert "Hosmer" in ans_hl or "Lemeshow" in ans_hl or "Calibration" in ans_hl or "Propensity" in ans_hl
+
+    ans_hac = narrator.answer_query("Explain Newey-West HAC robust standard error ratio", findings)
+    assert "Newey" in ans_hac or "West" in ans_hac or "HAC" in ans_hac or "Autocorrelation" in ans_hac
+
+    ans_siegel = narrator.answer_query("Explain Siegel Repeated Medians high-breakdown robust slope", findings)
+    assert "Siegel" in ans_siegel or "Repeated Medians" in ans_siegel or "Breakdown" in ans_siegel
+
+    ans_bg = narrator.answer_query("Explain Breusch-Godfrey test for higher-order serial correlation", findings)
+    assert "Breusch" in ans_bg or "Godfrey" in ans_bg or "Autocorrelation" in ans_bg or "Serial" in ans_bg
 
 
 def test_end_to_end_pipeline(tmp_path):

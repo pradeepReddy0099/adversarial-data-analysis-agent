@@ -246,6 +246,12 @@ with col_right:
                         if simpsons.get("kish_design_effect") is not None:
                             vr_flag = " (Variance Reduction)" if simpsons.get("stratified_variance_ratio", 1.0) < 1.0 else " (Variance Inflation)"
                             st.markdown(f"**Kish Stratification Design Effect:** D_Kish = `{simpsons.get('kish_design_effect', 0.0):.2f}` (Var Ratio = `{simpsons.get('stratified_variance_ratio', 0.0):.2f}`{vr_flag})")
+                        if simpsons.get("rucker_test_p") is not None:
+                            ruck_flag = " ⚠️ Arcsine Funnel Asymmetry (p < 0.05)" if simpsons.get("is_rucker_asymmetric") else " (Symmetric Strata Precision)"
+                            st.markdown(f"**Rücker Arcsine Asymmetry Test:** t = `{simpsons.get('rucker_test_t', 0.0):.2f}` (p = `{simpsons.get('rucker_test_p', 0.0):.3e}`){ruck_flag}")
+                        if simpsons.get("levene_p") is not None:
+                            lev_flag = " ⚠️ Unequal Scale Spread (p < 0.05)" if simpsons.get("is_levene_heterogeneous") else " (Homoscedastic Strata Spread)"
+                            st.markdown(f"**Levene Scale Homogeneity:** W = `{simpsons.get('levene_stat', 0.0):.2f}` (p = `{simpsons.get('levene_p', 0.0):.3e}`){lev_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -280,6 +286,12 @@ with col_right:
                         if conf_aud.get("hansen_threshold_p") is not None:
                             hansen_flag = f" ⚠️ Threshold Regime Shift (p = {conf_aud['hansen_threshold_p']:.3e})" if conf_aud.get("has_hansen_threshold_regime") else f" (Linear Response Adequate, p = {conf_aud['hansen_threshold_p']:.3e})"
                             st.markdown(f"**Hansen Structural Threshold Test:** Sup F = `{conf_aud.get('hansen_threshold_f', 0.0):.2f}` (p = `{conf_aud['hansen_threshold_p']:.3e}`){hansen_flag}")
+                        if conf_aud.get("hosmer_lemeshow_p") is not None:
+                            hl_flag = f" ⚠️ Propensity Model Miscalibrated (p = {conf_aud['hosmer_lemeshow_p']:.3e})" if conf_aud.get("is_propensity_miscalibrated") else f" (Well-Calibrated Propensity, p = {conf_aud['hosmer_lemeshow_p']:.3e})"
+                            st.markdown(f"**Hosmer-Lemeshow Calibration:** χ² = `{conf_aud.get('hosmer_lemeshow_chi2', 0.0):.2f}` (p = `{conf_aud['hosmer_lemeshow_p']:.3e}`){hl_flag}")
+                        if conf_aud.get("hac_se_ratio") is not None:
+                            hac_flag = f" ⚠️ Autocorrelation Inflation (ρ = {conf_aud['hac_se_ratio']:.2f} > 1.25)" if conf_aud.get("is_hac_inflated") else f" (Robust to Serial Correlation, ρ = {conf_aud['hac_se_ratio']:.2f})"
+                            st.markdown(f"**Newey-West HAC Variance Ratio:** ρ_HAC = `{conf_aud['hac_se_ratio']:.2f}` (HAC SE = `{conf_aud.get('newey_west_hac_se', 0.0):.4f}`){hac_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -368,6 +380,12 @@ with col_right:
                         if stab_aud.get("lts_slope_discrepancy") is not None:
                             lts_flag = " ⚠️ High-Breakdown Leverage Distortion" if stab_aud.get("is_lts_outlier_distorted") else " (Resistant to Outliers)"
                             st.markdown(f"**Least Trimmed Squares (LTS) Slope:** β_LTS = `{stab_aud.get('lts_slope', 0.0):.4f}` (Δ_LTS = `{stab_aud.get('lts_slope_discrepancy', 0.0):.1%}`){lts_flag}")
+                        if stab_aud.get("siegel_slope_discrepancy") is not None:
+                            sieg_flag = " ⚠️ 50% Breakdown Outlier Contamination" if stab_aud.get("is_siegel_outlier_distorted") else " (Robust to Gross Outliers)"
+                            st.markdown(f"**Siegel Repeated Medians Robust Slope:** β_Siegel = `{stab_aud.get('siegel_slope', 0.0):.4f}` (Δ_Siegel = `{stab_aud.get('siegel_slope_discrepancy', 0.0):.1%}`){sieg_flag}")
+                        if stab_aud.get("breusch_godfrey_p") is not None:
+                            bg_flag = f" ⚠️ Higher-Order Autocorrelation (p = {stab_aud['breusch_godfrey_p']:.3e})" if stab_aud.get("has_higher_order_autocorrelation") else f" (Independent Residuals, p = {stab_aud['breusch_godfrey_p']:.3e})"
+                            st.markdown(f"**Breusch-Godfrey Serial Correlation Test:** LM = `{stab_aud.get('breusch_godfrey_lm', 0.0):.2f}` (p = `{stab_aud['breusch_godfrey_p']:.3e}`){bg_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -562,6 +580,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Least Trimmed Squares (LTS) high-breakdown robust slope"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Least Trimmed Squares (LTS) high-breakdown robust slope", findings, dataset_name=dataset_name)
 
+            sug_col19, sug_col20, sug_col21 = st.columns(3)
+            with sug_col19:
+                if st.button("📐 Rücker Arcsine Asymmetry", key="sug_rucker"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Rücker arcsine test for funnel plot asymmetry in binary data"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Rücker arcsine test for funnel plot asymmetry in binary data", findings, dataset_name=dataset_name)
+            with sug_col20:
+                if st.button("🔍 Hosmer-Lemeshow Calibration", key="sug_hosmer"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Hosmer-Lemeshow propensity model calibration test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Hosmer-Lemeshow propensity model calibration test", findings, dataset_name=dataset_name)
+            with sug_col21:
+                if st.button("📈 Siegel Repeated Medians", key="sug_siegel"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Siegel Repeated Medians high-breakdown robust slope"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Siegel Repeated Medians high-breakdown robust slope", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -629,6 +664,10 @@ with col_right:
                     "Peters_p_value": f"{simp.get('peters_test_p', 0.0):.3e}" if simp.get("peters_test_p") is not None else "N/A",
                     "Kish_Design_Effect": f"{simp.get('kish_design_effect', 0.0):.2f}" if simp.get("kish_design_effect") is not None else "N/A",
                     "Stratified_Variance_Ratio": f"{simp.get('stratified_variance_ratio', 0.0):.2f}" if simp.get("stratified_variance_ratio") is not None else "N/A",
+                    "Rucker_Arcsine_t": f"{simp.get('rucker_test_t', 0.0):.2f}" if simp.get("rucker_test_t") is not None else "N/A",
+                    "Rucker_Arcsine_p": f"{simp.get('rucker_test_p', 0.0):.3e}" if simp.get("rucker_test_p") is not None else "N/A",
+                    "Levene_Scale_W": f"{simp.get('levene_stat', 0.0):.2f}" if simp.get("levene_stat") is not None else "N/A",
+                    "Levene_Scale_p": f"{simp.get('levene_p', 0.0):.3e}" if simp.get("levene_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -659,6 +698,8 @@ with col_right:
                     "Crump_Overlap_Ratio": f"{conf.get('crump_overlap_ratio', 0.0):.1%}" if conf.get("crump_overlap_ratio") is not None else "N/A",
                     "Hansen_Threshold_F": f"{conf.get('hansen_threshold_f', 0.0):.2f}" if conf.get("hansen_threshold_f") is not None else "N/A",
                     "Hansen_Threshold_p": f"{conf.get('hansen_threshold_p', 0.0):.3e}" if conf.get("hansen_threshold_p") is not None else "N/A",
+                    "Hosmer_Lemeshow_p": f"{conf.get('hosmer_lemeshow_p', 0.0):.3e}" if conf.get("hosmer_lemeshow_p") is not None else "N/A",
+                    "Newey_West_HAC_Ratio": f"{conf.get('hac_se_ratio', 0.0):.2f}" if conf.get("hac_se_ratio") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -690,6 +731,9 @@ with col_right:
                     "Huber_Slope_Discrepancy": f"{stab.get('huber_slope_discrepancy', 0.0):.1%}" if stab.get("huber_slope_discrepancy") is not None else "N/A",
                     "LTS_Slope": f"{stab.get('lts_slope', 0.0):.4f}" if stab.get("lts_slope") is not None else "N/A",
                     "LTS_Slope_Discrepancy": f"{stab.get('lts_slope_discrepancy', 0.0):.1%}" if stab.get("lts_slope_discrepancy") is not None else "N/A",
+                    "Siegel_Slope": f"{stab.get('siegel_slope', 0.0):.4f}" if stab.get("siegel_slope") is not None else "N/A",
+                    "Siegel_Slope_Discrepancy": f"{stab.get('siegel_slope_discrepancy', 0.0):.1%}" if stab.get("siegel_slope_discrepancy") is not None else "N/A",
+                    "Breusch_Godfrey_p": f"{stab.get('breusch_godfrey_p', 0.0):.3e}" if stab.get("breusch_godfrey_p") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

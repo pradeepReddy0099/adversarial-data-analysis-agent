@@ -92,6 +92,12 @@ class SimpsonsParadoxAudit:
     is_peters_asymmetric: bool = False
     kish_design_effect: Optional[float] = None
     stratified_variance_ratio: Optional[float] = None
+    rucker_test_t: Optional[float] = None
+    rucker_test_p: Optional[float] = None
+    is_rucker_asymmetric: bool = False
+    levene_stat: Optional[float] = None
+    levene_p: Optional[float] = None
+    is_levene_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -168,6 +174,12 @@ class ConfounderAudit:
     hansen_threshold_f: Optional[float] = None
     hansen_threshold_p: Optional[float] = None
     has_hansen_threshold_regime: bool = False
+    hosmer_lemeshow_chi2: Optional[float] = None
+    hosmer_lemeshow_p: Optional[float] = None
+    is_propensity_miscalibrated: bool = False
+    newey_west_hac_se: Optional[float] = None
+    hac_se_ratio: Optional[float] = None
+    is_hac_inflated: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -248,6 +260,12 @@ class StabilityAudit:
     lts_slope: Optional[float] = None
     lts_slope_discrepancy: Optional[float] = None
     is_lts_outlier_distorted: bool = False
+    siegel_slope: Optional[float] = None
+    siegel_slope_discrepancy: Optional[float] = None
+    is_siegel_outlier_distorted: bool = False
+    breusch_godfrey_lm: Optional[float] = None
+    breusch_godfrey_p: Optional[float] = None
+    has_higher_order_autocorrelation: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -2876,6 +2894,328 @@ def least_trimmed_squares_test(
         return None, None, False
 
 
+def rucker_arcsine_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Gerta Rücker, Guido Schwarzer, & James Carpenter's (2008) Arcsine Test
+    for Funnel Plot Asymmetry in Binary 2x2xK Stratified Contingency Tables.
+
+    Applies the angular arcsine transformation y_k = arcsin(sqrt(p_1k)) - arcsin(sqrt(p_0k))
+    where event rates are stabilized with variance sigma_k^2 = 1 / (4 * n_1k) + 1 / (4 * n_0k).
+    Because the asymptotic variance is strictly independent of the underlying effect under H_0,
+    regressing standardized effect z_k = y_k / sigma_k on precision x_k = 1 / sigma_k:
+      z_k = alpha + beta * x_k + epsilon_k
+    yields an orthogonalized asymmetry test:
+      t_Rucker = alpha_hat / SE(alpha_hat) ~ t(K - 2).
+    A statistically significant intercept (p < 0.05) detects small-stratum asymmetry without
+    the false-positive Type I error inflation of standard Egger regression under sparse cells.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        y_trans = []
+        precisions = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            n1 = a + b
+            n0 = c + d
+            if n1 > 0 and n0 > 0:
+                p1 = (a + 0.5) / (n1 + 1.0)
+                p0 = (c + 0.5) / (n0 + 1.0)
+                p1 = min(max(p1, 1e-4), 1.0 - 1e-4)
+                p0 = min(max(p0, 1e-4), 1.0 - 1e-4)
+                y_k = float(np.arcsin(np.sqrt(p1)) - np.arcsin(np.sqrt(p0)))
+                sigma_k2 = float(1.0 / (4.0 * n1) + 1.0 / (4.0 * n0))
+                sigma_k = float(np.sqrt(sigma_k2))
+                if sigma_k > 1e-9:
+                    z_k = y_k / sigma_k
+                    prec_k = 1.0 / sigma_k
+                    y_trans.append(z_k)
+                    precisions.append(prec_k)
+
+        k_valid = len(y_trans)
+        if k_valid < 3:
+            return None, None, False
+
+        y_vec = np.array(y_trans, dtype=float)
+        x_vec = np.array(precisions, dtype=float)
+
+        X_mat = np.column_stack([np.ones(k_valid), x_vec])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_vec, rcond=None)
+        res = y_vec - X_mat @ beta
+        df_e = k_valid - 2
+        if df_e <= 0:
+            return None, None, False
+
+        s2 = float(np.sum(res ** 2) / df_e)
+        cov = s2 * np.linalg.pinv(X_mat.T @ X_mat)
+        se_alpha = float(np.sqrt(max(1e-12, cov[0, 0])))
+        if se_alpha < 1e-12:
+            return None, None, False
+
+        t_stat = float(beta[0] / se_alpha)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def levene_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Howard Levene's (1960) Classical Mean-Centered Scale Homogeneity Test.
+
+    Evaluates whether conditional target scale dispersion varies across conditioning strata:
+      z_{ki} = |Y_{ki} - mean(Y_k)|
+      W_Levene = [ sum n_k (zbar_{k.} - zbar_{..})^2 / (K - 1) ] / [ sum sum (z_{ki} - zbar_{k.})^2 / (N - K) ]
+    distributed as F(K - 1, N - K).
+    Rejection (p < 0.05) detects significant conditional heteroscedasticity across strata.
+    """
+    valid_samples = [s for s in samples if len(s) >= 3 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        stat_val, p_val = stats.levene(*valid_samples, center="mean")
+        if np.isnan(stat_val) or np.isnan(p_val):
+            return None, None, False
+        return float(stat_val), float(p_val), bool(p_val < 0.05)
+    except Exception:
+        return None, None, False
+
+
+def hosmer_lemeshow_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    n_bins: int = 10,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates David Hosmer & Stanley Lemeshow's (1980) Goodness-of-Fit Calibration Test
+    for Propensity Confounder Models.
+
+    Dichotomizes focal regressor X at its median to construct pseudo-treatment assignments D = I(X > median(X)).
+    Estimates logistic propensity score pi_i = P(D = 1 | z_i) via IRLS / Newton-Raphson.
+    Partitions predictions into G quantiles and computes Pearson-type goodness-of-fit:
+      chi2_HL = sum_{g=1}^G [ (O_g - N_g * pbar_g)^2 / (N_g * pbar_g * (1 - pbar_g)) ] ~ chi^2(G - 2).
+    Rejection (p < 0.05) diagnoses severe propensity model miscalibration, demonstrating that
+    observational confounder conditioning is distorted by misspecified exposure weights.
+    """
+    n = len(x)
+    if n < 30 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d_treat = (x > med_x).astype(float)
+        if np.mean(d_treat) == 0.0 or np.mean(d_treat) == 1.0:
+            return None, None, False
+
+        z_norm = (z - np.mean(z)) / max(1e-9, float(np.std(z)))
+        X_mat = np.column_stack([np.ones(n), z_norm])
+
+        beta = np.zeros(2)
+        for _ in range(20):
+            p = 1.0 / (1.0 + np.exp(-np.clip(X_mat @ beta, -20.0, 20.0)))
+            w = np.clip(p * (1.0 - p), 1e-5, 0.25)
+            grad = X_mat.T @ (d_treat - p)
+            hess = X_mat.T @ (X_mat * w[:, None])
+            try:
+                step = np.linalg.solve(hess + 1e-4 * np.eye(2), grad)
+                beta += step
+                if np.max(np.abs(step)) < 1e-5:
+                    break
+            except Exception:
+                break
+
+        propensities = 1.0 / (1.0 + np.exp(-np.clip(X_mat @ beta, -20.0, 20.0)))
+        
+        g = min(n_bins, max(3, n // 10))
+        quantiles = np.quantile(propensities, np.linspace(0.0, 1.0, g + 1))
+        quantiles[0] -= 1e-6
+        quantiles[-1] += 1e-6
+
+        hl_stat = 0.0
+        df_hl = g - 2
+        if df_hl <= 0:
+            return None, None, False
+
+        for k in range(g):
+            bin_mask = (propensities > quantiles[k]) & (propensities <= quantiles[k + 1])
+            n_k = np.sum(bin_mask)
+            if n_k == 0:
+                continue
+            o_k = float(np.sum(d_treat[bin_mask]))
+            pbar_k = float(np.mean(propensities[bin_mask]))
+            var_k = n_k * pbar_k * (1.0 - pbar_k)
+            e_k = n_k * pbar_k
+            if var_k > 1e-6:
+                hl_stat += float(((o_k - e_k) ** 2) / var_k)
+
+        p_val = float(stats.chi2.sf(hl_stat, df=df_hl))
+        is_miscal = bool(p_val < 0.05)
+        return float(hl_stat), p_val, is_miscal
+    except Exception:
+        return None, None, False
+
+
+def newey_west_hac_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Whitney Newey & Kenneth West's (1987) Heteroscedasticity and Autocorrelation
+    Consistent (HAC) Variance Ratio.
+
+    Fits regression Y = beta_0 + beta_1 * X + beta_2 * Z + epsilon.
+    Constructs Bartlett kernel autocovariance matrix across bandwidth L = floor(4 * (n / 100)^(2/9)):
+      Omega_hat = Gamma_0 + sum_{l=1}^L [ 1 - l / (L + 1) ] * (Gamma_l + Gamma_l^T).
+    Computes HAC Standard Error for focal regressor X and evaluates inflation ratio:
+      rho_HAC = SE_HAC(beta_1) / SE_OLS(beta_1).
+    Flags severe inference distortion if rho_HAC > 1.25 (standard errors underestimated by > 20%).
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        if np.linalg.matrix_rank(X_mat) < 3:
+            return None, None, False
+
+        beta_hat, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        residuals = y - X_mat @ beta_hat
+        df_e = n - 3
+        s2 = float(np.sum(residuals ** 2) / max(1, df_e))
+
+        xtx_inv = np.linalg.pinv(X_mat.T @ X_mat)
+        v_ols = s2 * xtx_inv
+        se_ols = float(np.sqrt(max(1e-12, v_ols[1, 1])))
+        if se_ols < 1e-12:
+            return None, None, False
+
+        L = max(1, int(np.floor(4.0 * (n / 100.0) ** (2.0 / 9.0))))
+        u = residuals[:, None] * X_mat
+
+        gamma_0 = (u.T @ u) / float(n)
+        omega = gamma_0.copy()
+        for l in range(1, L + 1):
+            w_l = 1.0 - float(l) / float(L + 1)
+            gamma_l = (u[l:].T @ u[:-l]) / float(n)
+            omega += w_l * (gamma_l + gamma_l.T)
+
+        v_hac = float(n) * (xtx_inv @ omega @ xtx_inv)
+        se_hac = float(np.sqrt(max(1e-12, v_hac[1, 1])))
+        ratio = float(se_hac / se_ols)
+        is_inflated = bool(ratio > 1.25)
+        return se_hac, ratio, is_inflated
+    except Exception:
+        return None, None, False
+
+
+def siegel_repeated_medians_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    max_samples: int = 500,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Andrew Siegel's (1982) Repeated Medians High-Breakdown Robust Regression Discrepancy.
+
+    Computes the 50% breakdown point non-parametric estimator:
+      beta_Siegel = median_i { median_{j != i} [ (y_j - y_i) / (x_j - x_i) ] }.
+    Resistant to arbitrary gross contamination of up to 50% of the sample.
+    Evaluates relative slope discrepancy vs classical OLS:
+      Delta_Siegel = |beta_OLS - beta_Siegel| / max(1e-6, |beta_OLS|).
+    Flags outlier contamination if discrepancy > 0.20 (20% slope shift).
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        b_ols, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        ols_slope = float(b_ols[1])
+
+        if n > max_samples:
+            idx = np.random.default_rng(42).choice(n, size=max_samples, replace=False)
+            x_sub = x[idx]
+            y_sub = y[idx]
+        else:
+            x_sub = x
+            y_sub = y
+
+        dx = x_sub[:, None] - x_sub[None, :]
+        dy = y_sub[:, None] - y_sub[None, :]
+        valid_mask = np.abs(dx) > 1e-9
+        np.fill_diagonal(valid_mask, False)
+
+        pairwise_slopes = np.where(valid_mask, dy / np.where(valid_mask, dx, 1.0), np.nan)
+        inner_medians = np.nanmedian(pairwise_slopes, axis=1)
+        valid_inner = inner_medians[~np.isnan(inner_medians)]
+        if len(valid_inner) == 0:
+            return None, None, False
+
+        siegel_slope = float(np.median(valid_inner))
+        denom = max(1e-6, abs(ols_slope))
+        discrepancy = float(abs(ols_slope - siegel_slope) / denom)
+        is_distorted = bool(discrepancy > 0.20)
+        return siegel_slope, discrepancy, is_distorted
+    except Exception:
+        return None, None, False
+
+
+def breusch_godfrey_serial_correlation_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    lags: int = 2,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Trevor Breusch (1978) & Leslie Godfrey's (1978) Higher-Order Serial Correlation LM Test.
+
+    Evaluates AR(p) serial correlation in residuals along sorted regressor X:
+      e_t = alpha_0 + alpha_1 * X_t + sum_{j=1}^p rho_j * e_{t-j} + v_t.
+    Computes Lagrange Multiplier statistic:
+      LM_BG = (n - lags) * R^2_aux ~ chi^2(p).
+    Rejection (p < 0.05) detects higher-order autocorrelation that invalidates naive standard errors.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        idx = np.argsort(x)
+        x_s = x[idx]
+        y_s = y[idx]
+
+        X_mat = np.column_stack([np.ones(n), x_s])
+        beta_hat, _, _, _ = np.linalg.lstsq(X_mat, y_s, rcond=None)
+        residuals = y_s - X_mat @ beta_hat
+
+        p = min(lags, max(1, n // 10))
+        n_eff = n - p
+        if n_eff <= p + 2:
+            return None, None, False
+
+        y_aux = residuals[p:]
+        x_aux_cols = [np.ones(n_eff), x_s[p:]]
+        for j in range(1, p + 1):
+            x_aux_cols.append(residuals[p - j : n - j])
+        X_aux = np.column_stack(x_aux_cols)
+
+        b_aux, _, _, _ = np.linalg.lstsq(X_aux, y_aux, rcond=None)
+        y_pred = X_aux @ b_aux
+        ss_tot = float(np.sum((y_aux - np.mean(y_aux)) ** 2))
+        ss_res = float(np.sum((y_aux - y_pred) ** 2))
+        if ss_tot > 1e-12:
+            r2_aux = max(0.0, 1.0 - ss_res / ss_tot)
+        else:
+            r2_aux = 0.0
+
+        lm_stat = float(n_eff * r2_aux)
+        p_val = float(stats.chi2.sf(lm_stat, df=p))
+        has_autocorr = bool(p_val < 0.05)
+        return lm_stat, p_val, has_autocorr
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -3136,6 +3476,12 @@ class DevilsAdvocateAgent:
         is_peters_asym: bool = False
         kish_deff: Optional[float] = None
         strat_var_ratio: Optional[float] = None
+        rucker_t: Optional[float] = None
+        rucker_p: Optional[float] = None
+        is_rucker_asym: bool = False
+        levene_stat: Optional[float] = None
+        levene_p: Optional[float] = None
+        is_levene_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -3192,6 +3538,8 @@ class DevilsAdvocateAgent:
                 harbord_t, harbord_p, is_harbord_asym = harbord_modified_score_test(tables_2x2)
                 # Peters et al. (2006) Regression Test for Funnel Plot Asymmetry
                 peters_t, peters_p, is_peters_asym = peters_regression_asymmetry_test(tables_2x2)
+                # Rücker, Schwarzer, & Carpenter (2008) Arcsine Test for Funnel Plot Asymmetry
+                rucker_t, rucker_p, is_rucker_asym = rucker_arcsine_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -3262,6 +3610,7 @@ class DevilsAdvocateAgent:
             kw_h, kw_p, is_kw_hetero = kruskal_wallis_strata_test(kw_samples)
             fligner_stat, fligner_p, is_fligner_hetero = fligner_killeen_homogeneity_test(kw_samples)
             bf_stat, bf_p, is_bf_hetero = brown_forsythe_homogeneity_test(kw_samples)
+            levene_stat, levene_p, is_levene_hetero = levene_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -3293,6 +3642,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Harbord Score: t={harbord_t:.2f}, p={harbord_p:.3e}]"
         if peters_p is not None:
             cmh_note += f" [Peters Test: t={peters_t:.2f}, p={peters_p:.3e}]"
+        if rucker_p is not None:
+            cmh_note += f" [Rücker Arcsine: t={rucker_t:.2f}, p={rucker_p:.3e}]"
+        if levene_p is not None:
+            cmh_note += f" [Levene Scale: W={levene_stat:.2f}, p={levene_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -3384,6 +3737,12 @@ class DevilsAdvocateAgent:
             is_peters_asymmetric=is_peters_asym,
             kish_design_effect=kish_deff,
             stratified_variance_ratio=strat_var_ratio,
+            rucker_test_t=rucker_t,
+            rucker_test_p=rucker_p,
+            is_rucker_asymmetric=is_rucker_asym,
+            levene_stat=levene_stat,
+            levene_p=levene_p,
+            is_levene_heterogeneous=is_levene_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -3529,6 +3888,8 @@ class DevilsAdvocateAgent:
         sargan_j, sargan_p, is_sargan_rej = None, None, False
         crump_ratio, is_crump_def = None, False
         hansen_f, hansen_p, has_hansen = None, None, False
+        hl_chi2, hl_p, is_hl_miscal = None, None, False
+        hac_se, hac_ratio, is_hac_inf = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -3551,6 +3912,8 @@ class DevilsAdvocateAgent:
                     sargan_j, sargan_p, is_sargan_rej = sargan_overidentifying_test(x_mal, z_mal, y_mal)
                     crump_ratio, is_crump_def = crump_propensity_overlap_test(x_mal, z_mal)
                     hansen_f, hansen_p, has_hansen = hansen_threshold_regime_test(x_mal, z_mal, y_mal)
+                    hl_chi2, hl_p, is_hl_miscal = hosmer_lemeshow_test(x_mal, z_mal)
+                    hac_se, hac_ratio, is_hac_inf = newey_west_hac_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -3566,6 +3929,8 @@ class DevilsAdvocateAgent:
         j_str = f", J-test={j_stat:.2f} (p={j_p:.3e})" if j_p is not None else ""
         crump_str = f", Crump overlap={crump_ratio:.1%}" if crump_ratio is not None else ""
         hansen_str = f", Hansen threshold F={hansen_f:.2f} (p={hansen_p:.3e})" if hansen_p is not None else ""
+        hl_str = f", Hosmer-Lemeshow χ²={hl_chi2:.2f} (p={hl_p:.3e})" if hl_p is not None else ""
+        hac_str = f", HAC SE ratio={hac_ratio:.2f}" if hac_ratio is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
@@ -3575,9 +3940,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -3648,6 +4013,12 @@ class DevilsAdvocateAgent:
             hansen_threshold_f=hansen_f,
             hansen_threshold_p=hansen_p,
             has_hansen_threshold_regime=has_hansen,
+            hosmer_lemeshow_chi2=hl_chi2,
+            hosmer_lemeshow_p=hl_p,
+            is_propensity_miscalibrated=is_hl_miscal,
+            newey_west_hac_se=hac_se,
+            hac_se_ratio=hac_ratio,
+            is_hac_inflated=is_hac_inf,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -3878,6 +4249,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Rousseeuw (1984) Least Trimmed Squares (LTS) High-Breakdown Slope
         lts_slope, lts_disc, is_lts_distorted = least_trimmed_squares_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Andrew Siegel (1982) Repeated Medians High-Breakdown Slope
+        siegel_slope, siegel_disc, is_siegel_distorted = siegel_repeated_medians_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Breusch & Godfrey (1978) Higher-Order Serial Correlation LM Test
+        bg_lm, bg_p, has_bg_autocorr = breusch_godfrey_serial_correlation_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -3897,9 +4274,11 @@ class DevilsAdvocateAgent:
         hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         lts_str = f", Δ_LTS={lts_disc:.1%}" if lts_disc is not None else ""
+        siegel_str = f", Δ_Siegel={siegel_disc:.1%}" if siegel_disc is not None else ""
+        bg_str = f", BG_p={bg_p:.3e}" if bg_p is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
         type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{lts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{qdi_str}{dw_str}{bg_str}{hc3_str}{ts_str}{lts_str}{siegel_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -3975,6 +4354,12 @@ class DevilsAdvocateAgent:
             lts_slope=lts_slope,
             lts_slope_discrepancy=lts_disc,
             is_lts_outlier_distorted=is_lts_distorted,
+            siegel_slope=siegel_slope,
+            siegel_slope_discrepancy=siegel_disc,
+            is_siegel_outlier_distorted=is_siegel_distorted,
+            breusch_godfrey_lm=bg_lm,
+            breusch_godfrey_p=bg_p,
+            has_higher_order_autocorrelation=has_bg_autocorr,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
