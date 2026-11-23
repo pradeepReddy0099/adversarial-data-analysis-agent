@@ -66,6 +66,12 @@ class SimpsonsParadoxAudit:
     woolf_chi2: Optional[float] = None
     woolf_p: Optional[float] = None
     is_woolf_heterogeneous: bool = False
+    freeman_tukey_chi2: Optional[float] = None
+    freeman_tukey_p: Optional[float] = None
+    is_freeman_tukey_heterogeneous: bool = False
+    kruskal_wallis_h: Optional[float] = None
+    kruskal_wallis_p: Optional[float] = None
+    is_kruskal_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -123,6 +129,9 @@ class ConfounderAudit:
     mallows_cp: Optional[float] = None
     cp_bias_discrepancy: Optional[float] = None
     is_mallows_biased: bool = False
+    davidson_mackinnon_j_stat: Optional[float] = None
+    davidson_mackinnon_p: Optional[float] = None
+    is_j_test_rejected: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -181,6 +190,10 @@ class StabilityAudit:
     type_m_exaggeration_ratio: Optional[float] = None
     retrodesign_power: Optional[float] = None
     is_type_m_vulnerable: bool = False
+    andrews_sup_w: Optional[float] = None
+    andrews_break_fraction: Optional[float] = None
+    andrews_p_value: Optional[float] = None
+    has_unknown_structural_break: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1626,6 +1639,227 @@ def calculate_gelman_carlin_design_analysis(
         return None, None, None, False
 
 
+def freeman_tukey_double_arcsine_test(
+    tables_2x2: List[tuple[float, float, float, float]],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Freeman & Tukey's (1950) variance-stabilizing double-arcsine
+    transformation and cross-stratum homogeneity test for stratified binomial data.
+    
+    For each stratum k in {1, ..., K} with counts (a_k, b_k, c_k, d_k),
+    let successes x_k = a_k and sample size n_k = a_k + b_k (e.g. treatment arm):
+      theta_k = 0.5 * (arcsin(sqrt(x_k / (n_k + 1))) + arcsin(sqrt((x_k + 1) / (n_k + 1))))
+      Var(theta_k) = 1 / (4 * n_k + 2)
+      w_k = 4 * n_k + 2
+    Pooled double-arcsine transformed rate:
+      theta_bar = sum(w_k * theta_k) / sum(w_k)
+    Freeman-Tukey test statistic:
+      chi2_FT = sum(w_k * (theta_k - theta_bar)^2) ~ chi2(K - 1)
+      
+    Stabilizes binomial sampling variance across strata independent of p, resolving
+    the severe distortion and failure of naive chi-squared tests near 0 or 1.
+    Rejection (p < 0.05) certifies statistically significant variance-stabilized heterogeneity.
+    """
+    k = len(tables_2x2)
+    if k < 2:
+        return None, None, False
+    try:
+        thetas = []
+        weights = []
+        for a, b, c, d in tables_2x2:
+            n_grp = float(a + b)
+            if n_grp <= 0:
+                continue
+            x = float(a)
+            t_k = 0.5 * (np.arcsin(np.sqrt(x / (n_grp + 1.0))) + np.arcsin(np.sqrt((x + 1.0) / (n_grp + 1.0))))
+            w_k = 4.0 * n_grp + 2.0
+            thetas.append(float(t_k))
+            weights.append(float(w_k))
+            
+        if len(thetas) < 2:
+            return None, None, False
+            
+        t_arr = np.array(thetas, dtype=float)
+        w_arr = np.array(weights, dtype=float)
+        w_sum = float(np.sum(w_arr))
+        if w_sum <= 0:
+            return None, None, False
+            
+        theta_bar = float(np.sum(w_arr * t_arr) / w_sum)
+        chi2_val = float(np.sum(w_arr * (t_arr - theta_bar) ** 2))
+        df = len(thetas) - 1
+        p_val = float(stats.chi2.sf(chi2_val, df=df))
+        is_hetero = bool(p_val < 0.05)
+        return chi2_val, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def kruskal_wallis_strata_test(
+    subgroup_samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Kruskal & Wallis (1952) non-parametric rank-sum H-test across strata.
+    
+    Evaluates whether the distribution medians of the target variable differ across K >= 2
+    subgroups without assuming normality or homoscedasticity.
+    Rejection (p < 0.05) certifies non-parametric distributional heterogeneity across strata.
+    """
+    valid_samples = [s for s in subgroup_samples if len(s) >= 3 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        stat_h, p_val = stats.kruskal(*valid_samples)
+        h_val = float(stat_h)
+        p_val = float(p_val)
+        is_hetero = bool(p_val < 0.05)
+        return h_val, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def davidson_mackinnon_j_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Davidson & MacKinnon's (1981) J-test for non-nested model specification.
+    
+    Tests whether the bivariate model M_1: Y = a_0 + a_1 * X is correctly specified
+    against the alternative confounder model M_2: Y = b_0 + b_1 * Z.
+    Procedure:
+      1. Fit M_2: Y ~ 1 + Z, obtaining predicted values Y_hat_M2.
+      2. Fit augmented model: Y ~ 1 + X + theta * Y_hat_M2.
+      3. Test H_0: theta = 0 via t-statistic.
+      
+    If |t_J| >= 1.96 (p < 0.05), M_1 is rejected: the candidate confounder Z captures
+    statistically significant predictive information that X cannot account for.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        # Step 1: Fit M2 (Y ~ 1 + Z)
+        z_mat = np.column_stack([np.ones(n), z])
+        beta_z, _, _, _ = np.linalg.lstsq(z_mat, y, rcond=None)
+        y_hat_m2 = z_mat @ beta_z
+        
+        # Step 2: Fit augmented model Y ~ 1 + X + Y_hat_M2
+        aug_mat = np.column_stack([np.ones(n), x, y_hat_m2])
+        beta_aug, _, _, _ = np.linalg.lstsq(aug_mat, y, rcond=None)
+        res_aug = y - aug_mat @ beta_aug
+        rss_aug = float(np.sum(res_aug ** 2))
+        
+        df_e = n - 3
+        if df_e <= 0 or rss_aug < 1e-12:
+            return None, None, False
+            
+        mse_aug = rss_aug / df_e
+        cov_matrix = mse_aug * np.linalg.pinv(aug_mat.T @ aug_mat)
+        se_theta = float(np.sqrt(max(1e-12, cov_matrix[2, 2])))
+        
+        theta_val = float(beta_aug[2])
+        t_stat = float(theta_val / se_theta)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_rejected = bool(p_val < 0.05)
+        
+        return t_stat, p_val, is_rejected
+    except Exception:
+        return None, None, False
+
+
+def andrews_sup_wald_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    trim: float = 0.15,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Donald Andrews' (1993) Supremum Wald test (Sup W) for structural breaks
+    at an unknown change point with Hansen (1997) asymptotic distribution approximation.
+    
+    Sorts observations by regressor x and evaluates parameter instability across all candidate
+    split points tau in [trim, 1 - trim] (k = 2 parameters: intercept and slope).
+      W(tau) = [ (RSS_pooled - (RSS_1 + RSS_2)) / k ] / [ (RSS_1 + RSS_2) / (n - 2*k) ] * k
+      Sup W = max_{tau} W(tau)
+      
+    Asymptotic 5% critical value for k=2 with 15% trimming is ~11.72 (1% is ~15.20).
+    Rejection (p < 0.05) proves the relationship suffers from an unmodelled structural change
+    or regime shift along x without requiring prior knowledge of the break location.
+    """
+    n = len(x)
+    if n < 30 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, None, False
+    try:
+        # Sort by x
+        idx = np.argsort(x)
+        x_s = x[idx]
+        y_s = y[idx]
+        
+        # Pooled RSS
+        mat_pooled = np.column_stack([np.ones(n), x_s])
+        beta_p, _, _, _ = np.linalg.lstsq(mat_pooled, y_s, rcond=None)
+        rss_p = float(np.sum((y_s - mat_pooled @ beta_p) ** 2))
+        
+        k = 2
+        start_idx = max(k + 2, int(np.floor(trim * n)))
+        end_idx = min(n - (k + 2), int(np.ceil((1.0 - trim) * n)))
+        if end_idx <= start_idx:
+            return None, None, None, False
+            
+        step = max(1, (end_idx - start_idx) // 50)  # Evaluate up to 50 candidate break points
+        candidate_indices = list(range(start_idx, end_idx, step))
+        
+        max_wald = -1.0
+        best_idx = candidate_indices[0]
+        
+        for i in candidate_indices:
+            x1, y1 = x_s[:i], y_s[:i]
+            x2, y2 = x_s[i:], y_s[i:]
+            
+            if np.std(x1) < 1e-9 or np.std(x2) < 1e-9:
+                continue
+                
+            mat1 = np.column_stack([np.ones(i), x1])
+            mat2 = np.column_stack([np.ones(n - i), x2])
+            
+            b1, _, _, _ = np.linalg.lstsq(mat1, y1, rcond=None)
+            b2, _, _, _ = np.linalg.lstsq(mat2, y2, rcond=None)
+            
+            rss1 = float(np.sum((y1 - mat1 @ b1) ** 2))
+            rss2 = float(np.sum((y2 - mat2 @ b2) ** 2))
+            rss_sum = rss1 + rss2
+            
+            df_denom = n - 2 * k
+            if df_denom <= 0 or rss_sum < 1e-12:
+                continue
+                
+            f_stat = ((rss_p - rss_sum) / k) / (rss_sum / df_denom)
+            wald_stat = f_stat * k  # Wald statistic with k=2 restrictions
+            
+            if wald_stat > max_wald:
+                max_wald = wald_stat
+                best_idx = i
+                
+        if max_wald < 0:
+            return None, None, None, False
+            
+        break_fraction = float(best_idx / n)
+        
+        # Hansen (1997) asymptotic p-value approximation for k=2, 15% trimming
+        # Critical values: 10% = 10.15, 5% = 11.72, 1% = 15.20
+        if max_wald >= 15.20:
+            p_val = float(0.01 * np.exp(-0.4 * (max_wald - 15.20)))
+        elif max_wald >= 11.72:
+            p_val = float(0.01 + 0.04 * (15.20 - max_wald) / (15.20 - 11.72))
+        elif max_wald >= 10.15:
+            p_val = float(0.05 + 0.05 * (11.72 - max_wald) / (11.72 - 10.15))
+        else:
+            p_val = float(0.10 + 0.90 * max(0.0, (10.15 - max_wald) / 10.15))
+        p_val = min(1.0, max(1e-8, p_val))
+        
+        has_break = bool(p_val < 0.05)
+        return float(max_wald), float(break_fraction), p_val, has_break
+    except Exception:
+        return None, None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -1863,6 +2097,9 @@ class DevilsAdvocateAgent:
         woolf_chi2: Optional[float] = None
         woolf_p: Optional[float] = None
         is_woolf_hetero: bool = False
+        ft_chi2: Optional[float] = None
+        ft_p: Optional[float] = None
+        is_ft_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -1911,6 +2148,8 @@ class DevilsAdvocateAgent:
                 bd_stat, bd_p, tarone_stat, tarone_p = breslow_day_homogeneity_test(tables_2x2, cmh_or)
                 # Woolf's Stratified Heterogeneity Test with Haldane-Anscombe correction
                 woolf_chi2, woolf_p, is_woolf_hetero = woolf_stratified_heterogeneity_test(tables_2x2)
+                # Freeman-Tukey (1950) Variance-Stabilizing Double-Arcsine Homogeneity Test
+                ft_chi2, ft_p, is_ft_hetero = freeman_tukey_double_arcsine_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -1968,6 +2207,20 @@ class DevilsAdvocateAgent:
             subgroup_stats, subgroup_weights, [b.group_name for b in breakdowns], cochrans_q=cochrans_q
         )
 
+        # Advanced Metric 11: Kruskal & Wallis (1952) Non-Parametric Rank-Sum Heterogeneity Test
+        kw_h, kw_p, is_kw_hetero = None, None, False
+        try:
+            target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
+            kw_samples = []
+            for grp in sorted(groups, key=str):
+                grp_mask = (df[conf_col] == grp)
+                s = target_series[grp_mask].dropna().to_numpy(dtype=float)
+                if len(s) >= 3 and np.std(s) > 1e-9:
+                    kw_samples.append(s)
+            kw_h, kw_p, is_kw_hetero = kruskal_wallis_strata_test(kw_samples)
+        except Exception:
+            pass
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if bd_p is not None:
             cmh_note += f" [Breslow-Day: p={bd_p:.3e}]"
@@ -1995,6 +2248,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Vuong Test: z={vuong_z_val:.2f}, p={vuong_p_val:.3e}]"
         if woolf_p is not None:
             cmh_note += f" [Woolf Test: p={woolf_p:.3e}]"
+        if ft_p is not None:
+            cmh_note += f" [Freeman-Tukey: p={ft_p:.3e}]"
+        if kw_p is not None:
+            cmh_note += f" [Kruskal-Wallis: H={kw_h:.2f}, p={kw_p:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -2046,6 +2303,12 @@ class DevilsAdvocateAgent:
             woolf_chi2=woolf_chi2,
             woolf_p=woolf_p,
             is_woolf_heterogeneous=is_woolf_hetero,
+            freeman_tukey_chi2=ft_chi2,
+            freeman_tukey_p=ft_p,
+            is_freeman_tukey_heterogeneous=is_ft_hetero,
+            kruskal_wallis_h=kw_h,
+            kruskal_wallis_p=kw_p,
+            is_kruskal_heterogeneous=is_kw_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -2184,6 +2447,7 @@ class DevilsAdvocateAgent:
         # Advanced Econometric Metric: Altonji, Elder & Taber (2005) Selection Ratio on Unobservables
         aet_val, is_aet_vuln = None, False
         mallows_cp_val, mallows_disc_val, is_mallows_bad = None, None, False
+        j_stat, j_p, is_j_bad = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -2199,6 +2463,7 @@ class DevilsAdvocateAgent:
                     z_mal = sub_aet[top_conf].to_numpy(dtype=float)
                     y_mal = sub_aet[target].to_numpy(dtype=float)
                     mallows_cp_val, mallows_disc_val, is_mallows_bad = calculate_mallows_cp(x_mal, z_mal, y_mal)
+                    j_stat, j_p, is_j_bad = davidson_mackinnon_j_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -2211,6 +2476,7 @@ class DevilsAdvocateAgent:
         im_str = f", Imbens-Manski=[{im_ci_l:.3f}, {im_ci_h:.3f}]" if im_ci_l is not None else ""
         aet_str = f", AET={aet_val:.2f}" if aet_val is not None else ""
         mal_str = f", Mallows Cp={mallows_cp_val:.2f} (ΔCp={mallows_disc_val:.2f})" if mallows_cp_val is not None else ""
+        j_str = f", J-test={j_stat:.2f} (p={j_p:.3e})" if j_p is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
@@ -2220,9 +2486,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -2274,6 +2540,9 @@ class DevilsAdvocateAgent:
             mallows_cp=mallows_cp_val,
             cp_bias_discrepancy=mallows_disc_val,
             is_mallows_biased=is_mallows_bad,
+            davidson_mackinnon_j_stat=j_stat,
+            davidson_mackinnon_p=j_p,
+            is_j_test_rejected=is_j_bad,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -2483,6 +2752,9 @@ class DevilsAdvocateAgent:
             se=std_err,
         )
 
+        # Advanced Diagnostic: Donald Andrews (1993) Supremum Wald Test for Unknown Structural Break
+        andrews_w, andrews_frac, andrews_p, has_andrews_break = andrews_sup_wald_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -2492,6 +2764,7 @@ class DevilsAdvocateAgent:
         bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
         white_str = f", White_p={white_p:.3e}" if white_p is not None else ""
         chow_str = f", Chow_p={chow_p:.3e}" if chow_p is not None else ""
+        andrews_str = f", Andrews_SupW={andrews_w:.2f} (p={andrews_p:.3e})" if andrews_w is not None else ""
         jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
         dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
@@ -2499,7 +2772,7 @@ class DevilsAdvocateAgent:
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
         type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{andrews_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -2553,6 +2826,10 @@ class DevilsAdvocateAgent:
             type_m_exaggeration_ratio=type_m,
             retrodesign_power=retro_pow,
             is_type_m_vulnerable=is_type_m_vuln,
+            andrews_sup_w=andrews_w,
+            andrews_break_fraction=andrews_frac,
+            andrews_p_value=andrews_p,
+            has_unknown_structural_break=has_andrews_break,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

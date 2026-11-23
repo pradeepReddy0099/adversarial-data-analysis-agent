@@ -68,6 +68,11 @@ def test_berkeley_admissions_falsification():
     # Verify Woolf's stratified odds ratio heterogeneity test with Haldane-Anscombe correction
     assert audit.simpsons_audit.woolf_p is not None
     assert audit.simpsons_audit.woolf_chi2 is not None
+    # Verify Freeman-Tukey variance-stabilizing double-arcsine test and Kruskal-Wallis rank test
+    assert audit.simpsons_audit.freeman_tukey_chi2 is not None
+    assert audit.simpsons_audit.freeman_tukey_p is not None
+    assert audit.simpsons_audit.kruskal_wallis_h is not None
+    assert audit.simpsons_audit.kruskal_wallis_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -156,6 +161,9 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.imbens_manski_ci_low <= audit_coffee.confounder_audit.imbens_manski_ci_high
         assert audit_coffee.confounder_audit.mallows_cp is not None
         assert audit_coffee.confounder_audit.cp_bias_discrepancy is not None
+        # Check Davidson-MacKinnon J-test for non-nested models
+        assert audit_coffee.confounder_audit.davidson_mackinnon_j_stat is not None
+        assert audit_coffee.confounder_audit.davidson_mackinnon_p is not None
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -221,6 +229,10 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.type_s_error_prob is not None
     assert 0.0 <= audit.stability_audit.type_s_error_prob <= 1.0
     assert audit.stability_audit.retrodesign_power is not None
+    # Check Donald Andrews Supremum Wald test for unknown structural breaks
+    assert audit.stability_audit.andrews_sup_w is not None
+    assert audit.stability_audit.andrews_p_value is not None
+    assert audit.stability_audit.andrews_break_fraction is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -374,6 +386,18 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_gelman = narrator.answer_query("Explain Gelman-Carlin Type S and Type M design analysis", findings)
     assert "Gelman" in ans_gelman or "Type M" in ans_gelman or "Exaggeration" in ans_gelman
+
+    ans_ft = narrator.answer_query("Explain Freeman-Tukey double-arcsine homogeneity test", findings)
+    assert "Freeman" in ans_ft or "Tukey" in ans_ft or "Double-Arcsine" in ans_ft
+
+    ans_kw = narrator.answer_query("Explain Kruskal-Wallis rank sum test", findings)
+    assert "Kruskal" in ans_kw or "Wallis" in ans_kw or "Rank" in ans_kw
+
+    ans_j = narrator.answer_query("Explain Davidson-MacKinnon J-test", findings)
+    assert "Davidson" in ans_j or "MacKinnon" in ans_j or "J-Test" in ans_j
+
+    ans_andrews = narrator.answer_query("Explain Donald Andrews Supremum Wald test for unknown structural breaks", findings)
+    assert "Andrews" in ans_andrews or "Supremum" in ans_andrews or "Wald" in ans_andrews
 
 
 def test_end_to_end_pipeline(tmp_path):

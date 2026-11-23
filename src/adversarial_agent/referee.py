@@ -105,6 +105,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Galbraith Radial Outlier Strata: {simpsons.galbraith_outlier_count} outlying subgroups ({', '.join(simpsons.galbraith_outlier_subgroups)})")
             if simpsons.woolf_p is not None:
                 rationale["key_evidence"].append(f"Woolf Odds Ratio Heterogeneity Test: χ² = {simpsons.woolf_chi2:.2f} (p = {simpsons.woolf_p:.3e})")
+            if simpsons.freeman_tukey_p is not None:
+                rationale["key_evidence"].append(f"Freeman-Tukey Double-Arcsine Homogeneity Test: χ² = {simpsons.freeman_tukey_chi2:.2f} (p = {simpsons.freeman_tukey_p:.3e}) {'[VARIANCE-STABILIZED HETEROGENEITY]' if simpsons.is_freeman_tukey_heterogeneous else '[HOMOGENEOUS STRATA]'}")
+            if simpsons.kruskal_wallis_p is not None:
+                rationale["key_evidence"].append(f"Kruskal-Wallis Rank Heterogeneity: H = {simpsons.kruskal_wallis_h:.2f} (p = {simpsons.kruskal_wallis_p:.3e}) {'[NON-PARAMETRIC STRATA SHIFT]' if simpsons.is_kruskal_heterogeneous else '[INVARIANT MEDIANS]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -164,6 +168,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Imbens-Manski Asymptotically Valid CI: [{confounder.imbens_manski_ci_low:.3f}, {confounder.imbens_manski_ci_high:.3f}] (cn = {confounder.imbens_manski_cn:.3f}) {'[EXCLUDES ZERO]' if confounder.imbens_manski_excludes_zero else '[INCLUDES ZERO]'}")
             if confounder.mallows_cp is not None:
                 rationale["key_evidence"].append(f"Mallows' Cp Misspecification: Cp = {confounder.mallows_cp:.2f} (ΔCp = {confounder.cp_bias_discrepancy:+.2f}) {'[SEVERE OMITTED-VARIABLE BIAS]' if confounder.is_mallows_biased else '[WELL-SPECIFIED]'}")
+            if confounder.davidson_mackinnon_p is not None:
+                rationale["key_evidence"].append(f"Davidson-MacKinnon J-Test: t_J = {confounder.davidson_mackinnon_j_stat:.2f} (p = {confounder.davidson_mackinnon_p:.3e}) {'[NON-NESTED CONFOUNDER SPECIFICATION FAVORED]' if confounder.is_j_test_rejected else '[ORIGINAL MODEL ADEQUATE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -224,6 +230,8 @@ class RefereeAgent:
             if stability.type_m_exaggeration_ratio is not None:
                 flag_tm = "[VULNERABLE TO WINNER'S CURSE]" if stability.is_type_m_vulnerable else "[STABLE DESIGN]"
                 rationale["key_evidence"].append(f"Gelman-Carlin Design Analysis: Type M ratio = {stability.type_m_exaggeration_ratio:.2f}x (Type S error = {stability.type_s_error_prob:.1%}, Power = {stability.retrodesign_power:.1%}) {flag_tm}")
+            if stability.andrews_p_value is not None:
+                rationale["key_evidence"].append(f"Andrews Sup-Wald Unknown Break Test: Sup W = {stability.andrews_sup_w:.2f} at τ* = {stability.andrews_break_fraction:.1%} (p = {stability.andrews_p_value:.3e}) {'[UNKNOWN REGIME SHIFT / BREAK DETECTED]' if stability.has_unknown_structural_break else '[STABLE PARAMETERS ALONG REGRESSOR]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -327,6 +335,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Mallows' Cp Criterion: Cp = {confounder.mallows_cp:.2f} (ΔCp = {confounder.cp_bias_discrepancy:+.2f})")
             if stability.type_m_exaggeration_ratio is not None:
                 rationale["key_evidence"].append(f"Gelman-Carlin Type M Ratio: {stability.type_m_exaggeration_ratio:.2f}x (Type S = {stability.type_s_error_prob:.1%})")
+            if confounder.davidson_mackinnon_p is not None:
+                rationale["key_evidence"].append(f"Davidson-MacKinnon J-Test: t_J = {confounder.davidson_mackinnon_j_stat:.2f} (p = {confounder.davidson_mackinnon_p:.3e})")
+            if stability.andrews_p_value is not None:
+                rationale["key_evidence"].append(f"Andrews Sup-Wald Invariance: Sup W = {stability.andrews_sup_w:.2f} (p = {stability.andrews_p_value:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

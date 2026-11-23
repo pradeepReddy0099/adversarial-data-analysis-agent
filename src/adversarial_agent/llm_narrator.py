@@ -157,7 +157,7 @@ class LLMNarrator:
                 )
             return "E-value sensitivity metrics are computed for continuous correlations and stratified odds ratios."
 
-        if any(w in q_lower for w in ["tarone", "homogeneity", "interaction", "effect modification"]):
+        if "tarone" in q_lower or (any(w in q_lower for w in ["homogeneity", "interaction", "effect modification"]) and not any(k in q_lower for k in ["freeman", "woolf", "breslow"])):
             tarone_findings = [
                 f for f in findings
                 if f.get("audit", {}).get("simpsons_audit", {}).get("tarone_homogeneity_p") is not None
@@ -813,7 +813,7 @@ class LLMNarrator:
                 )
             return "Altonji-Elder-Taber selection ratio measures how much stronger selection on unobservables must be relative to observables to nullify the effect."
 
-        if any(w in q_lower for w in ["chow", "structural break", "parameter constancy", "regime shift", "regime instability"]):
+        if "chow" in q_lower or (any(w in q_lower for w in ["structural break", "parameter constancy", "regime shift", "regime instability"]) and "andrews" not in q_lower and "sup" not in q_lower and "wald" not in q_lower):
             chow_items = []
             for f in findings:
                 stab = f.get("audit", {}).get("stability_audit", {})
@@ -931,6 +931,86 @@ class LLMNarrator:
                     + "\n".join(type_items)
                 )
             return "Gelman-Carlin design analysis quantifies Type S sign error rates and Type M exaggeration ratios to safeguard against the Winner's Curse."
+
+        if any(w in q_lower for w in ["freeman", "tukey", "double arcsine", "double-arcsine"]):
+            ft_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                ft_p = simp.get("freeman_tukey_p")
+                ft_chi2 = simp.get("freeman_tukey_chi2")
+                is_het = simp.get("is_freeman_tukey_heterogeneous", False)
+                if ft_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Statistically Significant Heterogeneity (p < 0.05)" if is_het else " (Variance-Stabilized Homogeneity)"
+                    ft_items.append(f"• **{v_name}** conditioned on **{conf}**: Freeman-Tukey χ² = {ft_chi2:.2f} (p = {ft_p:.3e}){flag}")
+            if ft_items:
+                return (
+                    "**Freeman & Tukey (1950) Variance-Stabilizing Double-Arcsine Homogeneity Test:**\n"
+                    "Applies variance-stabilizing angular transformations (Var(θ_k) = 1 / (4n_k + 2)) to prevent distortion from sparse strata or extreme proportions:\n"
+                    + "\n".join(ft_items)
+                )
+            return "Freeman-Tukey double-arcsine transformation tests proportion homogeneity across strata while stabilizing binomial sampling variance."
+
+        if any(w in q_lower for w in ["kruskal", "wallis", "rank sum", "rank heterogeneity"]):
+            kw_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                kw_p = simp.get("kruskal_wallis_p")
+                kw_h = simp.get("kruskal_wallis_h")
+                is_het = simp.get("is_kruskal_heterogeneous", False)
+                if kw_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Statistically Significant Strata Shift (p < 0.05)" if is_het else " (Invariant Distribution Medians)"
+                    kw_items.append(f"• **{v_name}** stratified by **{conf}**: Kruskal-Wallis H = {kw_h:.2f} (p = {kw_p:.3e}){flag}")
+            if kw_items:
+                return (
+                    "**Kruskal & Wallis (1952) Non-Parametric Rank-Sum Heterogeneity Test:**\n"
+                    "Evaluates whether the distribution medians of the target differ across strata without assuming Gaussian normality:\n"
+                    + "\n".join(kw_items)
+                )
+            return "Kruskal-Wallis non-parametric rank test evaluates whether subgroup target distributions differ significantly across strata."
+
+        if any(w in q_lower for w in ["davidson", "mackinnon", "j-test", "j test", "non-nested", "non nested"]):
+            j_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                j_p = conf.get("davidson_mackinnon_p")
+                j_t = conf.get("davidson_mackinnon_j_stat")
+                is_rej = conf.get("is_j_test_rejected", False)
+                if j_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ Original Model Rejected (Confounder Specification Favored, p < 0.05)" if is_rej else " (Original Specification Adequate)"
+                    j_items.append(f"• **{v_name}** vs Confounder **{c_name}**: Davidson-MacKinnon t_J = {j_t:.2f} (p = {j_p:.3e}){flag}")
+            if j_items:
+                return (
+                    "**Russell Davidson & James MacKinnon (1981) J-Test for Non-Nested Model Specification:**\n"
+                    "Tests bivariate claims against alternative confounder specifications by augmenting the model with predicted values from the rival model:\n"
+                    + "\n".join(j_items)
+                )
+            return "Davidson-MacKinnon J-test tests non-nested model specifications to verify whether candidate confounders capture critical explanatory power."
+
+        if any(w in q_lower for w in ["andrews", "sup w", "sup-w", "supremum wald", "unknown break", "change point"]):
+            and_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                w_stat = stab.get("andrews_sup_w")
+                frac = stab.get("andrews_break_fraction")
+                p_val = stab.get("andrews_p_value")
+                has_brk = stab.get("has_unknown_structural_break", False)
+                if w_stat is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Unknown Structural Break at τ* = {frac:.1%} (p < 0.05)" if has_brk else f" (Parameter Constant along Regressor, τ* = {frac:.1%})"
+                    and_items.append(f"• **{v_name}**: Andrews Sup W = {w_stat:.2f} (p = {p_val:.3e}){flag}")
+            if and_items:
+                return (
+                    "**Donald Andrews (1993) Supremum Wald Test for Unknown Structural Breaks:**\n"
+                    "Evaluates parameter invariance across all interior candidate split points τ ∈ [0.15, 0.85] with Hansen (1997) asymptotic p-values:\n"
+                    + "\n".join(and_items)
+                )
+            return "Andrews' Supremum Wald test detects structural breaks and regime shifts at unknown change points along sorted regressors."
 
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
@@ -1144,15 +1224,15 @@ class LLMNarrator:
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
         lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 10 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Woolf Stratified Test, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance with Haldane-Anscombe continuity corrections (Woolf's test), quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
-        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit), Cohen's f² & Mallows' Cp Criterion:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, unique variance effect sizes ($f^2$), and Mallows' $C_p$ model misspecification discrepancy ($\\Delta C_p > 2.0$) needed to nullify empirical associations.")
+        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Woolf Stratified Test, Freeman-Tukey Double-Arcsine Homogeneity, Kruskal-Wallis Rank Heterogeneity, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance with Haldane-Anscombe continuity corrections (Woolf's test), applies variance-stabilizing angular transformations (Freeman-Tukey test), tests non-parametric median shifts across strata (Kruskal-Wallis $H$), quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
+        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit), Cohen's f², Mallows' Cp Criterion & Davidson-MacKinnon J-Test:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, unique variance effect sizes ($f^2$), Mallows' $C_p$ model misspecification discrepancy ($\\Delta C_p > 2.0$), and Davidson-MacKinnon $J$-tests arbitrating non-nested specification dominance between bivariate claims and rival confounder models.")
         lines.append("3. **Altonji-Elder-Taber (AET 2005) Selection Ratio, Rosenbaum (1987, 2002) Sensitivity Bounds (Γ), Manski (1990, 2003) Non-Parametric Partial Identification & Imbens-Manski (2004) Asymptotically Valid CIs:** Evaluates the relative selection ratio ($R_{\\text{AET}}$) on unobservables required to attribute effects to selection bias, calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection, and constructs exact Imbens-Manski confidence intervals accounting for boundary sampling variability.")
         lines.append("4. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
         lines.append("5. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
         lines.append("6. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
         lines.append("7. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
         lines.append("8. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
-        lines.append("9. **Gregory Chow (1960) Structural Break Test, Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
+        lines.append("9. **Gregory Chow (1960) Structural Break Test, Donald Andrews (1993) Supremum Wald Test (Sup W), Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), detects structural change points at unknown locations along sorted regressors (Andrews $\\operatorname{Sup} W$), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
         lines.append("10. **Andrew Gelman & John Carlin (2014) Type S/M Design Analysis, Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, quantifies Type S sign error probabilities and Type M exaggeration ratios to safeguard against the Winner's Curse, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
