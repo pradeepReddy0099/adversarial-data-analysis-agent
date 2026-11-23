@@ -199,6 +199,11 @@ with col_right:
                             st.markdown(f"**Begg & Mazumdar Funnel Test:** τ = `{simpsons.get('begg_funnel_tau', 0.0):.2f}` (p = `{simpsons['begg_funnel_p']:.3e}`)")
                         if simpsons.get("e_value") is not None:
                             st.markdown(f"**Causal Sensitivity E-Value:** `{simpsons['e_value']:.2f}`")
+                        if simpsons.get("tau_squared") is not None:
+                            st.markdown(f"**DerSimonian-Laird Heterogeneity Variance:** `τ² = {simpsons['tau_squared']:.4f}`")
+                        if simpsons.get("egger_test_p") is not None:
+                            eg_flag = " ⚠️ Asymmetric" if simpsons["egger_test_p"] < 0.05 else " (Symmetric)"
+                            st.markdown(f"**Egger Regression Test:** t = `{simpsons.get('egger_test_t', 0.0):.2f}` (p = `{simpsons['egger_test_p']:.3e}`){eg_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -212,6 +217,12 @@ with col_right:
                             st.markdown(f"**Sobel Mediation Test:** `p = {conf_aud['sobel_p']:.3e}` ({conf_aud.get('proportion_mediated', 0.0):.1f}% mediated by `{conf_aud.get('top_confounder')}`)")
                         if conf_aud.get("bayes_factor_bf10") is not None:
                             st.markdown(f"**Kass-Raftery Bayes Factor:** BF_10 = `{conf_aud['bayes_factor_bf10']:.2f}` (ΔBIC = `{conf_aud.get('bic_delta', 0.0):+.2f}`)")
+                        if conf_aud.get("ramsey_reset_p") is not None:
+                            res_flag = " ⚠️ Functional Misspecification" if conf_aud.get("is_reset_misspecified") else " (Well-Specified)"
+                            st.markdown(f"**Ramsey RESET Test:** F = `{conf_aud.get('ramsey_reset_f', 0.0):.2f}` (p = `{conf_aud['ramsey_reset_p']:.3e}`){res_flag}")
+                        if conf_aud.get("oster_delta") is not None:
+                            ost_flag = " (Robust to unobservables)" if abs(conf_aud["oster_delta"]) >= 1.0 else " ⚠️ Vulnerable"
+                            st.markdown(f"**Oster Selection Bound:** `δ* = {conf_aud['oster_delta']:.2f}`{ost_flag}")
 
                         stab_aud = audit.get("stability_audit", {})
                         if stab_aud.get("sign_invariance_prob") is not None:
@@ -220,11 +231,16 @@ with col_right:
                             st.markdown(f"**Cook's Distance Influence:** Max `D_i = {stab_aud['max_cooks_distance']:.3f}` ({stab_aud.get('cooks_outlier_count', 0)} points > 4/n, shift = `{stab_aud.get('cooks_statistic_shift', 0.0):.4f}`)")
                         if stab_aud.get("max_dffits") is not None and stab_aud.get("max_dffits", 0) > 0:
                             st.markdown(f"**DFFITS Regression Influence:** Max |DFFITS| = `{stab_aud['max_dffits']:.3f}` ({stab_aud.get('dffits_outlier_count', 0)} points > 2√(p/n))")
+                        if stab_aud.get("max_dfbetas") is not None and stab_aud.get("max_dfbetas", 0) > 0:
+                            st.markdown(f"**DFBETAS Slope Influence:** Max |DFBETAS| = `{stab_aud['max_dfbetas']:.3f}` ({stab_aud.get('dfbetas_outlier_count', 0)} points > 2/√n)")
                         if stab_aud.get("permutation_p_value") is not None:
                             st.markdown(f"**Permutation Shuffle Test:** `p_perm = {stab_aud['permutation_p_value']:.3e}`")
                         if stab_aud.get("breusch_pagan_p") is not None:
                             bp_flag = " ⚠️ Heteroscedastic" if stab_aud.get("is_heteroscedastic") else " (Homoscedastic)"
                             st.markdown(f"**Breusch-Pagan Test:** LM = `{stab_aud.get('breusch_pagan_lm', 0.0):.2f}` (p = `{stab_aud['breusch_pagan_p']:.3e}`){bp_flag}")
+                        if stab_aud.get("jarque_bera_p") is not None:
+                            jb_flag = " ⚠️ Non-Gaussian" if stab_aud.get("is_non_normal") else " (Normal)"
+                            st.markdown(f"**Jarque-Bera Normality Test:** JB = `{stab_aud.get('jarque_bera_stat', 0.0):.2f}` (p = `{stab_aud['jarque_bera_p']:.3e}`){jb_flag}")
                         if stab_aud.get("quantile_discrepancy_index") is not None:
                             qdi_flag_str = " ⚠️ High Discrepancy" if stab_aud.get("qdi_flag") else " (Uniform)"
                             st.markdown(f"**Quantile Discrepancy Index:** QDI = `{stab_aud['quantile_discrepancy_index']:.2f}`{qdi_flag_str}")
@@ -375,15 +391,21 @@ with col_right:
                     "Verdict": f.get("verdict_badge", ""),
                     "Confidence": f.get("confidence_score", 0.0),
                     "Higgins_I2": f"{simp.get('i_squared', 0.0):.1f}%" if simp.get("i_squared") is not None else "N/A",
+                    "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Begg_Funnel_p": f"{simp.get('begg_funnel_p', 0.0):.3e}" if simp.get("begg_funnel_p") is not None else "N/A",
+                    "Egger_Funnel_p": f"{simp.get('egger_test_p', 0.0):.3e}" if simp.get("egger_test_p") is not None else "N/A",
                     "Cinelli_Hazlett_RV": f"{conf.get('robustness_value', 0.0):.2f}" if conf.get("robustness_value") is not None else "N/A",
                     "Sobel_p_value": f"{conf.get('sobel_p', 0.0):.3e}" if conf.get("sobel_p") is not None else "N/A",
                     "Bayes_Factor_BF10": f"{conf.get('bayes_factor_bf10', 0.0):.2f}" if conf.get("bayes_factor_bf10") is not None else "N/A",
+                    "Ramsey_RESET_p": f"{conf.get('ramsey_reset_p', 0.0):.3e}" if conf.get("ramsey_reset_p") is not None else "N/A",
+                    "Oster_Delta": f"{conf.get('oster_delta', 0.0):.2f}" if conf.get("oster_delta") is not None else "N/A",
                     "Sign_Invariance_P": f"{stab.get('sign_invariance_prob', 1.0):.1%}",
                     "Cooks_D_Max": f"{stab.get('max_cooks_distance', 0.0):.3f}",
                     "Max_DFFITS": f"{stab.get('max_dffits', 0.0):.3f}" if stab.get("max_dffits") is not None else "N/A",
+                    "Max_DFBETAS": f"{stab.get('max_dfbetas', 0.0):.3f}" if stab.get("max_dfbetas") is not None else "N/A",
                     "Permutation_p": f"{stab.get('permutation_p_value', 0.0):.3e}" if stab.get("permutation_p_value") is not None else "N/A",
                     "Breusch_Pagan_p": f"{stab.get('breusch_pagan_p', 0.0):.3e}" if stab.get("breusch_pagan_p") is not None else "N/A",
+                    "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
                     "Quantile_Discrepancy_QDI": f"{stab.get('quantile_discrepancy_index', 0.0):.2f}" if stab.get("quantile_discrepancy_index") is not None else "N/A",
                     "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",
                     "Synthesis": f.get("synthesis_summary", ""),

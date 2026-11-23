@@ -47,6 +47,9 @@ class SimpsonsParadoxAudit:
     cochrans_q: Optional[float] = None
     begg_funnel_tau: Optional[float] = None
     begg_funnel_p: Optional[float] = None
+    tau_squared: Optional[float] = None
+    egger_test_t: Optional[float] = None
+    egger_test_p: Optional[float] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -77,6 +80,10 @@ class ConfounderAudit:
     bayes_factor_bf10: Optional[float] = None
     bic_delta: Optional[float] = None
     bayes_factor_interpretation: Optional[str] = None
+    ramsey_reset_f: Optional[float] = None
+    ramsey_reset_p: Optional[float] = None
+    is_reset_misspecified: bool = False
+    oster_delta: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -110,6 +117,11 @@ class StabilityAudit:
     is_heteroscedastic: bool = False
     quantile_discrepancy_index: Optional[float] = None
     qdi_flag: bool = False
+    max_dfbetas: Optional[float] = None
+    dfbetas_outlier_count: int = 0
+    jarque_bera_stat: Optional[float] = None
+    jarque_bera_p: Optional[float] = None
+    is_non_normal: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -434,6 +446,163 @@ def calculate_quantile_discrepancy(x: np.ndarray, y: np.ndarray) -> tuple[Option
         return None, False
 
 
+def dersimonian_laird_tau_squared(
+    subgroup_stats: List[float],
+    subgroup_weights: List[int],
+    cochrans_q: Optional[float],
+    is_correlation: bool = True
+) -> Optional[float]:
+    """Calculates DerSimonian & Laird (1986) between-stratum variance tau^2.
+    
+    tau^2 = max(0, (Q - (K - 1)) / (sum(w) - sum(w^2) / sum(w)))
+    Quantifies absolute excess between-stratum variance beyond random sampling noise.
+    """
+    K = len(subgroup_stats)
+    if K < 2 or cochrans_q is None:
+        return None
+    weights_arr = np.array(subgroup_weights, dtype=float)
+    if is_correlation:
+        w = np.maximum(1.0, weights_arr - 3.0)
+    else:
+        w = np.maximum(1.0, weights_arr)
+    sum_w = float(np.sum(w))
+    sum_w_sq = float(np.sum(w ** 2))
+    denom = sum_w - (sum_w_sq / max(1e-9, sum_w))
+    if denom <= 1e-9:
+        return 0.0
+    df = K - 1
+    tau_sq = max(0.0, float((cochrans_q - df) / denom))
+    return float(tau_sq)
+
+
+def eggers_funnel_regression_test(
+    subgroup_stats: List[float],
+    subgroup_weights: List[int],
+    is_correlation: bool = True
+) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Egger et al. (1997) linear regression test for funnel plot asymmetry.
+    
+    Regresses standardized effect (z_k = theta_k / SE_k) on precision (prec_k = 1 / SE_k):
+    z_k = alpha + beta * prec_k + epsilon_k.
+    H0: alpha = 0 (symmetric funnel). An intercept alpha != 0 with p < 0.05 indicates
+    small-subgroup effect distortion or selection asymmetry.
+    """
+    K = len(subgroup_stats)
+    if K < 3:
+        return None, None
+    weights_arr = np.array(subgroup_weights, dtype=float)
+    if is_correlation:
+        clipped = np.clip(np.array(subgroup_stats, dtype=float), -0.999, 0.999)
+        theta = 0.5 * np.log((1.0 + clipped) / (1.0 - clipped))
+        se = 1.0 / np.sqrt(np.maximum(1.0, weights_arr - 3.0))
+    else:
+        theta = np.array(subgroup_stats, dtype=float)
+        se = 1.0 / np.sqrt(np.maximum(1.0, weights_arr))
+    
+    prec = 1.0 / np.maximum(1e-9, se)
+    z = theta / np.maximum(1e-9, se)
+    
+    p_prec = prec - np.mean(prec)
+    var_prec = np.sum(p_prec ** 2)
+    if var_prec < 1e-9:
+        return None, None
+    
+    b_slope = np.sum(p_prec * (z - np.mean(z))) / var_prec
+    alpha = np.mean(z) - b_slope * np.mean(prec)
+    
+    residuals = z - (alpha + b_slope * prec)
+    df_res = max(1, K - 2)
+    mse = np.sum(residuals ** 2) / df_res
+    se_alpha = np.sqrt(max(1e-12, mse * (1.0 / K + (np.mean(prec) ** 2) / var_prec)))
+    
+    t_stat = float(alpha / max(1e-9, se_alpha))
+    p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_res))
+    return float(t_stat), float(p_val)
+
+
+def ramsey_reset_test(x: np.ndarray, z: np.ndarray, y: np.ndarray) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Ramsey's RESET test for functional form misspecification and omitted non-linear confounding.
+    
+    Restricted model: y ~ 1 + x + z
+    Unrestricted model: y ~ 1 + x + z + y_hat^2 + y_hat^3
+    H0: gamma_1 = gamma_2 = 0 (correct linear specification).
+    Rejection (p < 0.05) indicates non-linear confounder bias or omitted polynomial effects.
+    """
+    n = len(y)
+    if n < 20:
+        return None, None, False
+    try:
+        X_rest = np.column_stack([np.ones(n), x, z])
+        beta_rest, _, _, _ = np.linalg.lstsq(X_rest, y, rcond=None)
+        y_hat = X_rest @ beta_rest
+        ssr_rest = float(np.sum((y - y_hat) ** 2))
+        
+        y_hat2 = y_hat ** 2
+        y_hat3 = y_hat ** 3
+        X_unrest = np.column_stack([np.ones(n), x, z, y_hat2, y_hat3])
+        beta_unrest, _, _, _ = np.linalg.lstsq(X_unrest, y, rcond=None)
+        y_hat_unrest = X_unrest @ beta_unrest
+        ssr_unrest = float(np.sum((y - y_hat_unrest) ** 2))
+        
+        df_num = 2
+        df_denom = max(1, n - 5)
+        diff_ssr = max(0.0, ssr_rest - ssr_unrest)
+        f_stat = float((diff_ssr / df_num) / max(1e-9, ssr_unrest / df_denom))
+        p_val = float(stats.f.sf(f_stat, df_num, df_denom))
+        is_misspecified = bool(p_val < 0.05)
+        return float(f_stat), float(p_val), is_misspecified
+    except Exception:
+        return None, None, False
+
+
+def calculate_oster_delta(r_xy: float, r_xz: float, r_yz: float, n: int) -> Optional[float]:
+    """Calculates Emily Oster's (2019) coefficient stability bound delta* for selection on unobservables.
+    
+    Quantifies the proportional degree of selection on unobservables relative to observables
+    required to produce an effect of zero. Under R_max = min(1.0, 1.3 * R_controlled^2):
+    delta* = beta_controlled * (R_max - R_uncontrolled) / ((beta_uncontrolled - beta_controlled) * (R_controlled - R_uncontrolled)).
+    |delta*| >= 1.0 indicates robustness (unobservables must be stronger than observables to overturn).
+    """
+    if n < 15 or abs(r_xz) >= 0.999 or np.isnan(r_xy) or np.isnan(r_xz) or np.isnan(r_yz):
+        return None
+    denom = max(1e-9, 1.0 - r_xz ** 2)
+    beta_0 = r_xy
+    r2_0 = min(0.999, r_xy ** 2)
+    
+    beta_1 = (r_xy - r_xz * r_yz) / denom
+    r2_1 = min(0.999, max(0.0, (r_xy ** 2 + r_yz ** 2 - 2.0 * r_xy * r_yz * r_xz) / denom))
+    
+    diff_beta = beta_0 - beta_1
+    if abs(diff_beta) < 1e-6:
+        return 99.9
+        
+    r_max = min(1.0, 1.3 * r2_1)
+    delta_denom = diff_beta * max(1e-6, r2_1 - r2_0)
+    if abs(delta_denom) < 1e-9:
+        return 99.9
+        
+    delta_star = float((beta_1 * (r_max - r2_0)) / delta_denom)
+    return round(delta_star, 2)
+
+
+def jarque_bera_normality_test(residuals: np.ndarray) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Jarque-Bera goodness-of-fit test for residual normality.
+    
+    JB = (n / 6) * (S^2 + (K - 3)^2 / 4) ~ chi^2(2)
+    H0: Residuals are normally distributed.
+    Rejection (p < 0.05) indicates heavy-tailed distribution or skewness violating Gauss-Markov assumptions.
+    """
+    n = len(residuals)
+    if n < 15 or np.std(residuals) < 1e-9:
+        return None, None, False
+    try:
+        jb_stat, p_val = stats.jarque_bera(residuals)
+        is_non_norm = bool(p_val < 0.05)
+        return float(jb_stat), float(p_val), is_non_norm
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -739,6 +908,16 @@ class DevilsAdvocateAgent:
         # Advanced Metric 4: Begg & Mazumdar Funnel Plot Asymmetry Test across Strata
         begg_tau, begg_p = begg_funnel_asymmetry_test(subgroup_stats, subgroup_weights)
 
+        # Advanced Metric 5: DerSimonian & Laird Between-Stratum Variance tau^2
+        tau_sq = dersimonian_laird_tau_squared(
+            subgroup_stats, subgroup_weights, cochrans_q, is_correlation=(claim.claim_type == "correlation")
+        )
+
+        # Advanced Metric 6: Egger's Linear Regression Funnel Asymmetry Test
+        egger_t, egger_p = eggers_funnel_regression_test(
+            subgroup_stats, subgroup_weights, is_correlation=(claim.claim_type == "correlation")
+        )
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if tarone_p is not None:
             cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
@@ -748,6 +927,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [I² Heterogeneity: {i_sq:.1f}%]"
         if begg_p is not None:
             cmh_note += f" [Begg Funnel: τ={begg_tau:.2f}, p={begg_p:.3e}]"
+        if tau_sq is not None:
+            cmh_note += f" [DerSimonian-Laird τ²: {tau_sq:.4f}]"
+        if egger_p is not None:
+            cmh_note += f" [Egger Test: t={egger_t:.2f}, p={egger_p:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -780,6 +963,9 @@ class DevilsAdvocateAgent:
             cochrans_q=cochrans_q,
             begg_funnel_tau=begg_tau,
             begg_funnel_p=begg_p,
+            tau_squared=tau_sq,
+            egger_test_t=egger_t,
+            egger_test_p=egger_p,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -870,17 +1056,36 @@ class DevilsAdvocateAgent:
                 except Exception:
                     pass
 
+        # Advanced Specification Diagnostic: Ramsey RESET Test & Oster (2019) Selection Bound
+        reset_f, reset_p, is_reset_bad = None, None, False
+        oster_delta_val = None
+        if top_conf is not None:
+            sub_res = df[[source, target, top_conf]].dropna()
+            if len(sub_res) >= 20:
+                try:
+                    x_arr = sub_res[source].to_numpy(dtype=float)
+                    z_arr = sub_res[top_conf].to_numpy(dtype=float)
+                    y_arr = sub_res[target].to_numpy(dtype=float)
+                    reset_f, reset_p, is_reset_bad = ramsey_reset_test(x_arr, z_arr, y_arr)
+                    r_xz_o, _ = stats.pearsonr(x_arr, z_arr)
+                    r_yz_o, _ = stats.pearsonr(y_arr, z_arr)
+                    oster_delta_val = calculate_oster_delta(r_xy, r_xz_o, r_yz_o, n=len(sub_res))
+                except Exception:
+                    pass
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
         rv_str = f", RV={rv_point:.2f}"
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
+        reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
+        oster_str = f", Oster δ*={oster_delta_val:.2f}" if oster_delta_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -905,6 +1110,10 @@ class DevilsAdvocateAgent:
             bayes_factor_bf10=bf10,
             bic_delta=delta_bic,
             bayes_factor_interpretation=bf_interp,
+            ramsey_reset_f=reset_f,
+            ramsey_reset_p=reset_p,
+            is_reset_misspecified=is_reset_bad,
+            oster_delta=oster_delta_val,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -1058,9 +1267,18 @@ class DevilsAdvocateAgent:
             max_dffits_val = float(np.max(np.abs(dffits)))
             dffits_threshold = 2.0 * np.sqrt(p_params / n)
             dffits_count = int(np.sum(np.abs(dffits) > dffits_threshold))
+
+            # Advanced Diagnostic: Belsley-Kuh-Welsch DFBETAS Slope Influence Diagnostic
+            denom_dfb = np.sqrt(np.maximum(1e-12, (mse_i / x_ss) * denom_h))
+            dfbetas = (residuals * x_diff / x_ss) / denom_dfb
+            max_dfbetas_val = float(np.max(np.abs(dfbetas)))
+            dfbetas_threshold = 2.0 / np.sqrt(n)
+            dfbetas_count = int(np.sum(np.abs(dfbetas) > dfbetas_threshold))
         else:
             max_dffits_val = 0.0
             dffits_count = 0
+            max_dfbetas_val = 0.0
+            dfbetas_count = 0
 
         # Advanced Falsification Battery: Non-parametric Exact Permutation Shuffle Test
         n_perms = 150
@@ -1075,6 +1293,9 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Breusch-Pagan Lagrange Multiplier Test for Heteroscedasticity
         bp_lm, bp_p, is_hetero = breusch_pagan_test(x_vals, residuals)
 
+        # Advanced Diagnostic: Jarque-Bera Goodness-of-Fit Normality Test on Residuals
+        jb_stat, jb_p, is_non_norm = jarque_bera_normality_test(residuals)
+
         # Advanced Diagnostic: Quantile Discrepancy Index (QDI) across 25th, 50th, 75th percentiles
         qdi_val, qdi_flag = calculate_quantile_discrepancy(x_vals, y_vals)
 
@@ -1083,9 +1304,11 @@ class DevilsAdvocateAgent:
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
         cooks_str = f", Cook's D_max={max_cooks:.3f} ({cooks_count} influential)" if max_cooks > 0 else ""
         dffits_str = f", DFFITS_max={max_dffits_val:.3f}" if max_dffits_val > 0 else ""
+        dfb_str = f", DFBETAS_max={max_dfbetas_val:.3f}" if max_dfbetas_val > 0 else ""
         bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
+        jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{bp_str}{qdi_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -1114,6 +1337,11 @@ class DevilsAdvocateAgent:
             is_heteroscedastic=is_hetero,
             quantile_discrepancy_index=qdi_val,
             qdi_flag=qdi_flag,
+            max_dfbetas=max_dfbetas_val,
+            dfbetas_outlier_count=dfbetas_count,
+            jarque_bera_stat=jb_stat,
+            jarque_bera_p=jb_p,
+            is_non_normal=is_non_norm,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

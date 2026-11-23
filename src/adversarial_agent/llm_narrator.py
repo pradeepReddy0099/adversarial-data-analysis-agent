@@ -419,6 +419,116 @@ class LLMNarrator:
                 )
             return "Quantile Discrepancy Index measures whether conditional slopes vary dramatically across outcome quantiles."
 
+        if any(w in q_lower for w in ["egger", "egger's"]):
+            egger_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                t_stat = simp.get("egger_test_t")
+                p_val = simp.get("egger_test_p")
+                if p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Asymmetric" if p_val < 0.05 else " (Symmetric)"
+                    egger_items.append(f"• **{v_name}** across **{conf}**: Egger's t = {t_stat:.2f} (p = {p_val:.3e}){flag}")
+            if egger_items:
+                return (
+                    "**Egger et al. (1997) Linear Regression Test for Funnel Asymmetry:**\n"
+                    "Regresses standardized effect on precision to detect small-subgroup effect distortion or reporting bias:\n"
+                    + "\n".join(egger_items)
+                )
+            return "Egger's test evaluates funnel plot asymmetry and small-subgroup effect distortion."
+
+        if any(w in q_lower for w in ["dersimonian", "laird", "tau-squared", "tau^2", "between-strata"]):
+            tau_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                tau_sq = simp.get("tau_squared")
+                if tau_sq is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    tau_items.append(f"• **{v_name}** stratified by **{conf}**: DerSimonian-Laird τ² = {tau_sq:.4f}")
+            if tau_items:
+                return (
+                    "**DerSimonian & Laird (1986) Between-Stratum Variance (τ²):**\n"
+                    "Quantifies the absolute magnitude of true between-subgroup effect variance beyond random sampling noise:\n"
+                    + "\n".join(tau_items)
+                )
+            return "DerSimonian-Laird τ² estimates the between-stratum effect variance in random-effects meta-analysis."
+
+        if any(w in q_lower for w in ["ramsey", "reset", "misspecification"]):
+            reset_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                f_stat = conf.get("ramsey_reset_f")
+                p_val = conf.get("ramsey_reset_p")
+                is_bad = conf.get("is_reset_misspecified", False)
+                if p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ Functional Misspecification" if is_bad else " (Well-Specified)"
+                    reset_items.append(f"• **{v_name}** with **{c_name}**: RESET F = {f_stat:.2f} (p = {p_val:.3e}){flag}")
+            if reset_items:
+                return (
+                    "**Ramsey (1969) RESET Test for Functional Form & Non-linear Confounding:**\n"
+                    "Tests whether higher powers of fitted values (ŷ², ŷ³) improve fit, detecting omitted polynomial or interaction confounding:\n"
+                    + "\n".join(reset_items)
+                )
+            return "Ramsey's RESET tests for functional form misspecification and omitted non-linear confounding."
+
+        if any(w in q_lower for w in ["oster", "unobservable selection", "delta bound"]):
+            oster_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                d_star = conf.get("oster_delta")
+                if d_star is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " (Robust: |δ*| ≥ 1.0)" if abs(d_star) >= 1.0 else " ⚠️ Vulnerable: |δ*| < 1.0"
+                    oster_items.append(f"• **{v_name}** vs **{c_name}**: Oster δ* = {d_star:.2f}{flag}")
+            if oster_items:
+                return (
+                    "**Emily Oster (2019) Selection on Unobservables Bound (δ*):**\n"
+                    "Measures how much stronger selection on unobserved confounders must be relative to observed covariates to explain away the effect (R_max = min(1.0, 1.3*R²)):\n"
+                    + "\n".join(oster_items)
+                )
+            return "Oster's δ* bounds the degree of unobservable selection needed to nullify the observed effect."
+
+        if any(w in q_lower for w in ["dfbetas", "slope influence"]):
+            dfb_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                max_dfb = stab.get("max_dfbetas")
+                cnt = stab.get("dfbetas_outlier_count", 0)
+                if max_dfb is not None and max_dfb > 0:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    dfb_items.append(f"• **{v_name}**: Max |DFBETAS| = {max_dfb:.3f} ({cnt} observations exceeding 2/√n)")
+            if dfb_items:
+                return (
+                    "**Belsley, Kuh & Welsch (1980) DFBETAS Slope Influence Diagnostic:**\n"
+                    "Measures the standardized shift in the regression slope coefficient caused by deleting each observation:\n"
+                    + "\n".join(dfb_items)
+                )
+            return "DFBETAS identifies individual observations exerting excessive leverage on the estimated slope parameter."
+
+        if any(w in q_lower for w in ["jarque", "bera", "normality"]):
+            jb_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                jb_stat = stab.get("jarque_bera_stat")
+                p_val = stab.get("jarque_bera_p")
+                is_non = stab.get("is_non_normal", False)
+                if p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Non-Gaussian" if is_non else " (Normal Residuals)"
+                    jb_items.append(f"• **{v_name}**: JB = {jb_stat:.2f} (p = {p_val:.3e}){flag}")
+            if jb_items:
+                return (
+                    "**Jarque-Bera Goodness-of-Fit Residual Normality Test:**\n"
+                    "Tests null hypothesis of Gaussian residual distribution based on skewness and kurtosis:\n"
+                    + "\n".join(jb_items)
+                )
+            return "Jarque-Bera diagnostic tests whether regression residuals satisfy Gaussian normality."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -630,13 +740,14 @@ class LLMNarrator:
 
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
-        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 6 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I² & Begg's Funnel Asymmetry:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$), and tests small-stratum funnel asymmetry.")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 7 continuous and categorical stress tests:")
+        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I², DerSimonian-Laird τ² & Egger/Begg Funnel Tests:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), and tests small-stratum funnel asymmetry via linear regression (Egger) and rank correlation (Begg).")
         lines.append("2. **VanderWeele E-Values & Cinelli-Hazlett Robustness Values (RV):** Establishes mathematical bounds and partial $R^2$ strength an unmeasured confounder must achieve to nullify empirical associations.")
-        lines.append("3. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
-        lines.append("4. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
-        lines.append("5. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS & Breusch-Pagan:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), regression influence diagnostics, and tests error homoscedasticity.")
-        lines.append("6. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
+        lines.append("3. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
+        lines.append("4. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
+        lines.append("5. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
+        lines.append("6. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan & Jarque-Bera:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, and residual Gaussian normality.")
+        lines.append("7. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

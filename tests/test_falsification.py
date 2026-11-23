@@ -47,6 +47,11 @@ def test_berkeley_admissions_falsification():
     # Verify Begg's funnel plot asymmetry test is computed
     assert audit.simpsons_audit.begg_funnel_p is not None
     assert audit.simpsons_audit.begg_funnel_tau is not None
+    # Verify DerSimonian-Laird tau^2 and Egger's regression test
+    assert audit.simpsons_audit.tau_squared is not None
+    assert audit.simpsons_audit.tau_squared >= 0.0
+    assert audit.simpsons_audit.egger_test_p is not None
+    assert audit.simpsons_audit.egger_test_t is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -106,6 +111,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.bayes_factor_bf10 is not None
         assert audit_coffee.confounder_audit.bayes_factor_bf10 > 0.0
         assert audit_coffee.confounder_audit.bic_delta is not None
+        # Check Ramsey RESET test and Oster selection bound
+        assert audit_coffee.confounder_audit.ramsey_reset_p is not None
+        assert audit_coffee.confounder_audit.ramsey_reset_f is not None
+        assert audit_coffee.confounder_audit.oster_delta is not None
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -144,6 +153,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.breusch_pagan_p is not None
     assert audit.stability_audit.quantile_discrepancy_index is not None
     assert audit.stability_audit.quantile_discrepancy_index >= 0.0
+    # Check DFBETAS and Jarque-Bera residual normality
+    assert audit.stability_audit.max_dfbetas is not None
+    assert audit.stability_audit.max_dfbetas >= 0.0
+    assert audit.stability_audit.jarque_bera_stat is not None
+    assert audit.stability_audit.jarque_bera_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -216,6 +230,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_qdi = narrator.answer_query("What is the Quantile Discrepancy Index?", findings)
     assert "Quantile Discrepancy" in ans_qdi or "QDI" in ans_qdi
+
+    ans_egger = narrator.answer_query("Explain Egger's regression test", findings)
+    assert "Egger" in ans_egger or "Asymmetry" in ans_egger
+
+    ans_tau = narrator.answer_query("Explain DerSimonian-Laird tau-squared", findings)
+    assert "DerSimonian" in ans_tau or "τ²" in ans_tau or "Variance" in ans_tau
+
+    ans_reset = narrator.answer_query("Explain Ramsey RESET test", findings)
+    assert "Ramsey" in ans_reset or "RESET" in ans_reset
+
+    ans_oster = narrator.answer_query("What is the Oster delta bound?", findings)
+    assert "Oster" in ans_oster or "δ*" in ans_oster
+
+    ans_dfb = narrator.answer_query("What is DFBETAS slope influence?", findings)
+    assert "DFBETAS" in ans_dfb or "Influence" in ans_dfb
+
+    ans_jb = narrator.answer_query("Explain Jarque-Bera normality", findings)
+    assert "Jarque-Bera" in ans_jb or "Normality" in ans_jb
 
 
 def test_end_to_end_pipeline(tmp_path):

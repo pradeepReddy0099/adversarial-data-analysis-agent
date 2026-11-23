@@ -85,6 +85,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Higgins & Thompson I² Inconsistency: {simpsons.i_squared:.1f}% (Cochran's Q = {simpsons.cochrans_q:.2f})")
             if simpsons.begg_funnel_p is not None:
                 rationale["key_evidence"].append(f"Begg & Mazumdar Funnel Test: τ = {simpsons.begg_funnel_tau:.2f} (p = {simpsons.begg_funnel_p:.3e})")
+            if simpsons.tau_squared is not None:
+                rationale["key_evidence"].append(f"DerSimonian-Laird Heterogeneity Variance: τ² = {simpsons.tau_squared:.4f}")
+            if simpsons.egger_test_p is not None:
+                rationale["key_evidence"].append(f"Egger Funnel Asymmetry Test: t = {simpsons.egger_test_t:.2f} (p = {simpsons.egger_test_p:.3e})")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -122,6 +126,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Baron-Kenny Sobel Mediation: p = {confounder.sobel_p:.3e} ({confounder.proportion_mediated:.1f}% mediated by '{confounder.top_confounder}')")
             if confounder.bayes_factor_bf10 is not None:
                 rationale["key_evidence"].append(f"Kass-Raftery Bayes Factor: BF_10 = {confounder.bayes_factor_bf10:.2f} (ΔBIC = {confounder.bic_delta:+.2f}) [{confounder.bayes_factor_interpretation}]")
+            if confounder.ramsey_reset_p is not None:
+                rationale["key_evidence"].append(f"Ramsey RESET Test: F = {confounder.ramsey_reset_f:.2f} (p = {confounder.ramsey_reset_p:.3e}) {'[MISSPECIFIED / NON-LINEAR]' if confounder.is_reset_misspecified else '[WELL-SPECIFIED]'}")
+            if confounder.oster_delta is not None:
+                rationale["key_evidence"].append(f"Oster (2019) Selection Bound: δ* = {confounder.oster_delta:.2f} ({'Robust to unobservables' if abs(confounder.oster_delta) >= 1.0 else 'Sensitive to unobservables'})")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -163,6 +171,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Breusch-Pagan Heteroscedasticity: LM = {stability.breusch_pagan_lm:.2f} (p = {stability.breusch_pagan_p:.3e}) {'[HETEROSCEDASTIC]' if stability.is_heteroscedastic else '[HOMOSCEDASTIC]'}")
             if stability.quantile_discrepancy_index is not None:
                 rationale["key_evidence"].append(f"Quantile Discrepancy Index: QDI = {stability.quantile_discrepancy_index:.2f} {'[HIGH QUANTILE DISCREPANCY]' if stability.qdi_flag else '[UNIFORM]'}")
+            if stability.max_dfbetas is not None and stability.max_dfbetas > 0:
+                rationale["key_evidence"].append(f"DFBETAS Influence: Max |DFBETAS| = {stability.max_dfbetas:.3f} ({stability.dfbetas_outlier_count} influential observations)")
+            if stability.jarque_bera_p is not None:
+                rationale["key_evidence"].append(f"Jarque-Bera Normality Test: JB = {stability.jarque_bera_stat:.2f} (p = {stability.jarque_bera_p:.3e}) {'[NON-GAUSSIAN RESIDUALS]' if stability.is_non_normal else '[NORMAL RESIDUALS]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -234,6 +246,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Breusch-Pagan Homoscedasticity: LM = {stability.breusch_pagan_lm:.2f} (p = {stability.breusch_pagan_p:.3e})")
             if stability.quantile_discrepancy_index is not None:
                 rationale["key_evidence"].append(f"Quantile Discrepancy Index: QDI = {stability.quantile_discrepancy_index:.2f}")
+            if confounder.ramsey_reset_p is not None:
+                rationale["key_evidence"].append(f"Ramsey RESET Test: F = {confounder.ramsey_reset_f:.2f} (p = {confounder.ramsey_reset_p:.3e})")
+            if confounder.oster_delta is not None:
+                rationale["key_evidence"].append(f"Oster (2019) Selection Bound: δ* = {confounder.oster_delta:.2f}")
+            if stability.max_dfbetas is not None and stability.max_dfbetas > 0:
+                rationale["key_evidence"].append(f"DFBETAS Influence: Max |DFBETAS| = {stability.max_dfbetas:.3f}")
+            if stability.jarque_bera_p is not None:
+                rationale["key_evidence"].append(f"Jarque-Bera Normality Test: JB = {stability.jarque_bera_stat:.2f} (p = {stability.jarque_bera_p:.3e})")
             if claim.fdr_q_value is not None:
                 rationale["key_evidence"].append(f"Benjamini-Hochberg FDR: q = {claim.fdr_q_value:.4e}")
             if claim.bonferroni_p_value is not None:
