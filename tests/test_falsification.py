@@ -147,6 +147,12 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.schwarzer_test_p is not None
     assert audit.simpsons_audit.westenberg_stat_z is not None
     assert audit.simpsons_audit.westenberg_stat_p is not None
+    # Verify Ioannidis-Trikalinos TES excess test and O'Brien scale homogeneity test
+    assert audit.simpsons_audit.tes_excess_ratio is not None
+    assert audit.simpsons_audit.tes_chi2 is not None
+    assert audit.simpsons_audit.tes_p_value is not None
+    assert audit.simpsons_audit.obrien_stat_f is not None
+    assert audit.simpsons_audit.obrien_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -303,6 +309,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.rr_variance_ratio >= 0.0
         assert audit_coffee.confounder_audit.iw_quadratic_diff is not None
         assert audit_coffee.confounder_audit.iw_quadratic_diff >= 0.0
+        # Check Rosenbaum Hodges-Lehmann shift and Frank RIR fragility
+        assert audit_coffee.confounder_audit.hodges_lehmann_shift is not None
+        assert audit_coffee.confounder_audit.hodges_lehmann_p is not None
+        assert audit_coffee.confounder_audit.frank_rir_pct is not None
+        assert audit_coffee.confounder_audit.frank_rir_pct >= 0.0
+        assert audit_coffee.confounder_audit.frank_rir_count is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -444,6 +456,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.doornik_hansen_p is not None
     assert audit.stability_audit.max_welsch_distance is not None
     assert audit.stability_audit.max_welsch_distance >= 0.0
+    # Check Gel-Gastwirth robust Jarque-Bera normality and Daniel Peña influence
+    assert audit.stability_audit.gel_gastwirth_rjb is not None
+    assert audit.stability_audit.gel_gastwirth_rjb >= 0.0
+    assert audit.stability_audit.gel_gastwirth_p is not None
+    assert audit.stability_audit.max_pena_influence is not None
+    assert audit.stability_audit.max_pena_influence >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -861,6 +879,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_welsch = narrator.answer_query("Explain Roy Welsch distance influence metric in regression", findings)
     assert "Welsch" in ans_welsch or "Distance" in ans_welsch or "Influence" in ans_welsch or "Residual" in ans_welsch
+
+    ans_tes = narrator.answer_query("Explain John Ioannidis and Thomas Trikalinos test for excess significance", findings)
+    assert "Ioannidis" in ans_tes or "Significance" in ans_tes or "TES" in ans_tes or "Excess" in ans_tes
+
+    ans_obrien = narrator.answer_query("Explain Peter O'Brien homogeneity of variance test", findings)
+    assert "O'Brien" in ans_obrien or "Variance" in ans_obrien or "Homogeneity" in ans_obrien or "Scale" in ans_obrien
+
+    ans_hl = narrator.answer_query("Explain Paul Rosenbaum Hodges-Lehmann aligned rank covariate shift", findings)
+    assert "Hodges-Lehmann" in ans_hl or "Shift" in ans_hl or "Rank" in ans_hl or "Rosenbaum" in ans_hl
+
+    ans_rir = narrator.answer_query("Explain Kenneth Frank robustness of inference to replacement", findings)
+    assert "Frank" in ans_rir or "Replacement" in ans_rir or "RIR" in ans_rir or "Inference" in ans_rir
+
+    ans_rjb = narrator.answer_query("Explain Gel and Gastwirth robust Jarque-Bera normality test", findings)
+    assert "Gel" in ans_rjb or "Gastwirth" in ans_rjb or "RJB" in ans_rjb or "Jarque-Bera" in ans_rjb
+
+    ans_pena = narrator.answer_query("Explain Daniel Peña measure of influence in regression", findings)
+    assert "Peña" in ans_pena or "Pena" in ans_pena or "Influence" in ans_pena or "Projection" in ans_pena
 
 
 def test_end_to_end_pipeline(tmp_path):

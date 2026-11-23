@@ -165,6 +165,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Schwarzer Arcsine Funnel Test: t = {simpsons.schwarzer_test_t:.2f} (p = {simpsons.schwarzer_test_p:.3e}) {'[ARCSINE-STABILIZED ASYMMETRY]' if simpsons.is_schwarzer_asymmetric else '[SYMMETRIC ARCSINE PRECISION]'}")
             if simpsons.westenberg_stat_p is not None:
                 rationale["key_evidence"].append(f"Westenberg IQR Scale Test: Z = {simpsons.westenberg_stat_z:.2f} (p = {simpsons.westenberg_stat_p:.3e}) {'[NON-PARAMETRIC IQR SCALE DISPERSION]' if simpsons.is_westenberg_heterogeneous else '[HOMOGENEOUS IQR SPREAD]'}")
+            if simpsons.tes_p_value is not None:
+                rationale["key_evidence"].append(f"Ioannidis-Trikalinos TES Excess Test: A = {simpsons.tes_excess_ratio:.2f} (chi2 = {simpsons.tes_chi2:.2f}, p = {simpsons.tes_p_value:.3e}) {'[EXCESS SIGNIFICANCE / SELECTIVE DISCOVERY]' if simpsons.is_tes_excessive else '[EXPECTED STATISTICAL DISCOVERY POWER]'}")
+            if simpsons.obrien_p_value is not None:
+                rationale["key_evidence"].append(f"O'Brien Scale Homogeneity Test: F = {simpsons.obrien_stat_f:.2f} (p = {simpsons.obrien_p_value:.3e}) {'[ROBUST SCALE SPREAD HETEROGENEITY]' if simpsons.is_obrien_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -282,6 +286,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum-Rubin Residual Variance Ratio: VR = {confounder.rr_variance_ratio:.2f} (p = {confounder.rr_variance_p:.3e}) {'[HETEROGENEOUS RESIDUAL VARIANCE / 2ND-ORDER IMBALANCE]' if confounder.is_rr_variance_imbalanced else '[BALANCED SECOND-ORDER RESIDUAL SPREAD]'}")
             if confounder.iw_quadratic_diff is not None:
                 rationale["key_evidence"].append(f"Imbens-Wooldridge Quadratic Balance: Delta_Z2 = {confounder.iw_quadratic_diff:.3f} {'[SEVERE QUADRATIC NON-LINEAR EXTRAPOLATION RISK]' if confounder.is_iw_quadratic_excessive else '[SATISFACTORY QUADRATIC OVERLAP]'}")
+            if confounder.hodges_lehmann_p is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Hodges-Lehmann Shift: Delta_HL = {confounder.hodges_lehmann_shift:.3f} (Z = {confounder.hodges_lehmann_z:.2f}, p = {confounder.hodges_lehmann_p:.3e}) {'[NON-PARAMETRIC COVARIATE LOCATION SHIFT]' if confounder.is_hl_imbalanced else '[BALANCED NON-PARAMETRIC LOCATION]'}")
+            if confounder.frank_rir_pct is not None:
+                rationale["key_evidence"].append(f"Frank Robustness of Inference to Replacement (RIR): RIR = {confounder.frank_rir_pct:.1f}% ({confounder.frank_rir_count} cases) {'[HIGH INFERENTIAL FRAGILITY TO REPLACEMENT]' if confounder.is_rir_fragile else '[ROBUST INFERENTIAL REPLACEMENT BUFFER]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -400,6 +408,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Doornik-Hansen Residual Normality: E_DH = {stability.doornik_hansen_stat:.2f} (p = {stability.doornik_hansen_p:.3e}) {'[TRANSFORMED SKEW-KURTOSIS NON-NORMALITY]' if stability.is_doornik_hansen_non_normal else '[NORMAL GAUSSIAN SKEW-KURTOSIS FIT]'}")
             if stability.max_welsch_distance is not None:
                 rationale["key_evidence"].append(f"Welsch Distance Influence: Max W = {stability.max_welsch_distance:.2f} ({stability.welsch_outlier_count} influential) {'[LEVERAGE-WEIGHTED DISTANCE DISTORTION]' if stability.is_welsch_influential else '[BOUNDED WELSCH INFLUENCE]'}")
+            if stability.gel_gastwirth_p is not None:
+                rationale["key_evidence"].append(f"Gel-Gastwirth Robust Jarque-Bera (RJB): RJB = {stability.gel_gastwirth_rjb:.2f} (p = {stability.gel_gastwirth_p:.3e}) {'[ROBUST RESIDUAL NON-NORMALITY]' if stability.is_rjb_non_normal else '[NORMAL GAUSSIAN SPREAD]'}")
+            if stability.max_pena_influence is not None:
+                rationale["key_evidence"].append(f"Daniel Peña Influence: Max P = {stability.max_pena_influence:.3f} ({stability.pena_outlier_count} influential) {'[PROJECTION SUBSPACE DISTORTION]' if stability.is_pena_influential else '[BOUNDED PEÑA INFLUENCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -667,6 +679,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Doornik-Hansen Normality: E_DH = {stability.doornik_hansen_stat:.2f} (p = {stability.doornik_hansen_p:.3e})")
             if stability.max_welsch_distance is not None:
                 rationale["key_evidence"].append(f"Welsch Distance Influence: Max W = {stability.max_welsch_distance:.2f}")
+            if simpsons.tes_p_value is not None:
+                rationale["key_evidence"].append(f"Ioannidis-Trikalinos TES Test: A = {simpsons.tes_excess_ratio:.2f} (p = {simpsons.tes_p_value:.3e})")
+            if simpsons.obrien_p_value is not None:
+                rationale["key_evidence"].append(f"O'Brien Scale Test: F = {simpsons.obrien_stat_f:.2f} (p = {simpsons.obrien_p_value:.3e})")
+            if confounder.hodges_lehmann_p is not None:
+                rationale["key_evidence"].append(f"Hodges-Lehmann Shift: Delta_HL = {confounder.hodges_lehmann_shift:.3f} (p = {confounder.hodges_lehmann_p:.3e})")
+            if confounder.frank_rir_pct is not None:
+                rationale["key_evidence"].append(f"Frank RIR: {confounder.frank_rir_pct:.1f}% ({confounder.frank_rir_count} cases)")
+            if stability.gel_gastwirth_p is not None:
+                rationale["key_evidence"].append(f"Gel-Gastwirth RJB Normality: RJB = {stability.gel_gastwirth_rjb:.2f} (p = {stability.gel_gastwirth_p:.3e})")
+            if stability.max_pena_influence is not None:
+                rationale["key_evidence"].append(f"Peña Influence: Max P = {stability.max_pena_influence:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -312,6 +312,12 @@ with col_right:
                         if simpsons.get("westenberg_stat_p") is not None:
                             west_flag = " ⚠️ IQR Scale Dispersion (p < 0.05)" if simpsons.get("is_westenberg_heterogeneous") else " (Homogeneous IQR Spread)"
                             st.markdown(f"**Westenberg IQR Scale:** Z = `{simpsons.get('westenberg_stat_z', 0.0):.2f}` (p = `{simpsons.get('westenberg_stat_p', 0.0):.3e}`){west_flag}")
+                        if simpsons.get("tes_p_value") is not None:
+                            tes_flag = " ⚠️ Excess Significance Detected (p < 0.05)" if simpsons.get("is_tes_excessive") else " (Expected Statistical Discovery Power)"
+                            st.markdown(f"**Ioannidis-Trikalinos TES Excess Test:** A = `{simpsons.get('tes_excess_ratio', 0.0):.2f}` (χ² = `{simpsons.get('tes_chi2', 0.0):.2f}`, p = `{simpsons.get('tes_p_value', 0.0):.3e}`){tes_flag}")
+                        if simpsons.get("obrien_stat_f") is not None:
+                            ob_flag = " ⚠️ Scale Dispersion Heterogeneity (p < 0.05)" if simpsons.get("is_obrien_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**O'Brien Homogeneity of Variance:** F = `{simpsons.get('obrien_stat_f', 0.0):.2f}` (p = `{simpsons.get('obrien_p_value', 0.0):.3e}`){ob_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -412,6 +418,12 @@ with col_right:
                         if conf_aud.get("iw_quadratic_diff") is not None:
                             iw_flag = " ⚠️ Severe Quadratic Imbalance (Δ_Z² > 0.25)" if conf_aud.get("is_iw_quadratic_excessive") else " (Adequate Quadratic Support Overlap)"
                             st.markdown(f"**Imbens-Wooldridge Quadratic Balance:** Δ_Z² = `{conf_aud.get('iw_quadratic_diff', 0.0):.3f}`{iw_flag}")
+                        if conf_aud.get("hodges_lehmann_p") is not None:
+                            hl_flag = " ⚠️ Covariate Location Shift (p < 0.05)" if conf_aud.get("is_hl_imbalanced") else " (Balanced Non-Parametric Location)"
+                            st.markdown(f"**Rosenbaum Hodges-Lehmann Shift:** Δ_HL = `{conf_aud.get('hodges_lehmann_shift', 0.0):.3f}` (Z = `{conf_aud.get('hodges_lehmann_z', 0.0):.2f}`, p = `{conf_aud.get('hodges_lehmann_p', 0.0):.3e}`){hl_flag}")
+                        if conf_aud.get("frank_rir_pct") is not None:
+                            rir_flag = f" ⚠️ Extreme Causal Fragility (< 15%, {conf_aud.get('frank_rir_count', 0)} cases)" if conf_aud.get("is_rir_fragile") else f" (Robust Replacement Buffer, {conf_aud.get('frank_rir_count', 0)} cases)"
+                            st.markdown(f"**Frank Robustness of Inference to Replacement (RIR):** RIR = `{conf_aud.get('frank_rir_pct', 0.0):.1f}%`{rir_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -566,6 +578,12 @@ with col_right:
                         if stab_aud.get("max_welsch_distance") is not None:
                             welsch_flag = f" ⚠️ Leverage-Weighted Distance Outliers ({stab_aud.get('welsch_outlier_count', 0)} influential)" if stab_aud.get("is_welsch_influential") else " (Bounded Welsch Distance)"
                             st.markdown(f"**Welsch Distance Influence:** Max W = `{stab_aud.get('max_welsch_distance', 0.0):.2f}`{welsch_flag}")
+                        if stab_aud.get("gel_gastwirth_p") is not None:
+                            rjb_flag = f" ⚠️ Non-Gaussian Residuals (p = {stab_aud['gel_gastwirth_p']:.3e})" if stab_aud.get("is_rjb_non_normal") else f" (Normal Gaussian Residuals, p = {stab_aud['gel_gastwirth_p']:.3e})"
+                            st.markdown(f"**Gel-Gastwirth Robust Jarque-Bera (RJB):** RJB = `{stab_aud.get('gel_gastwirth_rjb', 0.0):.2f}` (p = `{stab_aud['gel_gastwirth_p']:.3e}`){rjb_flag}")
+                        if stab_aud.get("max_pena_influence") is not None:
+                            pena_flag = f" ⚠️ Projection Subspace Outliers ({stab_aud.get('pena_outlier_count', 0)} influential)" if stab_aud.get("is_pena_influential") else " (Bounded Peña Influence)"
+                            st.markdown(f"**Daniel Peña Influence Diagnostic:** Max P = `{stab_aud.get('max_pena_influence', 0.0):.3f}`{pena_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -947,6 +965,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Doornik and Hansen omnibus residual normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Doornik and Hansen omnibus residual normality test", findings, dataset_name=dataset_name)
 
+            sug_col52, sug_col53, sug_col54 = st.columns(3)
+            with sug_col52:
+                if st.button("📊 Ioannidis-Trikalinos TES", key="sug_tes"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain John Ioannidis and Thomas Trikalinos test for excess significance"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain John Ioannidis and Thomas Trikalinos test for excess significance", findings, dataset_name=dataset_name)
+            with sug_col53:
+                if st.button("🛡️ Frank Causal RIR", key="sug_rir"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Kenneth Frank robustness of inference to replacement"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Kenneth Frank robustness of inference to replacement", findings, dataset_name=dataset_name)
+            with sug_col54:
+                if st.button("🎯 Daniel Peña Influence", key="sug_pena"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Daniel Peña measure of influence in regression"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Daniel Peña measure of influence in regression", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1059,6 +1094,10 @@ with col_right:
                     "Schwarzer_Funnel_p": f"{simp.get('schwarzer_test_p', 0.0):.3e}" if simp.get("schwarzer_test_p") is not None else "N/A",
                     "Westenberg_Scale_Z": f"{simp.get('westenberg_stat_z', 0.0):.2f}" if simp.get("westenberg_stat_z") is not None else "N/A",
                     "Westenberg_Scale_p": f"{simp.get('westenberg_stat_p', 0.0):.3e}" if simp.get("westenberg_stat_p") is not None else "N/A",
+                    "TES_Excess_Ratio": f"{simp.get('tes_excess_ratio', 0.0):.2f}" if simp.get("tes_excess_ratio") is not None else "N/A",
+                    "TES_Excess_p": f"{simp.get('tes_p_value', 0.0):.3e}" if simp.get("tes_p_value") is not None else "N/A",
+                    "OBrien_Scale_F": f"{simp.get('obrien_stat_f', 0.0):.2f}" if simp.get("obrien_stat_f") is not None else "N/A",
+                    "OBrien_Scale_p": f"{simp.get('obrien_p_value', 0.0):.3e}" if simp.get("obrien_p_value") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -1124,6 +1163,10 @@ with col_right:
                     "Rosenbaum_Rubin_VR": f"{conf.get('rr_variance_ratio', 0.0):.2f}" if conf.get("rr_variance_ratio") is not None else "N/A",
                     "Rosenbaum_Rubin_p": f"{conf.get('rr_variance_p', 0.0):.3e}" if conf.get("rr_variance_p") is not None else "N/A",
                     "Imbens_Wooldridge_Quad_Diff": f"{conf.get('iw_quadratic_diff', 0.0):.3f}" if conf.get("iw_quadratic_diff") is not None else "N/A",
+                    "Hodges_Lehmann_Shift": f"{conf.get('hodges_lehmann_shift', 0.0):.3f}" if conf.get("hodges_lehmann_shift") is not None else "N/A",
+                    "Hodges_Lehmann_p": f"{conf.get('hodges_lehmann_p', 0.0):.3e}" if conf.get("hodges_lehmann_p") is not None else "N/A",
+                    "Frank_RIR_Pct": f"{conf.get('frank_rir_pct', 0.0):.1f}%" if conf.get("frank_rir_pct") is not None else "N/A",
+                    "Frank_RIR_Count": f"{conf.get('frank_rir_count', 0)}" if conf.get("frank_rir_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -1198,6 +1241,10 @@ with col_right:
                     "Doornik_Hansen_p": f"{stab.get('doornik_hansen_p', 0.0):.3e}" if stab.get("doornik_hansen_p") is not None else "N/A",
                     "Max_Welsch_Distance": f"{stab.get('max_welsch_distance', 0.0):.2f}" if stab.get("max_welsch_distance") is not None else "N/A",
                     "Welsch_Outlier_Count": f"{stab.get('welsch_outlier_count', 0)}" if stab.get("welsch_outlier_count") is not None else "N/A",
+                    "Gel_Gastwirth_RJB": f"{stab.get('gel_gastwirth_rjb', 0.0):.2f}" if stab.get("gel_gastwirth_rjb") is not None else "N/A",
+                    "Gel_Gastwirth_p": f"{stab.get('gel_gastwirth_p', 0.0):.3e}" if stab.get("gel_gastwirth_p") is not None else "N/A",
+                    "Max_Pena_Influence": f"{stab.get('max_pena_influence', 0.0):.3f}" if stab.get("max_pena_influence") is not None else "N/A",
+                    "Pena_Outlier_Count": f"{stab.get('pena_outlier_count', 0)}" if stab.get("pena_outlier_count") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

@@ -161,6 +161,13 @@ class SimpsonsParadoxAudit:
     westenberg_stat_z: Optional[float] = None
     westenberg_stat_p: Optional[float] = None
     is_westenberg_heterogeneous: bool = False
+    tes_excess_ratio: Optional[float] = None
+    tes_chi2: Optional[float] = None
+    tes_p_value: Optional[float] = None
+    is_tes_excessive: bool = False
+    obrien_stat_f: Optional[float] = None
+    obrien_p_value: Optional[float] = None
+    is_obrien_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -298,6 +305,13 @@ class ConfounderAudit:
     is_rr_variance_imbalanced: bool = False
     iw_quadratic_diff: Optional[float] = None
     is_iw_quadratic_excessive: bool = False
+    hodges_lehmann_shift: Optional[float] = None
+    hodges_lehmann_z: Optional[float] = None
+    hodges_lehmann_p: Optional[float] = None
+    is_hl_imbalanced: bool = False
+    frank_rir_pct: Optional[float] = None
+    frank_rir_count: Optional[int] = None
+    is_rir_fragile: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -445,6 +459,12 @@ class StabilityAudit:
     max_welsch_distance: Optional[float] = None
     welsch_outlier_count: int = 0
     is_welsch_influential: bool = False
+    gel_gastwirth_rjb: Optional[float] = None
+    gel_gastwirth_p: Optional[float] = None
+    is_rjb_non_normal: bool = False
+    max_pena_influence: Optional[float] = None
+    pena_outlier_count: int = 0
+    is_pena_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -6333,6 +6353,326 @@ def welsch_distance_influence_test(
         return None, 0, False
 
 
+def ioannidis_trikalinos_tes_test(
+    tables_2x2: List[np.ndarray],
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates John P. A. Ioannidis & Thomas A. Trikalinos's (2007) Test for Excess Significance (TES).
+
+    Evaluates whether the observed count of statistically significant stratum findings (O) exceeds
+    the expected count (E) based on each stratum's statistical power to detect the fixed-effect summary odds ratio.
+      O = sum_{k=1}^K I(p_k < alpha),  E = sum_{k=1}^K Power_k.
+      chi^2_TES = (O - E)^2 / E + ((K - O) - (K - E))^2 / (K - E) ~ chi^2(1).
+      A = O / max(1e-6, E) (Excess Significance Ratio).
+    An excess ratio A > 1.0 with p < 0.05 formally certifies data-dredging, publication bias,
+    or selective stratum reporting.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, None, False
+    try:
+        theta_list, se_list, p_list = [], [], []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                if len(tab) == 4:
+                    a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+                else:
+                    tab = np.array(tab, dtype=float)
+                    a, b = float(tab[0, 0]), float(tab[0, 1])
+                    c, d = float(tab[1, 0]), float(tab[1, 1])
+            elif isinstance(tab, np.ndarray) and tab.shape == (2, 2):
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            else:
+                arr = np.array(tab, dtype=float).ravel()
+                a, b, c, d = float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3])
+
+            n1 = a + b
+            n0 = c + d
+            if n1 < 1.0 or n0 < 1.0:
+                continue
+
+            a_adj, b_adj, c_adj, d_adj = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            lor = float(np.log((a_adj * d_adj) / (b_adj * c_adj)))
+            se = float(np.sqrt(1.0 / a_adj + 1.0 / b_adj + 1.0 / c_adj + 1.0 / d_adj))
+            z = lor / max(1e-12, se)
+            p_val = float(2.0 * stats.norm.sf(abs(z)))
+
+            theta_list.append(lor)
+            se_list.append(se)
+            p_list.append(p_val)
+
+        k = len(theta_list)
+        if k < 3:
+            return None, None, None, False
+
+        theta_arr = np.array(theta_list, dtype=float)
+        se_arr = np.array(se_list, dtype=float)
+        weights = 1.0 / (se_arr ** 2)
+        sum_w = float(np.sum(weights))
+        if sum_w < 1e-12:
+            return None, None, None, False
+
+        summary_theta = float(np.sum(weights * theta_arr) / sum_w)
+
+        z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        powers = []
+        for se in se_arr:
+            lambda_val = abs(summary_theta) / max(1e-12, se)
+            pow_k = float(1.0 - stats.norm.cdf(z_crit - lambda_val) + stats.norm.cdf(-z_crit - lambda_val))
+            powers.append(min(0.999, max(0.001, pow_k)))
+
+        obs_sig = float(sum(1 for p in p_list if p < alpha))
+        exp_sig = float(np.sum(powers))
+        exp_sig = min(k - 0.01, max(0.01, exp_sig))
+
+        a_ratio = float(obs_sig / exp_sig) if exp_sig > 0 else 1.0
+
+        num1 = (obs_sig - exp_sig) ** 2
+        den1 = exp_sig
+        num2 = ((k - obs_sig) - (k - exp_sig)) ** 2
+        den2 = max(0.01, k - exp_sig)
+
+        chi2_tes = float(num1 / den1 + num2 / den2)
+        p_tes = float(stats.chi2.sf(chi2_tes, df=1))
+        is_excessive = bool(obs_sig > exp_sig and p_tes < 0.05)
+
+        return a_ratio, chi2_tes, p_tes, is_excessive
+    except Exception:
+        return None, None, None, False
+
+
+def obrien_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Peter C. O'Brien's (1979, 1981) Homogeneity of Variance Test.
+
+    Constructs transformed scores for each observation y_ik in stratum k:
+      r_ik = [(n_k - 1.5) * n_k * (y_ik - ybar_k)^2 - 0.5 * s_k^2 * (n_k - 1)] / [(n_k - 1) * (n_k - 2)].
+    Performs standard one-way ANOVA across strata on the transformed r_ik scores:
+      F_OBrien ~ F(K - 1, N - K).
+    Provides robust, powerful evaluation of scale spread equality resistant to moderate non-normality.
+    Rejection (p < 0.05) certifies statistically significant stratum variance heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        r_groups = []
+        for s in valid_samples:
+            n_k = len(s)
+            ybar_k = float(np.mean(s))
+            s_sq_k = float(np.var(s, ddof=1))
+            if s_sq_k < 1e-12:
+                continue
+            r_k = (
+                (n_k - 1.5) * n_k * ((s - ybar_k) ** 2) - 0.5 * s_sq_k * (n_k - 1.0)
+            ) / ((n_k - 1.0) * (n_k - 2.0))
+            r_groups.append(r_k)
+
+        if len(r_groups) < 2:
+            return None, None, False
+
+        f_stat, p_val = stats.f_oneway(*r_groups)
+        f_stat = float(f_stat) if not np.isnan(f_stat) else None
+        p_val = float(p_val) if not np.isnan(p_val) else None
+        if f_stat is None or p_val is None:
+            return None, None, False
+
+        is_hetero = bool(p_val < 0.05)
+        return f_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_hodges_lehmann_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (1984, 2002) Hodges-Lehmann Aligned Rank Covariate Shift.
+
+    Dichotomizes exposure X at median into treated (D = 1) and control (D = 0) cohorts.
+    Evaluates the Hodges-Lehmann non-parametric location shift between confounder distributions:
+      Delta_HL = median_{i in D1, j in D0} { W_1i - W_0j }.
+    Computes normalized Wilcoxon-Mann-Whitney rank sum test statistic Z_HL and asymptotic p-value.
+    Rejection (p < 0.05 or |Delta_HL| / IQR(Z) > 0.20) diagnoses severe non-parametric covariate imbalance.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x)
+        w1 = z[d]
+        w0 = z[~d]
+        n1, n0 = len(w1), len(w0)
+        if n1 < 6 or n0 < 6:
+            return None, None, None, False
+
+        if n1 * n0 > 10000:
+            rng = np.random.default_rng(42)
+            sub1 = rng.choice(w1, min(100, n1), replace=False)
+            sub0 = rng.choice(w0, min(100, n0), replace=False)
+            diffs = sub1[:, None] - sub0[None, :]
+        else:
+            diffs = w1[:, None] - w0[None, :]
+
+        hl_shift = float(np.median(diffs))
+
+        res = stats.mannwhitneyu(w1, w0, alternative="two-sided")
+        u_stat = float(res.statistic)
+        p_val = float(res.pvalue)
+
+        mu_u = (n1 * n0) / 2.0
+        sigma_u = np.sqrt(max(1.0, (n1 * n0 * (n1 + n0 + 1.0)) / 12.0))
+        z_stat = float((u_stat - mu_u) / sigma_u)
+
+        iqr_z = float(np.percentile(z, 75) - np.percentile(z, 25))
+        iqr_ratio = abs(hl_shift) / max(1e-6, iqr_z)
+
+        is_imbal = bool(p_val < 0.05 or iqr_ratio > 0.20)
+        return hl_shift, z_stat, p_val, is_imbal
+    except Exception:
+        return None, None, None, False
+
+
+def frank_rir_fragility_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[int], bool]:
+    """Calculates Kenneth A. Frank et al.'s (2013) Robustness of Inference to Replacement (RIR).
+
+    Measures the percentage and count of observations that would have to be replaced with cases
+    of zero causal effect (null cases) to reduce the estimated effect to the critical significance threshold (t_crit).
+      %_replace = max(0, 100 * (1 - t_crit / |t_obs|)),  n_replace = int(n * %_replace / 100).
+    Threshold: %_replace < 15.0% diagnoses extreme inferential fragility to unmeasured perturbations or replacement.
+    """
+    n = len(x)
+    p = 3
+    if n <= p + 4 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        df_e = max(1, n - p)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_beta1 = float(np.sqrt(max(1e-12, cov_mat[1, 1])))
+
+        t_obs = float(beta[1] / se_beta1)
+        t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df=df_e))
+
+        if abs(t_obs) <= t_crit:
+            rir_pct = 0.0
+            rir_cnt = 0
+            is_fragile = True
+        else:
+            rir_pct = float(100.0 * (1.0 - t_crit / abs(t_obs)))
+            rir_cnt = int(n * (rir_pct / 100.0))
+            is_fragile = bool(rir_pct < 15.0)
+
+        return rir_pct, rir_cnt, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def gel_gastwirth_rjb_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Gel & Gastwirth's (2008) Robust Jarque-Bera (RJB) Normality Test.
+
+    Replaces the sensitive sample variance denominator in the Jarque-Bera statistic with
+    the median absolute deviation / mean absolute deviation from the median (J_n):
+      J_n = (sqrt(pi/2) / n) * sum_{i=1}^n |e_i - median(e)|.
+    Computes robust standardized moments m_3* and m_4*:
+      RJB = (n / 2.1646) * (m_3*)^2 + (n / 5.7679) * (m_4* - 3.0)^2 ~ chi^2(2).
+    Offers robust size and power against isolated extreme outliers that distort classic normality tests.
+    Rejection (p < 0.05 or RJB >= 5.99) certifies residual non-Gaussianity.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 6 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        med_res = float(np.median(res))
+        j_n = float(np.sqrt(np.pi / 2.0) * np.mean(np.abs(res - med_res)))
+        if j_n < 1e-12:
+            return 0.0, 1.0, False
+
+        u = (res - np.mean(res)) / j_n
+        m3_star = float(np.mean(u ** 3))
+        m4_star = float(np.mean(u ** 4))
+
+        c1 = 2.1646
+        c2 = 5.7679
+
+        rjb_stat = float((n / c1) * (m3_star ** 2) + (n / c2) * ((m4_star - 3.0) ** 2))
+        p_val = float(stats.chi2.sf(rjb_stat, df=2))
+        is_non_norm = bool(p_val < 0.05)
+        return rjb_stat, p_val, is_non_norm
+    except Exception:
+        return None, None, False
+
+
+def pena_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Daniel Peña's (2001) Measure of Influence in Linear Regression (P_i).
+
+    Measures the influence of each observation on the overall subspace of fitted values:
+      P_i = [1 / (p * (1 - h_ii))] * sum_{j=1}^n [h_ij^2 * (r_j^*)^2],
+    where h_ij are entries of the hat matrix and r_j^* are studentized deleted residuals.
+    Threshold: P_crit = max(3 * sqrt(p/n), mean(P) + 2.5 * std(P)).
+    Flags observations that distort the collective structure of predicted values across all sample points.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        df_e = max(1, n - p)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        if s_sq < 1e-12:
+            return 0.0, 0, False
+
+        denom = np.sqrt(np.maximum(1e-12, s_sq * (1.0 - h_diag)))
+        r_int = res / denom
+
+        r_del_sq = (n - p - 1.0) / np.maximum(1e-6, n - p - (r_int ** 2))
+        r_ext_sq = (r_int ** 2) * np.maximum(0.0, r_del_sq)
+
+        h_sq = H ** 2
+        weighted_sum = h_sq @ r_ext_sq
+        pena_scores = weighted_sum / (p * (1.0 - h_diag))
+
+        mean_p = float(np.mean(pena_scores))
+        std_p = float(np.std(pena_scores))
+        p_crit = max(3.0 * np.sqrt(p / n), mean_p + 2.5 * std_p)
+
+        max_pena = float(np.max(pena_scores))
+        outlier_count = int(np.sum(pena_scores > p_crit))
+        is_infl = bool(outlier_count > 0 and max_pena > p_crit)
+        return max_pena, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -6712,6 +7052,8 @@ class DevilsAdvocateAgent:
                 pust_t, pust_p, is_pust_asym = pustejovsky_funnel_asymmetry_test(tables_2x2)
                 # Guido Schwarzer et al. (2002, 2007) Arcsine Funnel Asymmetry Test
                 schw_t, schw_p, is_schw_asym = schwarzer_funnel_asymmetry_test(tables_2x2)
+                # John Ioannidis & Thomas Trikalinos (2007) Test for Excess Significance (TES)
+                tes_ratio, tes_chi2, tes_p, is_tes_excess = ioannidis_trikalinos_tes_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -6720,6 +7062,7 @@ class DevilsAdvocateAgent:
             tang_t, tang_p, is_tang_asym = None, None, False
             pust_t, pust_p, is_pust_asym = None, None, False
             schw_t, schw_p, is_schw_asym = None, None, False
+            tes_ratio, tes_chi2, tes_p, is_tes_excess = None, None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -6808,6 +7151,8 @@ class DevilsAdvocateAgent:
             moses_u, moses_p, is_moses_hetero = moses_scale_dispersion_test(kw_samples)
             # Westenberg (1948) Interquartile Range Dispersion Test
             west_z, west_p, is_west_hetero = westenberg_scale_dispersion_test(kw_samples)
+            # Peter C. O'Brien (1979, 1981) Homogeneity of Variance Test
+            obrien_f, obrien_p, is_obrien_hetero = obrien_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -6883,8 +7228,12 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Moses Scale: U={moses_u:.1f}, p={moses_p:.3e}]"
         if schw_p is not None:
             cmh_note += f" [Schwarzer Funnel: t={schw_t:.2f}, p={schw_p:.3e}]"
+        if tes_p is not None:
+            cmh_note += f" [TES Excess: A={tes_ratio:.2f}, p={tes_p:.3e}]"
         if west_p is not None:
             cmh_note += f" [Westenberg Scale: Z={west_z:.2f}, p={west_p:.3e}]"
+        if obrien_p is not None:
+            cmh_note += f" [O'Brien Scale: F={obrien_f:.2f}, p={obrien_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -7043,6 +7392,13 @@ class DevilsAdvocateAgent:
             westenberg_stat_z=west_z,
             westenberg_stat_p=west_p,
             is_westenberg_heterogeneous=is_west_hetero,
+            tes_excess_ratio=tes_ratio,
+            tes_chi2=tes_chi2,
+            tes_p_value=tes_p,
+            is_tes_excessive=is_tes_excess,
+            obrien_stat_f=obrien_f,
+            obrien_p_value=obrien_p,
+            is_obrien_heterogeneous=is_obrien_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -7210,6 +7566,8 @@ class DevilsAdvocateAgent:
         lin_t, lin_p, is_lin_hetero = None, None, False
         rr_vr, rr_p, is_rr_imbal = None, None, False
         iw_quad_diff, is_iw_quad_excess = None, False
+        hl_shift, hl_z, hl_p, is_hl_imbal = None, None, None, False
+        rir_pct, rir_cnt, is_rir_frag = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -7272,6 +7630,10 @@ class DevilsAdvocateAgent:
                     rr_vr, rr_p, is_rr_imbal = rosenbaum_rubin_residual_variance_test(x_mal, z_mal)
                     # Guido W. Imbens & Jeffrey M. Wooldridge (2009) Normalized Quadratic Difference Metric
                     iw_quad_diff, is_iw_quad_excess = imbens_wooldridge_quadratic_balance_test(x_mal, z_mal)
+                    # Paul R. Rosenbaum (1984, 2002) Hodges-Lehmann Aligned Rank Covariate Shift
+                    hl_shift, hl_z, hl_p, is_hl_imbal = rosenbaum_hodges_lehmann_balance_test(x_mal, z_mal)
+                    # Kenneth A. Frank et al. (2013) Robustness of Inference to Replacement (RIR)
+                    rir_pct, rir_cnt, is_rir_frag = frank_rir_fragility_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -7446,6 +7808,13 @@ class DevilsAdvocateAgent:
             is_rr_variance_imbalanced=is_rr_imbal,
             iw_quadratic_diff=iw_quad_diff,
             is_iw_quadratic_excessive=is_iw_quad_excess,
+            hodges_lehmann_shift=hl_shift,
+            hodges_lehmann_z=hl_z,
+            hodges_lehmann_p=hl_p,
+            is_hl_imbalanced=is_hl_imbal,
+            frank_rir_pct=rir_pct,
+            frank_rir_count=rir_cnt,
+            is_rir_fragile=is_rir_frag,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -7742,6 +8111,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Roy E. Welsch (1982) Distance Influence Metric in Regression
         welsch_max, welsch_cnt, is_welsch_infl = welsch_distance_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Gel & Gastwirth (2008) Robust Jarque-Bera (RJB) Normality Test
+        rjb_stat, rjb_p, is_rjb_non_normal = gel_gastwirth_rjb_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Daniel Peña (2001) Measure of Influence in Linear Regression
+        pena_max, pena_cnt, is_pena_infl = pena_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -7914,6 +8289,12 @@ class DevilsAdvocateAgent:
             max_welsch_distance=welsch_max,
             welsch_outlier_count=welsch_cnt,
             is_welsch_influential=is_welsch_infl,
+            gel_gastwirth_rjb=rjb_stat,
+            gel_gastwirth_p=rjb_p,
+            is_rjb_non_normal=is_rjb_non_normal,
+            max_pena_influence=pena_max,
+            pena_outlier_count=pena_cnt,
+            is_pena_influential=is_pena_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
