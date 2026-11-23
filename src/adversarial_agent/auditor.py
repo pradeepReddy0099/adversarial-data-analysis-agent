@@ -111,6 +111,12 @@ class SimpsonsParadoxAudit:
     mood_stat_z: Optional[float] = None
     mood_p_value: Optional[float] = None
     is_mood_heterogeneous: bool = False
+    thompson_sharp_t: Optional[float] = None
+    thompson_sharp_p: Optional[float] = None
+    is_thompson_asymmetric: bool = False
+    ansari_bradley_stat: Optional[float] = None
+    ansari_bradley_p: Optional[float] = None
+    is_ansari_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -204,6 +210,12 @@ class ConfounderAudit:
     is_dml_confounded: bool = False
     cinelli_k_multiplier: Optional[float] = None
     is_cinelli_fragile: bool = False
+    rubin_b_score: Optional[float] = None
+    rubin_r_ratio: Optional[float] = None
+    is_rubin_imbalanced: bool = False
+    brunner_munzel_w: Optional[float] = None
+    brunner_munzel_p: Optional[float] = None
+    has_brunner_munzel_effect: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -302,6 +314,12 @@ class StabilityAudit:
     shapiro_francia_w: Optional[float] = None
     shapiro_francia_p: Optional[float] = None
     is_shapiro_francia_non_normal: bool = False
+    dagostino_pearson_k2: Optional[float] = None
+    dagostino_pearson_p: Optional[float] = None
+    is_dagostino_non_normal: bool = False
+    glejser_t_stat: Optional[float] = None
+    glejser_p_value: Optional[float] = None
+    has_glejser_heteroskedasticity: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -3884,6 +3902,250 @@ def shapiro_francia_normality_test(
         return None, None, False
 
 
+def thompson_sharp_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates S. G. Thompson & S. J. Sharp's (1999) Random-Effects Weighted Meta-Regression Funnel Asymmetry Test.
+
+    Incorporates DerSimonian-Laird between-study variance tau^2_DL into random-effects weights:
+      w_k* = 1 / (v_k + tau^2_DL)
+    Regresses log odds ratio theta_k on standard error SE_k:
+      theta_k = alpha + beta * SE_k + epsilon_k*
+    Test statistic:
+      t_TS = beta_hat / SE(beta_hat) ~ t(K - 2).
+    Rejection (p < 0.05) detects significant small-study publication or reporting asymmetry
+    while properly conditioning on between-stratum random-effects heterogeneity.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        theta_vec = []
+        var_vec = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                if len(t) == 4 and not isinstance(t[0], (tuple, list)):
+                    a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+                else:
+                    a, b = float(t[0][0]), float(t[0][1])
+                    c, d = float(t[1][0]), float(t[1][1])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            if a + b > 0 and c + d > 0 and a + c > 0 and b + d > 0:
+                a_c = a + 0.5
+                b_c = b + 0.5
+                c_c = c + 0.5
+                d_c = d + 0.5
+                theta = float(np.log((a_c * d_c) / (b_c * c_c)))
+                v = float(1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c)
+                theta_vec.append(theta)
+                var_vec.append(v)
+        k_val = len(theta_vec)
+        if k_val < 3:
+            return None, None, False
+
+        y = np.array(theta_vec, dtype=float)
+        v = np.array(var_vec, dtype=float)
+        se = np.sqrt(v)
+        w_fe = 1.0 / v
+        W = float(np.sum(w_fe))
+        pooled_fe = float(np.sum(w_fe * y) / W)
+        Q = float(np.sum(w_fe * (y - pooled_fe) ** 2))
+        df_q = k_val - 1
+        denom_tau = W - float(np.sum(w_fe ** 2)) / W
+        tau2 = max(0.0, float((Q - df_q) / max(1e-9, denom_tau)))
+        w_re = 1.0 / (v + tau2)
+        sw = np.sqrt(w_re)
+        X_mat = np.column_stack([sw, sw * se])
+        Y_trans = sw * y
+        beta, _, _, _ = np.linalg.lstsq(X_mat, Y_trans, rcond=None)
+        res = Y_trans - X_mat @ beta
+        df_e = k_val - 2
+        if df_e <= 0:
+            return None, None, False
+        s2 = float(np.sum(res ** 2) / df_e)
+        cov = s2 * np.linalg.pinv(X_mat.T @ X_mat)
+        se_slope = float(np.sqrt(max(1e-12, cov[1, 1])))
+        if se_slope < 1e-12:
+            return None, None, False
+        t_stat = float(beta[1] / se_slope)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def ansari_bradley_scale_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates C. E. Ansari & R. A. Bradley's (1960) Non-Parametric Rank-Sum Scale Dispersion Test.
+
+    Evaluates equality of scale/dispersion parameters across conditioning strata without normality assumptions.
+    Compares the two primary conditioning strata samples:
+      W_AB = sum_{i in group 1} s_i, where s_i are folded triangular ranks.
+    Rejection (two-sided p < 0.05) certifies statistically significant scale heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        res = stats.ansari(s1, s2)
+        stat_w = float(res.statistic)
+        p_val = float(res.pvalue)
+        is_hetero = bool(p_val < 0.05)
+        return stat_w, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rubin_covariate_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Donald B. Rubin's (2001) Causal Covariate Balance Diagnostics (Rubin's B and R).
+
+    Binarizes exposure X at its median into treated and comparison groups.
+    Estimates the linear propensity index q_i = E[T | Z] and evaluates:
+      Rubin's B = (|mean(q_1) - mean(q_0)| / sqrt((s_1^2 + s_0^2)/2)) * 100
+      Rubin's R = s_1^2 / s_0^2
+    Rubin's rule of thumb recommends B < 25% for balance and R in [0.5, 2.0] for variance equity.
+    Observational comparisons with B >= 25% or R not in [0.5, 2.0] suffer from severe model dependence.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        if np.sum(treated) < 5 or np.sum(~treated) < 5:
+            return None, None, False
+
+        Z_mat = np.column_stack([np.ones(n), z])
+        t_float = treated.astype(float)
+        b_prop, _, _, _ = np.linalg.lstsq(Z_mat, t_float, rcond=None)
+        p_score = Z_mat @ b_prop
+
+        p1 = p_score[treated]
+        p0 = p_score[~treated]
+        var1 = float(np.var(p1, ddof=1))
+        var0 = float(np.var(p0, ddof=1))
+        if var1 < 1e-12 or var0 < 1e-12:
+            return None, None, False
+
+        mean_diff = abs(float(np.mean(p1) - np.mean(p0)))
+        pooled_sd = np.sqrt((var1 + var0) / 2.0)
+        rubin_b = float((mean_diff / max(1e-9, pooled_sd)) * 100.0)
+        rubin_r = float(var1 / var0)
+
+        is_imbalanced = bool(rubin_b >= 25.0 or rubin_r < 0.5 or rubin_r > 2.0)
+        return rubin_b, rubin_r, is_imbalanced
+    except Exception:
+        return None, None, False
+
+
+def brunner_munzel_relative_effect_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Edgar Brunner & Ullrich Munzel's (2000) Generalized Relative Treatment Effect.
+
+    Solves the non-parametric Behrens-Fisher problem for stochastic superiority without equal variances:
+      P(Y_low < Y_high) + 0.5 * P(Y_low == Y_high) = 0.5
+    Test statistic W_BM follows Brunner-Munzel's t-distribution with Satterthwaite-type degrees of freedom.
+    Significant difference (p < 0.05) confirms stochastic separation between exposure tiers.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        y_high = y[x > med_x]
+        y_low = y[x <= med_x]
+        if len(y_high) < 4 or len(y_low) < 4:
+            return None, None, False
+
+        res = stats.brunnermunzel(y_high, y_low)
+        w_stat = float(res.statistic)
+        p_val = float(res.pvalue)
+        has_effect = bool(p_val < 0.05)
+        return w_stat, p_val, has_effect
+    except Exception:
+        return None, None, False
+
+
+def dagostino_pearson_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Ralph D'Agostino & E. S. Pearson's (1973) Omnibus Normality Test for Regression Residuals.
+
+    Combines D'Agostino skewness Z_1(s) and Anscombe-Glynn kurtosis Z_2(k) transformations:
+      K^2 = Z_1(s)^2 + Z_2(k)^2 ~ chi^2(2).
+    Rejection (p < 0.05) indicates departure from residual Gaussianity due to excessive skew or kurtosis.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        if np.std(res) < 1e-9:
+            return None, None, False
+
+        k2, p_val = stats.normaltest(res)
+        k2_stat = float(k2)
+        p_float = float(p_val)
+        is_non_norm = bool(p_float < 0.05)
+        return k2_stat, p_float, is_non_norm
+    except Exception:
+        return None, None, False
+
+
+def glejser_heteroskedasticity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Herbert Glejser's (1969) Regression Test for Heteroskedasticity.
+
+    Regresses absolute OLS residuals |e_i| on regressor X_i:
+      |e_i| = gamma_0 + gamma_1 * X_i + nu_i
+    Evaluates t_Glejser = gamma_1 / SE(gamma_1) ~ t(N - 2).
+    Rejection (two-sided p < 0.05) diagnoses scale dispersion varying systematically with X magnitude.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+        abs_res = np.abs(res)
+
+        b_g, _, _, _ = np.linalg.lstsq(X_mat, abs_res, rcond=None)
+        res_g = abs_res - X_mat @ b_g
+        df_e = n - 2
+        if df_e <= 0:
+            return None, None, False
+
+        s2 = float(np.sum(res_g ** 2) / df_e)
+        cov = s2 * np.linalg.pinv(X_mat.T @ X_mat)
+        se_slope = float(np.sqrt(max(1e-12, cov[1, 1])))
+        if se_slope < 1e-12:
+            return None, None, False
+
+        t_stat = float(b_g[1] / se_slope)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        has_hetero = bool(p_val < 0.05)
+        return t_stat, p_val, has_hetero
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -4162,6 +4424,12 @@ class DevilsAdvocateAgent:
         mood_z: Optional[float] = None
         mood_p: Optional[float] = None
         is_mood_hetero: bool = False
+        thompson_sharp_t: Optional[float] = None
+        thompson_sharp_p: Optional[float] = None
+        is_thompson_asym: bool = False
+        ansari_w: Optional[float] = None
+        ansari_p: Optional[float] = None
+        is_ansari_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -4224,6 +4492,8 @@ class DevilsAdvocateAgent:
                 macaskill_t, macaskill_p, is_macaskill_asym = macaskill_regression_asymmetry_test(tables_2x2)
                 # Jon Deeks, Peter Macaskill, & Les Irwig (2005) Diagnostic Odds Ratio (DOR) Asymmetry Regression Test
                 deeks_t, deeks_p, is_deeks_asym = deeks_funnel_asymmetry_test(tables_2x2)
+                # S. G. Thompson & S. J. Sharp (1999) Random-Effects Weighted Funnel Asymmetry Test
+                thompson_sharp_t, thompson_sharp_p, is_thompson_asym = thompson_sharp_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -4299,6 +4569,8 @@ class DevilsAdvocateAgent:
             bartlett_stat, bartlett_p, is_bartlett_hetero = bartlett_homogeneity_test(kw_samples)
             # Alexander M. Mood (1954) Non-Parametric Median-Rank Dispersion Scale Test
             mood_z, mood_p, is_mood_hetero = mood_dispersion_scale_test(kw_samples)
+            # C. E. Ansari & R. A. Bradley (1960) Non-Parametric Rank-Sum Scale Dispersion Test
+            ansari_w, ansari_p, is_ansari_hetero = ansari_bradley_scale_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -4336,12 +4608,16 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Macaskill Funnel: t={macaskill_t:.2f}, p={macaskill_p:.3e}]"
         if deeks_p is not None:
             cmh_note += f" [Deeks DOR Funnel: t={deeks_t:.2f}, p={deeks_p:.3e}]"
+        if thompson_sharp_p is not None:
+            cmh_note += f" [Thompson-Sharp Funnel: t={thompson_sharp_t:.2f}, p={thompson_sharp_p:.3e}]"
         if levene_p is not None:
             cmh_note += f" [Levene Scale: W={levene_stat:.2f}, p={levene_p:.3e}]"
         if bartlett_p is not None:
             cmh_note += f" [Bartlett Scale: B={bartlett_stat:.2f}, p={bartlett_p:.3e}]"
         if mood_p is not None:
             cmh_note += f" [Mood Scale: Z={mood_z:.2f}, p={mood_p:.3e}]"
+        if ansari_p is not None:
+            cmh_note += f" [Ansari-Bradley Scale: W={ansari_w:.2f}, p={ansari_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -4451,6 +4727,12 @@ class DevilsAdvocateAgent:
             mood_stat_z=mood_z,
             mood_p_value=mood_p,
             is_mood_heterogeneous=is_mood_hetero,
+            thompson_sharp_t=thompson_sharp_t,
+            thompson_sharp_p=thompson_sharp_p,
+            is_thompson_asymmetric=is_thompson_asym,
+            ansari_bradley_stat=ansari_w,
+            ansari_bradley_p=ansari_p,
+            is_ansari_heterogeneous=is_ansari_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -4602,6 +4884,8 @@ class DevilsAdvocateAgent:
         leamer_b_min, leamer_b_max, is_leamer_frag = None, None, False
         dml_tau, dml_disc, is_dml_conf = None, None, False
         cinelli_k, is_cinelli_frag = None, False
+        rubin_b, rubin_r, is_rubin_imbal = None, None, False
+        bm_w, bm_p, has_bm_effect = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -4632,6 +4916,10 @@ class DevilsAdvocateAgent:
                     dml_tau, dml_disc, is_dml_conf = double_machine_learning_test(x_mal, z_mal, y_mal)
                     # Carlos Cinelli & Chad Hazlett (2020) Extreme Confounder Relative Strength Multiplier
                     cinelli_k, is_cinelli_frag = cinelli_extreme_confounder_test(x_mal, z_mal, y_mal, rv_point)
+                    # Donald B. Rubin (2001) Propensity Score Covariate Balance Diagnostics
+                    rubin_b, rubin_r, is_rubin_imbal = rubin_covariate_balance_test(x_mal, z_mal, y_mal)
+                    # Edgar Brunner & Ullrich Munzel (2000) Non-Parametric Relative Treatment Effect
+                    bm_w, bm_p, has_bm_effect = brunner_munzel_relative_effect_test(x_mal, y_mal)
                 except Exception:
                     pass
 
@@ -4660,6 +4948,8 @@ class DevilsAdvocateAgent:
         aipw_str = f", AIPW τ={aipw_tau:.3f} (Δ={aipw_disc:.1%})" if aipw_disc is not None else ""
         dml_str = f", DML τ={dml_tau:.3f} (Δ={dml_disc:.1%})" if dml_disc is not None else ""
         cinelli_str = f", Cinelli k={cinelli_k:.2f}x" if cinelli_k is not None else ""
+        rubin_str = f", Rubin B={rubin_b:.1f}% (R={rubin_r:.2f})" if rubin_b is not None else ""
+        bm_str = f", Brunner-Munzel W={bm_w:.2f} (p={bm_p:.3e})" if bm_w is not None else ""
         leamer_str = f", Leamer EBA=[{leamer_b_min:.3f}, {leamer_b_max:.3f}]" if leamer_b_min is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
@@ -4670,9 +4960,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{leamer_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{rubin_str}{bm_str}{leamer_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{leamer_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{j_str}{crump_str}{hansen_str}{hl_str}{hac_str}{aipw_str}{dml_str}{cinelli_str}{rubin_str}{bm_str}{leamer_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -4760,6 +5050,12 @@ class DevilsAdvocateAgent:
             is_dml_confounded=is_dml_conf,
             cinelli_k_multiplier=cinelli_k,
             is_cinelli_fragile=is_cinelli_frag,
+            rubin_b_score=rubin_b,
+            rubin_r_ratio=rubin_r,
+            is_rubin_imbalanced=is_rubin_imbal,
+            brunner_munzel_w=bm_w,
+            brunner_munzel_p=bm_p,
+            has_brunner_munzel_effect=has_bm_effect,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -5008,6 +5304,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: S. S. Shapiro & R. S. Francia (1972) Residual Normality Test
         sf_w, sf_p, is_sf_non_normal = shapiro_francia_normality_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Ralph D'Agostino & E. S. Pearson (1973) Omnibus Normality Test
+        dp_k2, dp_p, is_dp_non_normal = dagostino_pearson_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Herbert Glejser (1969) Regression Heteroskedasticity Test
+        glejser_t, glejser_p, has_glejser_hetero = glejser_heteroskedasticity_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -5032,10 +5334,12 @@ class DevilsAdvocateAgent:
         runs_str = f", Runs_Z={runs_z:.2f} (p={runs_p:.3e})" if runs_z is not None else ""
         kendall_str = f", Δ_Kendall={kendall_disc:.1%}" if kendall_disc is not None else ""
         gq_str = f", GQ_p={gq_p:.3e}" if gq_p is not None else ""
+        glejser_str = f", Glejser_p={glejser_p:.3e}" if glejser_p is not None else ""
         sf_str = f", SF_W={sf_w:.3f} (p={sf_p:.3e})" if sf_w is not None else ""
+        dp_str = f", DP_K2={dp_k2:.2f} (p={dp_p:.3e})" if dp_k2 is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
         type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{gq_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{sf_str}{qdi_str}{dw_str}{bg_str}{runs_str}{hc3_str}{ts_str}{lts_str}{siegel_str}{kendall_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{koenker_str}{white_str}{gq_str}{glejser_str}{chow_str}{andrews_str}{cusum_str}{cusumsq_str}{jb_str}{sf_str}{dp_str}{qdi_str}{dw_str}{bg_str}{runs_str}{hc3_str}{ts_str}{lts_str}{siegel_str}{kendall_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -5129,6 +5433,12 @@ class DevilsAdvocateAgent:
             shapiro_francia_w=sf_w,
             shapiro_francia_p=sf_p,
             is_shapiro_francia_non_normal=is_sf_non_normal,
+            dagostino_pearson_k2=dp_k2,
+            dagostino_pearson_p=dp_p,
+            is_dagostino_non_normal=is_dp_non_normal,
+            glejser_t_stat=glejser_t,
+            glejser_p_value=glejser_p,
+            has_glejser_heteroskedasticity=has_glejser_hetero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

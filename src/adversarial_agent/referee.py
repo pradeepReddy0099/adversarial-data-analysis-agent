@@ -133,6 +133,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Deeks DOR Funnel Asymmetry Test: t = {simpsons.deeks_test_t:.2f} (p = {simpsons.deeks_test_p:.3e}) {'[DIAGNOSTIC ODDS RATIO FUNNEL ASYMMETRY]' if simpsons.is_deeks_asymmetric else '[SYMMETRIC DOR PRECISION]'}")
             if simpsons.mood_p_value is not None:
                 rationale["key_evidence"].append(f"Mood Median-Rank Scale Dispersion: Z = {simpsons.mood_stat_z:.2f} (p = {simpsons.mood_p_value:.3e}) {'[NON-PARAMETRIC SCALE HETEROGENEITY]' if simpsons.is_mood_heterogeneous else '[HOMOSCEDASTIC MEDIAN SPREAD]'}")
+            if simpsons.thompson_sharp_p is not None:
+                rationale["key_evidence"].append(f"Thompson-Sharp Random-Effects Funnel Test: t = {simpsons.thompson_sharp_t:.2f} (p = {simpsons.thompson_sharp_p:.3e}) {'[RANDOM-EFFECTS SMALL-STUDY ASYMMETRY]' if simpsons.is_thompson_asymmetric else '[SYMMETRIC BETWEEN-STRATA PRECISION]'}")
+            if simpsons.ansari_bradley_p is not None:
+                rationale["key_evidence"].append(f"Ansari-Bradley Scale Dispersion: W = {simpsons.ansari_bradley_stat:.2f} (p = {simpsons.ansari_bradley_p:.3e}) {'[NON-PARAMETRIC SCALE DISPERSION HETEROGENEITY]' if simpsons.is_ansari_heterogeneous else '[HOMOGENEOUS STRATA DISPERSIONS]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -218,6 +222,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Double Machine Learning (DML) Orthogonal Effect: β_DML = {confounder.dml_treatment_effect:.4f} (Discrepancy Δ_DML = {confounder.dml_discrepancy:.1%}) {'[NEYMAN ORTHOGONAL CONFOUNDING BIAS]' if confounder.is_dml_confounded else '[ROBUST DML IDENTIFIED]'}")
             if confounder.cinelli_k_multiplier is not None:
                 rationale["key_evidence"].append(f"Cinelli-Hazlett Extreme Confounder Multiplier: k = {confounder.cinelli_k_multiplier:.2f}x {'[FRAGILE TO WEAK UNOBSERVED CONFOUNDING]' if confounder.is_cinelli_fragile else '[ROBUST - CONFOUNDER MUST EXCEED OBSERVED]'}")
+            if confounder.rubin_b_score is not None:
+                rationale["key_evidence"].append(f"Rubin Covariate Balance: B = {confounder.rubin_b_score:.1f}%, R = {confounder.rubin_r_ratio:.2f} {'[SEVERE COVARIATE IMBALANCE - MODEL DEPENDENT]' if confounder.is_rubin_imbalanced else '[SUFFICIENT COVARIATE BALANCE]'}")
+            if confounder.brunner_munzel_p is not None:
+                rationale["key_evidence"].append(f"Brunner-Munzel Relative Treatment Effect: W = {confounder.brunner_munzel_w:.2f} (p = {confounder.brunner_munzel_p:.3e}) {'[STOCHASTIC TREATMENT EFFECT]' if confounder.has_brunner_munzel_effect else '[NO STOCHASTIC SEPARATION]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -304,6 +312,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Goldfeld-Quandt Split Heteroskedasticity: F = {stability.goldfeld_quandt_f:.2f} (p = {stability.goldfeld_quandt_p:.3e}) {'[REGIME-SHIFT VARIANCE HETEROSKEDASTICITY]' if stability.has_goldfeld_quandt_heteroskedasticity else '[HOMOSCEDASTIC SPLIT REGIMES]'}")
             if stability.shapiro_francia_p is not None:
                 rationale["key_evidence"].append(f"Shapiro-Francia Residual Normality: W' = {stability.shapiro_francia_w:.4f} (p = {stability.shapiro_francia_p:.3e}) {'[RESIDUAL GAUSSIAN VIOLATION - NON-NORMAL]' if stability.is_shapiro_francia_non_normal else '[NORMAL GAUSSIAN RESIDUALS]'}")
+            if stability.dagostino_pearson_p is not None:
+                rationale["key_evidence"].append(f"D'Agostino-Pearson Omnibus Normality: K² = {stability.dagostino_pearson_k2:.2f} (p = {stability.dagostino_pearson_p:.3e}) {'[RESIDUAL SKEW/KURTOSIS NON-NORMALITY]' if stability.is_dagostino_non_normal else '[NORMAL GAUSSIAN SKEW/KURTOSIS]'}")
+            if stability.glejser_p_value is not None:
+                rationale["key_evidence"].append(f"Glejser Regression Heteroskedasticity: t = {stability.glejser_t_stat:.2f} (p = {stability.glejser_p_value:.3e}) {'[ERROR DISPERSION REGRESSOR-DEPENDENCE]' if stability.has_glejser_heteroskedasticity else '[HOMOSCEDASTIC ERROR SPREAD]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -475,6 +487,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Goldfeld-Quandt Heteroskedasticity: F = {stability.goldfeld_quandt_f:.2f} (p = {stability.goldfeld_quandt_p:.3e})")
             if stability.shapiro_francia_p is not None:
                 rationale["key_evidence"].append(f"Shapiro-Francia Residual Normality: W' = {stability.shapiro_francia_w:.4f} (p = {stability.shapiro_francia_p:.3e})")
+            if simpsons.thompson_sharp_p is not None:
+                rationale["key_evidence"].append(f"Thompson-Sharp Funnel Test: t = {simpsons.thompson_sharp_t:.2f} (p = {simpsons.thompson_sharp_p:.3e})")
+            if simpsons.ansari_bradley_p is not None:
+                rationale["key_evidence"].append(f"Ansari-Bradley Scale: W = {simpsons.ansari_bradley_stat:.2f} (p = {simpsons.ansari_bradley_p:.3e})")
+            if confounder.rubin_b_score is not None:
+                rationale["key_evidence"].append(f"Rubin Balance: B = {confounder.rubin_b_score:.1f}%, R = {confounder.rubin_r_ratio:.2f}")
+            if confounder.brunner_munzel_p is not None:
+                rationale["key_evidence"].append(f"Brunner-Munzel Effect: W = {confounder.brunner_munzel_w:.2f} (p = {confounder.brunner_munzel_p:.3e})")
+            if stability.dagostino_pearson_p is not None:
+                rationale["key_evidence"].append(f"D'Agostino-Pearson Normality: K² = {stability.dagostino_pearson_k2:.2f} (p = {stability.dagostino_pearson_p:.3e})")
+            if stability.glejser_p_value is not None:
+                rationale["key_evidence"].append(f"Glejser Heteroskedasticity: t = {stability.glejser_t_stat:.2f} (p = {stability.glejser_p_value:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

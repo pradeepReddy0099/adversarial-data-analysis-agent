@@ -106,6 +106,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.deeks_test_p is not None
     assert audit.simpsons_audit.mood_stat_z is not None
     assert audit.simpsons_audit.mood_p_value is not None
+    # Verify Thompson-Sharp random-effects funnel test and Ansari-Bradley scale test
+    assert audit.simpsons_audit.thompson_sharp_t is not None
+    assert audit.simpsons_audit.thompson_sharp_p is not None
+    assert audit.simpsons_audit.ansari_bradley_stat is not None
+    assert audit.simpsons_audit.ansari_bradley_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -225,6 +230,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.dml_treatment_effect is not None
         assert audit_coffee.confounder_audit.dml_discrepancy is not None
         assert audit_coffee.confounder_audit.cinelli_k_multiplier is not None
+        # Check Rubin's covariate balance and Brunner-Munzel relative treatment effect
+        assert audit_coffee.confounder_audit.rubin_b_score is not None
+        assert audit_coffee.confounder_audit.rubin_r_ratio is not None
+        assert audit_coffee.confounder_audit.brunner_munzel_w is not None
+        assert audit_coffee.confounder_audit.brunner_munzel_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -323,6 +333,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.goldfeld_quandt_p is not None
     assert audit.stability_audit.shapiro_francia_w is not None
     assert audit.stability_audit.shapiro_francia_p is not None
+    # Check D'Agostino-Pearson omnibus normality and Glejser heteroskedasticity test
+    assert audit.stability_audit.dagostino_pearson_k2 is not None
+    assert audit.stability_audit.dagostino_pearson_p is not None
+    assert audit.stability_audit.glejser_t_stat is not None
+    assert audit.stability_audit.glejser_p_value is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -596,6 +611,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_sf = narrator.answer_query("Explain Shapiro-Francia test for regression residual Gaussian normality", findings)
     assert "Shapiro" in ans_sf or "Francia" in ans_sf or "Normality" in ans_sf or "Gaussian" in ans_sf
+
+    ans_ts = narrator.answer_query("Explain Simon Thompson and Stephen Sharp random-effects funnel asymmetry test", findings)
+    assert "Thompson" in ans_ts or "Sharp" in ans_ts or "Funnel" in ans_ts or "Random-Effects" in ans_ts
+
+    ans_ab = narrator.answer_query("Explain Ansari-Bradley rank-sum scale dispersion test", findings)
+    assert "Ansari" in ans_ab or "Bradley" in ans_ab or "Dispersion" in ans_ab or "Scale" in ans_ab
+
+    ans_rubin = narrator.answer_query("Explain Donald Rubin propensity score covariate balance diagnostics", findings)
+    assert "Rubin" in ans_rubin or "Balance" in ans_rubin or "Propensity" in ans_rubin
+
+    ans_bm = narrator.answer_query("Explain Edgar Brunner and Ullrich Munzel generalized relative treatment effect", findings)
+    assert "Brunner" in ans_bm or "Munzel" in ans_bm or "Treatment Effect" in ans_bm or "Relative" in ans_bm
+
+    ans_dp = narrator.answer_query("Explain Ralph D'Agostino and E. S. Pearson omnibus normality test", findings)
+    assert "Agostino" in ans_dp or "Pearson" in ans_dp or "Normality" in ans_dp or "Omnibus" in ans_dp
+
+    ans_glejser = narrator.answer_query("Explain Herbert Glejser absolute residual regression heteroskedasticity test", findings)
+    assert "Glejser" in ans_glejser or "Heteroskedasticity" in ans_glejser or "Residual" in ans_glejser
 
 
 def test_end_to_end_pipeline(tmp_path):
