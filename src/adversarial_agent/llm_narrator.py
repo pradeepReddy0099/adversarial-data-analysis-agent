@@ -174,6 +174,74 @@ class LLMNarrator:
                 )
             return "Tarone's test evaluates whether the odds ratio is invariant across subgroups in stratified 2x2xK tables."
 
+        if any(w in q_lower for w in ["cook", "influence", "leverage", "outlier", "d_max"]):
+            cook_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                d_max = stab.get("max_cooks_distance")
+                n_infl = stab.get("cooks_outlier_count", 0)
+                shift = stab.get("cooks_statistic_shift", 0.0)
+                if d_max is not None and d_max > 0:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    cook_items.append(f"• **{v_name}**: Max Cook's D = {d_max:.3f} ({n_infl} influential points, correlation shift = {shift:.4f})")
+            if cook_items:
+                return (
+                    "**Cook's Distance Influence Diagnostics (Threshold: D_i > 4/n):**\n"
+                    "Quantifies how much regression parameters shift when individual observations are removed:\n"
+                    + "\n".join(cook_items)
+                )
+            return "Cook's distance diagnostic measures the influence of individual data points on parameter stability."
+
+        if any(w in q_lower for w in ["sign invariance", "sign test", "p(sign)", "bayesian"]):
+            sign_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                p_sign = stab.get("sign_invariance_prob")
+                if p_sign is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    sign_items.append(f"• **{v_name}**: P(sign invariance) = {p_sign:.1%}")
+            if sign_items:
+                return (
+                    "**Empirical Bootstrap Sign Invariance Probabilities:**\n"
+                    "The posterior empirical probability that the true effect maintains its claimed direction across resampling:\n"
+                    + "\n".join(sign_items)
+                )
+            return "Sign invariance probability measures directional consistency across 150 non-parametric bootstrap replications."
+
+        if any(w in q_lower for w in ["vif", "collinear", "multicollinear"]):
+            vif_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                vif = conf.get("top_confounder_vif")
+                if vif is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    top_c = conf.get("top_confounder")
+                    flag = " ⚠️ High collinearity (VIF >= 5.0)" if conf.get("is_collinear") else " (Stable VIF < 5.0)"
+                    vif_items.append(f"• **{v_name}** controlled by **{top_c}**: VIF = {vif:.2f}{flag}")
+            if vif_items:
+                return (
+                    "**Variance Inflation Factor (VIF) Multicollinearity Diagnostics:**\n"
+                    "VIF measures variance inflation when controlling for candidate confounders:\n"
+                    + "\n".join(vif_items)
+                )
+            return "VIF diagnostics evaluate multicollinearity between candidate predictors and confounders."
+
+        if any(w in q_lower for w in ["fdr", "false discovery", "hochberg", "benjamini", "multiple testing"]):
+            fdr_items = []
+            for f in findings:
+                q = f.get("claim", {}).get("fdr_q_value")
+                if q is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    p_orig = f.get("claim", {}).get("p_value", 0.0)
+                    fdr_items.append(f"• **{v_name}**: Raw p = {p_orig:.3e} → Benjamini-Hochberg FDR q = {q:.3e}")
+            if fdr_items:
+                return (
+                    "**Multiple Hypothesis Testing Correction (Benjamini-Hochberg FDR):**\n"
+                    "Guarantees that across all evaluated claims, the expected proportion of false discoveries is bounded:\n"
+                    + "\n".join(fdr_items)
+                )
+            return "Benjamini-Hochberg FDR q-values adjust raw p-values across all discovered candidate claims."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -370,9 +438,11 @@ class LLMNarrator:
                 claim = r.get("claim", {})
                 var = claim.get("source_variable")
                 stat_val = claim.get("statistic_value", 0.0)
+                stab = r.get("audit", {}).get("stability_audit", {})
+                p_sign = stab.get("sign_invariance_prob", 1.0)
                 lines.append(
                     f"- **{var}:** Passed all four falsification batteries without subgroup reversal or covariate attenuation. "
-                    f"Empirical effect ({claim.get('statistic_name')} = {stat_val:.3f}) is robust and recommended for deployment."
+                    f"Empirical effect ({claim.get('statistic_name')} = {stat_val:.3f}, P(sign invariance) = {p_sign:.1%}) is robust and recommended for deployment."
                 )
 
         if leakage:
@@ -380,6 +450,14 @@ class LLMNarrator:
             for lk in leakage:
                 var = lk.get("claim", {}).get("source_variable")
                 lines.append(f"- **{var}:** Exhibits near-deterministic correlation with target ($r \\ge 0.98$). Feature is a data artifact.")
+
+        lines.append("\n---")
+        lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 4 continuous and categorical stress tests:")
+        lines.append("1. **Cochran-Mantel-Haenszel & Tarone Homogeneity:** Verifies whether stratified odds ratios reverse or vary significantly across confounding strata.")
+        lines.append("2. **VanderWeele-Ding E-values:** Establishes the mathematical bound for unmeasured confounding sensitivity.")
+        lines.append("3. **Non-Parametric Vectorized Bootstrap & Cook's Influence:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), and outlier leverage ($D_i > 4/n$).")
+        lines.append("4. **Benjamini-Hochberg FDR:** Guarantees control over false discovery rate across high-dimensional exploratory hypothesis mining.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

@@ -90,6 +90,8 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.variance_explained_loss_pct > 70.0
         assert audit_coffee.confounder_audit.e_value is not None
         assert audit_coffee.confounder_audit.e_value >= 1.0
+        assert audit_coffee.confounder_audit.top_confounder_vif is not None
+        assert audit_coffee.confounder_audit.top_confounder_vif >= 1.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -110,6 +112,13 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.rank_discrepancy is not None
     assert audit.stability_audit.max_leverage is not None
     assert audit.stability_audit.max_leverage >= 0.0
+    # Check Cook's distance, sign invariance probability, and Benjamini-Hochberg FDR
+    assert audit.stability_audit.sign_invariance_prob >= 0.90
+    assert audit.stability_audit.max_cooks_distance is not None
+    assert audit.stability_audit.max_cooks_distance >= 0.0
+    assert audit.stability_audit.cooks_trimmed_statistic is not None
+    assert exp_claim.fdr_q_value is not None
+    assert exp_claim.fdr_q_value <= 1.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -143,6 +152,15 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_tarone = narrator.answer_query("Explain Tarone homogeneity", findings)
     assert "Tarone" in ans_tarone
+
+    ans_cook = narrator.answer_query("What is Cook's distance?", findings)
+    assert "Cook" in ans_cook
+
+    ans_sign = narrator.answer_query("What is the sign invariance probability?", findings)
+    assert "Sign Invariance" in ans_sign
+
+    ans_vif = narrator.answer_query("Explain VIF multicollinearity", findings)
+    assert "VIF" in ans_vif
 
 
 def test_end_to_end_pipeline(tmp_path):

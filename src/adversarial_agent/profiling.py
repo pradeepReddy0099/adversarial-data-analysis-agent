@@ -34,3 +34,24 @@ def profile_table(df: pd.DataFrame) -> Dict[str, Any]:
         "duplicate_rows": int(df.duplicated().sum()),
         "columns": col_profiles,
     }
+
+
+def benjamini_hochberg_fdr(p_values: List[float]) -> List[float]:
+    """Computes Benjamini-Hochberg False Discovery Rate (FDR) adjusted q-values.
+    
+    Guarantees that across m tested hypotheses, FDR <= q.
+    q_(i) = min_{k >= i} (m / k * p_(k)), capped at 1.0.
+    """
+    m = len(p_values)
+    if m == 0:
+        return []
+    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
+    q_vals = [0.0] * m
+    min_q = 1.0
+    for rank_minus_1, (orig_idx, p) in reversed(list(enumerate(indexed))):
+        rank = rank_minus_1 + 1
+        q = min(1.0, (m / rank) * p)
+        min_q = min(min_q, q)
+        q_vals[orig_idx] = float(min_q)
+    return q_vals
+

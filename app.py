@@ -175,6 +175,8 @@ with col_right:
                         st.info(claim["description"])
                         st.write(f"- **Observed Statistic:** `{claim['statistic_name']}` = `{claim['statistic_value']:.4f}`")
                         st.write(f"- **Significance:** `p = {claim['p_value']:.4e}`")
+                        if claim.get("fdr_q_value") is not None:
+                            st.write(f"- **Benjamini-Hochberg FDR:** `q = {claim['fdr_q_value']:.4e}`")
                         st.write(f"- **Sample Size:** `N = {claim['sample_size']}`")
                         
                     with deb_col2:
@@ -195,8 +197,15 @@ with col_right:
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
                             st.markdown(f"**VanderWeele E-Value:** `{conf_aud['e_value']:.2f}`")
+                        if conf_aud.get("top_confounder_vif") is not None:
+                            vif_flag = " ⚠️ High Collinearity" if conf_aud.get("is_collinear") else ""
+                            st.markdown(f"**Confounder VIF Collinearity:** `{conf_aud['top_confounder_vif']:.2f}`{vif_flag}")
 
                         stab_aud = audit.get("stability_audit", {})
+                        if stab_aud.get("sign_invariance_prob") is not None:
+                            st.markdown(f"**Sign Invariance Probability:** `P(sign) = {stab_aud['sign_invariance_prob']:.1%}`")
+                        if stab_aud.get("max_cooks_distance") is not None and stab_aud.get("max_cooks_distance", 0) > 0:
+                            st.markdown(f"**Cook's Distance Influence:** Max `D_i = {stab_aud['max_cooks_distance']:.3f}` ({stab_aud.get('cooks_outlier_count', 0)} points > 4/n, shift = `{stab_aud.get('cooks_statistic_shift', 0.0):.4f}`)")
                         if stab_aud.get("rank_discrepancy") is not None:
                             st.markdown(f"**Spearman Rank Discrepancy:** `Δr = {stab_aud['rank_discrepancy']:.3f}` (ρ = `{stab_aud.get('spearman_rho', 0.0):.3f}`)")
                         if stab_aud.get("max_leverage") is not None and stab_aud.get("max_leverage", 0) > 0:
@@ -324,16 +333,26 @@ with col_right:
             if json_path.exists():
                 st.download_button("📦 Download JSON Findings Dossier", data=json_path.read_text(encoding="utf-8"), file_name=json_path.name, mime="application/json")
 
+            narrator = LLMNarrator(provider=llm_provider)
+            briefing_text = narrator.generate_executive_briefing(findings, dataset_name=dataset_name)
+            st.download_button("🧠 Download Executive Narrative Briefing (Markdown)", data=briefing_text, file_name="llm_executive_briefing.md", mime="text/markdown")
+
             summary_rows = []
             for f in findings:
                 cl = f.get("claim", {})
+                stab = f.get("audit", {}).get("stability_audit", {})
+                conf = f.get("audit", {}).get("confounder_audit", {})
                 summary_rows.append({
                     "Variable": cl.get("source_variable", ""),
                     "Target": cl.get("target_variable", ""),
                     "Statistic": f"{cl.get('statistic_name', '')} = {cl.get('statistic_value', 0.0):.4f}",
                     "p_value": f"{cl.get('p_value', 0.0):.4e}",
+                    "FDR_q_value": f"{cl.get('fdr_q_value', 0.0):.4e}" if cl.get("fdr_q_value") is not None else "N/A",
                     "Verdict": f.get("verdict_badge", ""),
                     "Confidence": f.get("confidence_score", 0.0),
+                    "Sign_Invariance_P": f"{stab.get('sign_invariance_prob', 1.0):.1%}",
+                    "Cooks_D_Max": f"{stab.get('max_cooks_distance', 0.0):.3f}",
+                    "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",
                     "Synthesis": f.get("synthesis_summary", ""),
                     "Takeaway": f.get("actionable_takeaway", ""),
                 })

@@ -110,6 +110,8 @@ class RefereeAgent:
             }
             if confounder.e_value is not None:
                 rationale["key_evidence"].append(f"E-value for unmeasured confounding: {confounder.e_value:.2f}")
+            if confounder.top_confounder_vif is not None:
+                rationale["key_evidence"].append(f"Confounder VIF collinearity: {confounder.top_confounder_vif:.2f} {'[HIGH COLLINEARITY]' if confounder.is_collinear else '[STABLE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -117,27 +119,32 @@ class RefereeAgent:
             confidence = 0.35
             summary = (
                 f"STATISTICAL INSTABILITY: The claim failed bootstrap stability testing. "
-                f"The 95% confidence interval spans across zero [{stability.ci_95_low:.3f}, {stability.ci_95_high:.3f}]."
+                f"The 95% confidence interval spans across zero [{stability.ci_95_low:.3f}, {stability.ci_95_high:.3f}] "
+                f"(P(sign invariance) = {stability.sign_invariance_prob:.1%})."
             )
             takeaway = "Treat this finding with skepticism; it is highly sensitive to sample noise."
             rationale = {
                 "category_name": "Statistically Unstable (High Variance / Outlier Sensitive)",
                 "why_assigned": (
                     f"Assigned because Battery 3 (non-parametric bootstrap resampling) proved that "
-                    f"the finding's 95% empirical confidence interval spans across zero [{stability.ci_95_low:.3f}, {stability.ci_95_high:.3f}]. "
-                    f"This proves the direction of effect cannot be distinguished from random noise at standard significance."
+                    f"the finding's 95% empirical confidence interval spans across zero [{stability.ci_95_low:.3f}, {stability.ci_95_high:.3f}] "
+                    f"or exhibits sign instability (P(sign invariance) = {stability.sign_invariance_prob:.1%}). "
+                    f"This proves the direction of effect cannot be reliably distinguished from random noise."
                 ),
                 "key_evidence": [
                     f"Bootstrap 95% Confidence Interval: [{stability.ci_95_low:.3f}, {stability.ci_95_high:.3f}]",
-                    "Zero-crossing detected: True (interval includes 0.0)",
+                    f"Sign invariance probability: {stability.sign_invariance_prob:.1%}",
+                    "Zero-crossing detected: True (interval includes 0.0)" if stability.zero_crossing else "Sign invariance below threshold",
                     f"Bootstrap sample mean: {stability.bootstrap_mean:.4f}",
                 ],
-                "decision_rule": "Rule: If 95% bootstrap confidence interval crosses zero (includes 0.0) -> UNSTABLE / OUTLIER-DRIVEN.",
+                "decision_rule": "Rule: If 95% bootstrap confidence interval crosses zero or P(sign invariance) < 90% -> UNSTABLE / OUTLIER-DRIVEN.",
             }
             if stability.rank_discrepancy is not None:
                 rationale["key_evidence"].append(f"Spearman rank discrepancy: Δr = {stability.rank_discrepancy:.3f}")
             if stability.max_leverage is not None:
                 rationale["key_evidence"].append(f"Max leverage: {stability.max_leverage:.4f} ({stability.high_leverage_points} high-leverage points)")
+            if stability.max_cooks_distance is not None and stability.max_cooks_distance > 0:
+                rationale["key_evidence"].append(f"Cook's distance: D_max = {stability.max_cooks_distance:.3f} ({stability.cooks_outlier_count} influential points, shift = {stability.cooks_statistic_shift:.4f})")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -196,6 +203,11 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Causal sensitivity E-value: {confounder.e_value:.2f} ({confounder.e_value_interpretation})")
             if stability.spearman_rho is not None:
                 rationale["key_evidence"].append(f"Monotonic Rank: Spearman ρ = {stability.spearman_rho:.3f} (Δr = {stability.rank_discrepancy:.3f})")
+            rationale["key_evidence"].append(f"Sign invariance probability: P(sign) = {stability.sign_invariance_prob:.1%}")
+            if stability.max_cooks_distance is not None and stability.max_cooks_distance > 0:
+                rationale["key_evidence"].append(f"Cook's distance: D_max = {stability.max_cooks_distance:.3f} (influence shift = {stability.cooks_statistic_shift:.4f})")
+            if claim.fdr_q_value is not None:
+                rationale["key_evidence"].append(f"Benjamini-Hochberg FDR: q = {claim.fdr_q_value:.4e}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

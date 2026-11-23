@@ -9,6 +9,7 @@ import pandas as pd
 from scipy import stats
 
 from adversarial_agent.explorer import Claim
+from adversarial_agent.profiling import benjamini_hochberg_fdr
 
 
 @dataclass
@@ -62,6 +63,8 @@ class ConfounderAudit:
     variance_explained_loss_pct: float = 0.0
     e_value: Optional[float] = None
     e_value_interpretation: Optional[str] = None
+    top_confounder_vif: Optional[float] = None
+    is_collinear: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -82,6 +85,11 @@ class StabilityAudit:
     rank_discrepancy: Optional[float] = None
     max_leverage: Optional[float] = None
     high_leverage_points: int = 0
+    sign_invariance_prob: float = 1.0
+    max_cooks_distance: Optional[float] = None
+    cooks_outlier_count: int = 0
+    cooks_trimmed_statistic: Optional[float] = None
+    cooks_statistic_shift: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -557,6 +565,7 @@ class DevilsAdvocateAgent:
         max_att = 0.0
         top_conf = None
         best_partial = r_xy
+        top_vif = None
 
         for z in candidates:
             sub = df[[source, target, z]].dropna()
@@ -572,6 +581,7 @@ class DevilsAdvocateAgent:
                     max_att = att
                     top_conf = z
                     best_partial = r_part
+                    top_vif = float(1.0 / max(1e-4, 1.0 - r_xz**2))
             except Exception:
                 continue
 
@@ -585,11 +595,13 @@ class DevilsAdvocateAgent:
         e_val, e_desc = calculate_e_value(rr_approx)
 
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
+        is_collinear = top_vif is not None and top_vif >= 5.0
+        vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -604,6 +616,8 @@ class DevilsAdvocateAgent:
             variance_explained_loss_pct=variance_loss,
             e_value=e_val,
             e_value_interpretation=e_desc,
+            top_confounder_vif=top_vif,
+            is_collinear=is_collinear,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -707,11 +721,51 @@ class DevilsAdvocateAgent:
             max_lev = float(np.max(h_ii))
             high_lev_count = int(np.sum(h_ii > (4.0 / n)))
         else:
+            h_ii = np.full(n, 1.0 / n)
             max_lev = 0.0
             high_lev_count = 0
 
+        # Bayesian sign invariance empirical probability
+        if claim.statistic_value > 0:
+            sign_inv_prob = float(np.mean(valid_r > 0))
+        elif claim.statistic_value < 0:
+            sign_inv_prob = float(np.mean(valid_r < 0))
+        else:
+            sign_inv_prob = 1.0
+
+        # Cook's Distance Outlier Influence Diagnostic
+        # D_i = (e_i^2 / (p * MSE)) * (h_ii / (1 - h_ii)^2)
+        p_params = 2
+        fitted_y = np.polyval(np.polyfit(x_vals, y_vals, 1), x_vals) if np.std(x_vals) > 0 else np.full_like(y_vals, np.mean(y_vals))
+        residuals = y_vals - fitted_y
+        sse = float(np.sum(residuals ** 2))
+        mse = sse / max(1, n - p_params)
+
+        if x_ss > 1e-9 and mse > 1e-12:
+            denom_lev = np.maximum(1e-6, (1.0 - h_ii) ** 2)
+            cooks_d = (residuals ** 2) / (p_params * mse) * (h_ii / denom_lev)
+            max_cooks = float(np.max(cooks_d))
+            cooks_influential = cooks_d > (4.0 / n)
+            cooks_count = int(np.sum(cooks_influential))
+
+            non_cooks = ~cooks_influential
+            if np.sum(non_cooks) > 10 and np.std(x_vals[non_cooks]) > 1e-9 and np.std(y_vals[non_cooks]) > 1e-9:
+                cooks_trim_r = float(stats.pearsonr(x_vals[non_cooks], y_vals[non_cooks])[0])
+                cooks_shift = float(abs(claim.statistic_value - cooks_trim_r))
+            else:
+                cooks_trim_r = float(trim_r)
+                cooks_shift = 0.0
+        else:
+            max_cooks = 0.0
+            cooks_count = 0
+            cooks_trim_r = float(trim_r)
+            cooks_shift = 0.0
+
+        is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90)
+
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, {exec_ms:.1f}ms{disc_str}). Trimmed r = {trim_r:.4f}."
+        cooks_str = f", Cook's D_max={max_cooks:.3f} ({cooks_count} influential)" if max_cooks > 0 else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, {exec_ms:.1f}ms{disc_str}{cooks_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -727,6 +781,11 @@ class DevilsAdvocateAgent:
             rank_discrepancy=rank_disc,
             max_leverage=max_lev,
             high_leverage_points=high_lev_count,
+            sign_invariance_prob=sign_inv_prob,
+            max_cooks_distance=max_cooks,
+            cooks_outlier_count=cooks_count,
+            cooks_trimmed_statistic=cooks_trim_r,
+            cooks_statistic_shift=cooks_shift,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

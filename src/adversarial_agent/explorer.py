@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from adversarial_agent.profiling import benjamini_hochberg_fdr
+
 
 @dataclass
 class Claim:
@@ -22,6 +24,7 @@ class Claim:
     direction: str
     description: str
     metadata: dict
+    fdr_q_value: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -96,6 +99,11 @@ class ExplorerAgent:
                         counter += 1
 
         claims.sort(key=lambda x: (x.p_value, -abs(x.statistic_value)))
+        if claims:
+            p_vals = [c.p_value for c in claims]
+            q_vals = benjamini_hochberg_fdr(p_vals)
+            for c, q in zip(claims, q_vals):
+                c.fdr_q_value = q
         return claims
 
     def _is_identifier(self, col: str, df: pd.DataFrame) -> bool:
