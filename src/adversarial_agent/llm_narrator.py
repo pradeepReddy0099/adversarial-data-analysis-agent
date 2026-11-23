@@ -276,7 +276,7 @@ class LLMNarrator:
                 )
             return "Cinelli-Hazlett Robustness Values define the minimum confounder association needed to nullify point estimates or significance."
 
-        if any(w in q_lower for w in ["i-squared", "i^2", "heterogeneity", "cochran"]):
+        if any(w in q_lower for w in ["i-squared", "i^2", "heterogeneity", "cochran"]) and not any(w in q_lower for w in ["woolf", "haldane", "anscombe"]):
             i2_items = []
             for f in findings:
                 simp = f.get("audit", {}).get("simpsons_audit", {})
@@ -852,6 +852,86 @@ class LLMNarrator:
                 )
             return "Higgins H² and Galbraith radial diagnostics evaluate total heterogeneity inflation and isolate outlying strata driving paradoxes."
 
+        if any(w in q_lower for w in ["woolf", "haldane", "anscombe"]):
+            woolf_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                w_p = simp.get("woolf_p")
+                w_chi2 = simp.get("woolf_chi2")
+                is_het = simp.get("is_woolf_heterogeneous", False)
+                if w_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Statistically Significant Heterogeneity (p < 0.05)" if is_het else " (Homogeneous Across Strata)"
+                    woolf_items.append(f"• **{v_name}** conditioned on **{conf}**: Woolf χ² = {w_chi2:.2f} (p = {w_p:.3e}){flag}")
+            if woolf_items:
+                return (
+                    "**Barnet Woolf (1955) Stratified Odds Ratio Heterogeneity Test:**\n"
+                    "Evaluates cross-stratum odds ratio invariance with Haldane-Anscombe 0.5 continuity correction for sparse cells:\n"
+                    + "\n".join(woolf_items)
+                )
+            return "Woolf's test assesses odds ratio homogeneity across stratified contingency tables using inverse-variance weights."
+
+        if any(w in q_lower for w in ["imbens", "manski ci", "im ci", "partially identified ci"]):
+            im_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                im_l = conf.get("imbens_manski_ci_low")
+                im_h = conf.get("imbens_manski_ci_high")
+                im_cn = conf.get("imbens_manski_cn")
+                excl = conf.get("imbens_manski_excludes_zero", False)
+                if im_l is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " 🟢 Excludes Zero (Identified Directional Sign)" if excl else " ⚠️ Spans Zero (Partially Identified Sign)"
+                    im_items.append(f"• **{v_name}**: Imbens-Manski 95% CI = [{im_l:.3f}, {im_h:.3f}] (c_n = {im_cn:.3f}){flag}")
+            if im_items:
+                return (
+                    "**Guido Imbens & Charles Manski (2004) Partial Identification Confidence Intervals:**\n"
+                    "Derives asymptotically valid 95% confidence intervals accounting for non-parametric boundary sampling variability:\n"
+                    + "\n".join(im_items)
+                )
+            return "Imbens-Manski confidence intervals provide exact statistical coverage for partially identified parameters under arbitrary non-random selection."
+
+        if any(w in q_lower for w in ["mallows", "cp criterion", "cp discrepancy", "specification bias"]):
+            mal_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                cp = conf.get("mallows_cp")
+                disc = conf.get("cp_bias_discrepancy")
+                is_bad = conf.get("is_mallows_biased", False)
+                if cp is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ Severe Omitted-Variable Bias (ΔCp > 2.0)" if is_bad else " (Well-Specified Model)"
+                    mal_items.append(f"• **{v_name}** omitting **{c_name}**: Mallows' Cp = {cp:.2f} (ΔCp = {disc:+.2f}){flag}")
+            if mal_items:
+                return (
+                    "**Colin Mallows (1973) Cp Model Misspecification & Selection Criterion:**\n"
+                    "Compares restricted bivariate models against confounder-adjusted specifications. Cp >> p (ΔCp > 2.0) reveals severe omitted-variable bias:\n"
+                    + "\n".join(mal_items)
+                )
+            return "Mallows' Cp criterion evaluates whether omitting a candidate confounder introduces substantial model bias and prediction variance inflation."
+
+        if any(w in q_lower for w in ["gelman", "carlin", "type s", "type m", "exaggeration", "retrodesign", "winner's curse", "sign error"]):
+            type_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                tm = stab.get("type_m_exaggeration_ratio")
+                ts = stab.get("type_s_error_prob")
+                rp = stab.get("retrodesign_power")
+                vuln = stab.get("is_type_m_vulnerable", False)
+                if tm is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ High Exaggeration / Winner's Curse Vulnerability" if vuln else " (Stable Effect Size)"
+                    type_items.append(f"• **{v_name}**: Type M Exaggeration = {tm:.2f}x (Type S Sign Error = {ts:.1%}, Power = {rp:.1%}){flag}")
+            if type_items:
+                return (
+                    "**Andrew Gelman & John Carlin (2014) Type S (Sign) & Type M (Magnitude) Design Analysis:**\n"
+                    "Evaluates the probability of incorrect directional signs (Type S) and factor of effect inflation (Type M) conditional on statistical significance:\n"
+                    + "\n".join(type_items)
+                )
+            return "Gelman-Carlin design analysis quantifies Type S sign error rates and Type M exaggeration ratios to safeguard against the Winner's Curse."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -1064,16 +1144,16 @@ class LLMNarrator:
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
         lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 10 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
-        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
-        lines.append("3. **Altonji-Elder-Taber (AET 2005) Selection Ratio, Rosenbaum (1987, 2002) Sensitivity Bounds (Γ) & Manski (1990, 2003) Non-Parametric Partial Identification:** Evaluates the relative selection ratio ($R_{\\text{AET}}$) on unobservables required to attribute effects to selection bias, calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, and computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection.")
+        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Woolf Stratified Test, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance with Haldane-Anscombe continuity corrections (Woolf's test), quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
+        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit), Cohen's f² & Mallows' Cp Criterion:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, unique variance effect sizes ($f^2$), and Mallows' $C_p$ model misspecification discrepancy ($\\Delta C_p > 2.0$) needed to nullify empirical associations.")
+        lines.append("3. **Altonji-Elder-Taber (AET 2005) Selection Ratio, Rosenbaum (1987, 2002) Sensitivity Bounds (Γ), Manski (1990, 2003) Non-Parametric Partial Identification & Imbens-Manski (2004) Asymptotically Valid CIs:** Evaluates the relative selection ratio ($R_{\\text{AET}}$) on unobservables required to attribute effects to selection bias, calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection, and constructs exact Imbens-Manski confidence intervals accounting for boundary sampling variability.")
         lines.append("4. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
         lines.append("5. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
         lines.append("6. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
         lines.append("7. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
         lines.append("8. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
         lines.append("9. **Gregory Chow (1960) Structural Break Test, Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
-        lines.append("10. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
+        lines.append("10. **Andrew Gelman & John Carlin (2014) Type S/M Design Analysis, Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, quantifies Type S sign error probabilities and Type M exaggeration ratios to safeguard against the Winner's Curse, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

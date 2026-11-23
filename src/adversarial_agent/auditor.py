@@ -63,6 +63,9 @@ class SimpsonsParadoxAudit:
     higgins_h_squared: Optional[float] = None
     galbraith_outlier_count: int = 0
     galbraith_outlier_subgroups: List[str] = field(default_factory=list)
+    woolf_chi2: Optional[float] = None
+    woolf_p: Optional[float] = None
+    is_woolf_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -113,6 +116,13 @@ class ConfounderAudit:
     manski_contains_zero: bool = False
     aet_selection_ratio: Optional[float] = None
     is_aet_vulnerable: bool = False
+    imbens_manski_ci_low: Optional[float] = None
+    imbens_manski_ci_high: Optional[float] = None
+    imbens_manski_cn: Optional[float] = None
+    imbens_manski_excludes_zero: bool = False
+    mallows_cp: Optional[float] = None
+    cp_bias_discrepancy: Optional[float] = None
+    is_mallows_biased: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -167,6 +177,10 @@ class StabilityAudit:
     chow_f_stat: Optional[float] = None
     chow_p_value: Optional[float] = None
     has_structural_break: bool = False
+    type_s_error_prob: Optional[float] = None
+    type_m_exaggeration_ratio: Optional[float] = None
+    retrodesign_power: Optional[float] = None
+    is_type_m_vulnerable: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1384,6 +1398,234 @@ def calculate_higgins_h_and_galbraith_outliers(
         return 1.0, 0, []
 
 
+def woolf_stratified_heterogeneity_test(
+    tables_2x2: List[tuple[float, float, float, float]],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Woolf's (1955) stratified odds ratio heterogeneity test
+    with Haldane (1956) and Anscombe (1956) 0.5 continuity corrections.
+    
+    For each stratum k in {1, ..., K} with table (a_k, b_k, c_k, d_k):
+      ln(OR_k) = ln( (a_k + 0.5)(d_k + 0.5) / ((b_k + 0.5)(c_k + 0.5)) )
+      v_k = 1/(a_k + 0.5) + 1/(b_k + 0.5) + 1/(c_k + 0.5) + 1/(d_k + 0.5)
+      w_k = 1 / v_k
+    Pooled log odds ratio:
+      ln(OR_bar) = sum(w_k * ln(OR_k)) / sum(w_k)
+    Woolf test statistic:
+      chi2_Woolf = sum(w_k * (ln(OR_k) - ln(OR_bar))^2) ~ chi2(K - 1)
+    
+    Unlike asymptotic Breslow-Day tests, the Haldane-Anscombe correction guarantees
+    finite, non-zero variance even in the presence of sparse or empty cells.
+    Rejection (p < 0.05) certifies statistically significant effect modification across strata.
+    """
+    k = len(tables_2x2)
+    if k < 2:
+        return None, None, False
+    try:
+        ln_ors = []
+        weights = []
+        for a, b, c, d in tables_2x2:
+            a_c = float(a) + 0.5
+            b_c = float(b) + 0.5
+            c_c = float(c) + 0.5
+            d_c = float(d) + 0.5
+            lor = float(np.log((a_c * d_c) / (b_c * c_c)))
+            var = float(1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c)
+            if var < 1e-12:
+                continue
+            w = float(1.0 / var)
+            ln_ors.append(lor)
+            weights.append(w)
+        
+        if len(ln_ors) < 2:
+            return None, None, False
+        
+        w_arr = np.array(weights, dtype=float)
+        lor_arr = np.array(ln_ors, dtype=float)
+        w_sum = float(np.sum(w_arr))
+        if w_sum < 1e-12:
+            return None, None, False
+        
+        pooled_lor = float(np.sum(w_arr * lor_arr) / w_sum)
+        chi2_val = float(np.sum(w_arr * (lor_arr - pooled_lor) ** 2))
+        df = len(ln_ors) - 1
+        p_val = float(stats.chi2.sf(chi2_val, df=df))
+        is_hetero = bool(p_val < 0.05)
+        return chi2_val, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def calculate_imbens_manski_ci(
+    x: np.ndarray,
+    y: np.ndarray,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Imbens & Manski (2004) asymptotically valid confidence intervals
+    for partially identified Average Treatment Effects under arbitrary non-random selection.
+    
+    Extends Manski's (1990) point identification bounds [Delta_low, Delta_high] by accounting
+    for boundary estimator sampling variability. Solves for critical value c_n in [z_{1-alpha}, z_{1-alpha/2}]
+    satisfying:
+      Phi(c_n + sqrt(n) * (Delta_high - Delta_low) / sigma_max) - Phi(-c_n) = 1 - alpha
+    
+    Yields asymptotically valid coverage:
+      CI_{1-alpha} = [Delta_low - c_n * sigma_low / sqrt(n), Delta_high + c_n * sigma_high / sqrt(n)]
+    Certifies whether zero is strictly excluded from the entire identification region.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, None, False
+    try:
+        x_med = float(np.median(x))
+        d = (x > x_med).astype(float)
+        n1 = int(np.sum(d == 1.0))
+        n0 = int(np.sum(d == 0.0))
+        if n1 < 5 or n0 < 5:
+            return None, None, None, False
+        
+        p1 = float(n1 / n)
+        p0 = float(n0 / n)
+        y1 = y[d == 1.0]
+        y0 = y[d == 0.0]
+        
+        e_y1 = float(np.mean(y1))
+        e_y0 = float(np.mean(y0))
+        s1_sq = float(np.var(y1, ddof=1)) if len(y1) > 1 else 0.0
+        s0_sq = float(np.var(y0, ddof=1)) if len(y0) > 1 else 0.0
+        
+        y_min = float(np.percentile(y, 1.0))
+        y_max = float(np.percentile(y, 99.0))
+        
+        delta_low = float(p1 * e_y1 + p0 * y_min - (p1 * y_max + p0 * e_y0))
+        delta_high = float(p1 * e_y1 + p0 * y_max - (p1 * y_min + p0 * e_y0))
+        
+        sigma_low = float(np.sqrt(max(1e-8, s1_sq / p1 + s0_sq / p0)))
+        sigma_high = float(np.sqrt(max(1e-8, s1_sq / p1 + s0_sq / p0)))
+        sigma_max = max(sigma_low, sigma_high, 1e-6)
+        
+        bound_width = max(0.0, delta_high - delta_low)
+        delta_n = float(np.sqrt(n) * bound_width / sigma_max)
+        
+        z_one_sided = float(stats.norm.ppf(1.0 - alpha))
+        z_two_sided = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        
+        def _obj(c: float) -> float:
+            return float(stats.norm.cdf(c + delta_n) - stats.norm.cdf(-c) - (1.0 - alpha))
+        
+        if delta_n >= 20.0:
+            c_n = z_one_sided
+        elif delta_n <= 1e-6:
+            c_n = z_two_sided
+        else:
+            try:
+                c_n = float(optimize.brentq(_obj, z_one_sided - 0.05, z_two_sided + 0.05))
+            except Exception:
+                c_n = z_two_sided
+        
+        ci_low = float(delta_low - c_n * sigma_low / np.sqrt(n))
+        ci_high = float(delta_high + c_n * sigma_high / np.sqrt(n))
+        excludes_zero = bool(ci_low > 0.0 or ci_high < 0.0)
+        
+        return ci_low, ci_high, c_n, excludes_zero
+    except Exception:
+        return None, None, None, False
+
+
+def calculate_mallows_cp(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Colin Mallows' (1973) Cp model misspecification and selection criterion.
+    
+    Evaluates whether omitting candidate confounder z from the model y ~ x introduces
+    substantial specification bias and variance inflation.
+    Restricted model: y ~ 1 + x (p = 2)
+    Full model: y ~ 1 + x + z (p_full = 3)
+      Cp = (RSS_rest / MSE_full) - (n - 2 * p)
+      Discrepancy: Delta Cp = Cp - p
+    
+    If Delta Cp > 2.0, the restricted model suffers from severe omitted-variable bias,
+    demonstrating that omitting confounder z misspecifies the true data-generating process.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        x_mat = np.column_stack([np.ones(n), x])
+        beta_rest, _, _, _ = np.linalg.lstsq(x_mat, y, rcond=None)
+        res_rest = y - x_mat @ beta_rest
+        rss_rest = float(np.sum(res_rest ** 2))
+        
+        full_mat = np.column_stack([np.ones(n), x, z])
+        beta_full, _, _, _ = np.linalg.lstsq(full_mat, y, rcond=None)
+        res_full = y - full_mat @ beta_full
+        rss_full = float(np.sum(res_full ** 2))
+        
+        p = 2
+        p_full = 3
+        df_full = n - p_full
+        if df_full <= 0 or rss_full < 1e-12:
+            return None, None, False
+            
+        mse_full = rss_full / df_full
+        cp = float((rss_rest / mse_full) - (n - 2 * p))
+        discrepancy = float(cp - p)
+        is_biased = bool(discrepancy > 2.0)
+        
+        return cp, discrepancy, is_biased
+    except Exception:
+        return None, None, False
+
+
+def calculate_gelman_carlin_design_analysis(
+    estimate: float,
+    se: float,
+    prior_effect: Optional[float] = None,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Gelman & Carlin (2014) design analysis: Type S (Sign) error probability,
+    Type M (Exaggeration / Magnitude) error ratio, and retrodesign power.
+    
+    In exploratory and observational discovery, statistical significance (p < 0.05) often
+    leads to dramatic effect exaggeration ('Winner's Curse') and wrong-sign conclusions
+    under low statistical power.
+    Given standard error se and hypothesized true effect theta_0:
+      c = z_{1-alpha/2} * se
+      Power = 1 - beta = Phi((theta_0 - c)/se) + Phi((-theta_0 - c)/se)
+      Type S = Phi((-theta_0 - c)/se) / (1 - beta)
+      Type M = E[|theta_hat| | |theta_hat| > c] / theta_0
+    
+    Flags is_vulnerable if Type M ratio > 1.50 or Type S error > 0.05.
+    """
+    if se <= 1e-9 or abs(estimate) < 1e-9:
+        return None, None, None, False
+    try:
+        theta_0 = abs(prior_effect) if prior_effect is not None else max(0.05, abs(estimate) / 2.0)
+        z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        c = z_crit * se
+        
+        term1 = (theta_0 - c) / se
+        term2 = (-theta_0 - c) / se
+        power = float(stats.norm.cdf(term1) + stats.norm.cdf(term2))
+        power = min(1.0, max(1e-12, power))
+        
+        type_s = float(stats.norm.cdf(term2) / power)
+        type_s = min(1.0, max(0.0, type_s))
+        
+        part_pos = theta_0 * stats.norm.cdf(term1) + se * stats.norm.pdf(term1)
+        part_neg = -theta_0 * stats.norm.cdf(term2) + se * stats.norm.pdf(term2)
+        e_abs_given_reject = float((part_pos + part_neg) / power)
+        
+        type_m = float(e_abs_given_reject / theta_0)
+        type_m = max(1.0, min(99.9, type_m))
+        
+        is_vulnerable = bool(type_m > 1.50 or type_s > 0.05)
+        return type_s, type_m, power, is_vulnerable
+    except Exception:
+        return None, None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -1618,6 +1860,9 @@ class DevilsAdvocateAgent:
         tarone_p: Optional[float] = None
         simpson_e_val: Optional[float] = None
         simpson_e_desc: Optional[str] = None
+        woolf_chi2: Optional[float] = None
+        woolf_p: Optional[float] = None
+        is_woolf_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -1664,6 +1909,8 @@ class DevilsAdvocateAgent:
                 
                 # Breslow-Day & Tarone's Homogeneity Test
                 bd_stat, bd_p, tarone_stat, tarone_p = breslow_day_homogeneity_test(tables_2x2, cmh_or)
+                # Woolf's Stratified Heterogeneity Test with Haldane-Anscombe correction
+                woolf_chi2, woolf_p, is_woolf_hetero = woolf_stratified_heterogeneity_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -1746,6 +1993,8 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Hausman Test: H={haus_stat:.2f}, p={haus_p:.3e}]"
         if vuong_p_val is not None:
             cmh_note += f" [Vuong Test: z={vuong_z_val:.2f}, p={vuong_p_val:.3e}]"
+        if woolf_p is not None:
+            cmh_note += f" [Woolf Test: p={woolf_p:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -1794,6 +2043,9 @@ class DevilsAdvocateAgent:
             higgins_h_squared=higgins_h2,
             galbraith_outlier_count=galb_cnt,
             galbraith_outlier_subgroups=galb_outliers,
+            woolf_chi2=woolf_chi2,
+            woolf_p=woolf_p,
+            is_woolf_heterogeneous=is_woolf_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -1927,9 +2179,11 @@ class DevilsAdvocateAgent:
             y_arr_m = pd.Series(pd.Categorical(sub_pair[target]).codes, index=sub_pair.index, dtype=float).to_numpy()
         val_m = ~(np.isnan(x_arr_m) | np.isnan(y_arr_m))
         manski_l, manski_h, manski_zero = calculate_manski_bounds(x_arr_m[val_m], y_arr_m[val_m])
+        im_ci_l, im_ci_h, im_cn, im_excl_zero = calculate_imbens_manski_ci(x_arr_m[val_m], y_arr_m[val_m])
 
         # Advanced Econometric Metric: Altonji, Elder & Taber (2005) Selection Ratio on Unobservables
         aet_val, is_aet_vuln = None, False
+        mallows_cp_val, mallows_disc_val, is_mallows_bad = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -1939,6 +2193,14 @@ class DevilsAdvocateAgent:
                     aet_val, is_aet_vuln = calculate_altonji_elder_taber_ratio(r_xy, r_xz_a, r_yz_a)
                 except Exception:
                     pass
+            if len(sub_aet) >= 15:
+                try:
+                    x_mal = sub_aet[source].to_numpy(dtype=float)
+                    z_mal = sub_aet[top_conf].to_numpy(dtype=float)
+                    y_mal = sub_aet[target].to_numpy(dtype=float)
+                    mallows_cp_val, mallows_disc_val, is_mallows_bad = calculate_mallows_cp(x_mal, z_mal, y_mal)
+                except Exception:
+                    pass
 
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
@@ -1946,7 +2208,9 @@ class DevilsAdvocateAgent:
         rv_str = f", RV={rv_point:.2f} (R²crit={rcrit_val:.2f})"
         rosen_str = f", Rosenbaum Γcrit={gamma_crit:.2f}" if gamma_crit is not None else ""
         manski_str = f", Manski=[{manski_l:.3f}, {manski_h:.3f}]" if manski_l is not None else ""
+        im_str = f", Imbens-Manski=[{im_ci_l:.3f}, {im_ci_h:.3f}]" if im_ci_l is not None else ""
         aet_str = f", AET={aet_val:.2f}" if aet_val is not None else ""
+        mal_str = f", Mallows Cp={mallows_cp_val:.2f} (ΔCp={mallows_disc_val:.2f})" if mallows_cp_val is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
@@ -1956,9 +2220,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{aet_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{aet_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{im_str}{aet_str}{mal_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -2003,6 +2267,13 @@ class DevilsAdvocateAgent:
             manski_contains_zero=manski_zero,
             aet_selection_ratio=aet_val,
             is_aet_vulnerable=is_aet_vuln,
+            imbens_manski_ci_low=im_ci_l,
+            imbens_manski_ci_high=im_ci_h,
+            imbens_manski_cn=im_cn,
+            imbens_manski_excludes_zero=im_excl_zero,
+            mallows_cp=mallows_cp_val,
+            cp_bias_discrepancy=mallows_disc_val,
+            is_mallows_biased=is_mallows_bad,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -2206,6 +2477,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Gregory Chow (1960) Structural Break & Parameter Stability F-Test
         chow_f, chow_p, has_break = chow_structural_break_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Andrew Gelman & John Carlin (2014) Type S (Sign) & Type M (Magnitude) Design Analysis
+        type_s, type_m, retro_pow, is_type_m_vuln = calculate_gelman_carlin_design_analysis(
+            estimate=claim.statistic_value,
+            se=std_err,
+        )
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -2221,7 +2498,8 @@ class DevilsAdvocateAgent:
         hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
+        type_m_str = f", Type M={type_m:.2f} (Type S={type_s:.1%})" if type_m is not None else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{chow_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}{type_m_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -2271,6 +2549,10 @@ class DevilsAdvocateAgent:
             chow_f_stat=chow_f,
             chow_p_value=chow_p,
             has_structural_break=has_break,
+            type_s_error_prob=type_s,
+            type_m_exaggeration_ratio=type_m,
+            retrodesign_power=retro_pow,
+            is_type_m_vulnerable=is_type_m_vuln,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

@@ -219,6 +219,9 @@ with col_right:
                             st.markdown(f"**Higgins H² Heterogeneity:** `{simpsons['higgins_h_squared']:.2f}` (Inflation Factor H = `{np.sqrt(simpsons['higgins_h_squared']):.2f}`)")
                         if simpsons.get("galbraith_outlier_count", 0) > 0:
                             st.markdown(f"**Galbraith Radial Outliers:** `{simpsons['galbraith_outlier_count']}` strata flagged (`{', '.join(simpsons.get('galbraith_outlier_subgroups', []))}`)")
+                        if simpsons.get("woolf_p") is not None:
+                            w_flag = " ⚠️ Heterogeneous" if simpsons.get("is_woolf_heterogeneous") else " (Homogeneous)"
+                            st.markdown(f"**Woolf Odds Ratio Heterogeneity Test:** χ² = `{simpsons.get('woolf_chi2', 0.0):.2f}` (p = `{simpsons['woolf_p']:.3e}`){w_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -226,6 +229,12 @@ with col_right:
                         if conf_aud.get("aet_selection_ratio") is not None:
                             aet_flag = " ⚠️ High Selection Vulnerability (R_AET < 1.0)" if conf_aud.get("is_aet_vulnerable") else " (Robust R_AET ≥ 1.0)"
                             st.markdown(f"**Altonji-Elder-Taber Ratio:** R_AET = `{conf_aud['aet_selection_ratio']:.2f}`{aet_flag}")
+                        if conf_aud.get("imbens_manski_ci_low") is not None:
+                            im_flag = " 🟢 Excludes Zero" if conf_aud.get("imbens_manski_excludes_zero") else " ⚠️ Spans Zero"
+                            st.markdown(f"**Imbens-Manski 95% Partial Identification CI:** [`{conf_aud['imbens_manski_ci_low']:.3f}`, `{conf_aud.get('imbens_manski_ci_high', 0.0):.3f}`] (c_n = `{conf_aud.get('imbens_manski_cn', 0.0):.3f}`){im_flag}")
+                        if conf_aud.get("mallows_cp") is not None:
+                            cp_flag = " ⚠️ Severe Omitted Bias" if conf_aud.get("is_mallows_biased") else " (Well-Specified)"
+                            st.markdown(f"**Mallows' Cp Model Selection:** Cp = `{conf_aud['mallows_cp']:.2f}` (ΔCp = `{conf_aud.get('cp_bias_discrepancy', 0.0):+.2f}`){cp_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -290,6 +299,9 @@ with col_right:
                         if stab_aud.get("chow_p_value") is not None:
                             chow_flag = " ⚠️ Structural Break Detected" if stab_aud.get("has_structural_break") else " (Parameter Invariant)"
                             st.markdown(f"**Chow Structural Break Test:** F = `{stab_aud.get('chow_f_stat', 0.0):.2f}` (p = `{stab_aud['chow_p_value']:.3e}`){chow_flag}")
+                        if stab_aud.get("type_m_exaggeration_ratio") is not None:
+                            tm_flag = " ⚠️ Winner's Curse Vulnerable" if stab_aud.get("is_type_m_vulnerable") else " (Stable Effect Size)"
+                            st.markdown(f"**Gelman-Carlin Design Analysis:** Type M = `{stab_aud['type_m_exaggeration_ratio']:.2f}x` (Type S = `{stab_aud.get('type_s_error_prob', 0.0):.1%}`, Power = `{stab_aud.get('retrodesign_power', 0.0):.1%}`){tm_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -399,6 +411,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Detect Galbraith Outlier Strata"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Detect Galbraith Outlier Strata", findings, dataset_name=dataset_name)
 
+            sug_col4, sug_col5, sug_col6 = st.columns(3)
+            with sug_col4:
+                if st.button("🔬 Gelman-Carlin Type S/M", key="sug_gelman"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Gelman-Carlin Type S and Type M design analysis"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Gelman-Carlin Type S and Type M design analysis", findings, dataset_name=dataset_name)
+            with sug_col5:
+                if st.button("📐 Imbens-Manski Bounds CI", key="sug_im"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Imbens-Manski partial identification confidence intervals"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Imbens-Manski partial identification confidence intervals", findings, dataset_name=dataset_name)
+            with sug_col6:
+                if st.button("📈 Mallows' Cp Criterion", key="sug_cp"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Mallows Cp model misspecification criterion"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Mallows Cp model misspecification criterion", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -453,6 +482,7 @@ with col_right:
                     "Higgins_I2": f"{simp.get('i_squared', 0.0):.1f}%" if simp.get("i_squared") is not None else "N/A",
                     "Higgins_H_Squared": f"{simp.get('higgins_h_squared', 0.0):.2f}" if simp.get("higgins_h_squared") is not None else "N/A",
                     "Galbraith_Outliers": f"{simp.get('galbraith_outlier_count', 0)}" if simp.get("galbraith_outlier_count") is not None else "N/A",
+                    "Woolf_Heterogeneity_p": f"{simp.get('woolf_p', 0.0):.3e}" if simp.get("woolf_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -468,6 +498,10 @@ with col_right:
                     "Rosenbaum_Gamma_Crit": f"{conf.get('rosenbaum_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_gamma_crit") is not None else "N/A",
                     "Manski_Bound_Low": f"{conf.get('manski_bound_low', 0.0):.3f}" if conf.get("manski_bound_low") is not None else "N/A",
                     "Manski_Bound_High": f"{conf.get('manski_bound_high', 0.0):.3f}" if conf.get("manski_bound_high") is not None else "N/A",
+                    "Imbens_Manski_CI_Low": f"{conf.get('imbens_manski_ci_low', 0.0):.3f}" if conf.get("imbens_manski_ci_low") is not None else "N/A",
+                    "Imbens_Manski_CI_High": f"{conf.get('imbens_manski_ci_high', 0.0):.3f}" if conf.get("imbens_manski_ci_high") is not None else "N/A",
+                    "Mallows_Cp": f"{conf.get('mallows_cp', 0.0):.2f}" if conf.get("mallows_cp") is not None else "N/A",
+                    "Mallows_Discrepancy": f"{conf.get('cp_bias_discrepancy', 0.0):+.2f}" if conf.get("cp_bias_discrepancy") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -489,6 +523,8 @@ with col_right:
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
                     "Quantile_Discrepancy_QDI": f"{stab.get('quantile_discrepancy_index', 0.0):.2f}" if stab.get("quantile_discrepancy_index") is not None else "N/A",
                     "Theil_Sen_Discrepancy": f"{stab.get('theil_sen_discrepancy', 0.0):.1%}" if stab.get("theil_sen_discrepancy") is not None else "N/A",
+                    "Type_S_Error_P": f"{stab.get('type_s_error_prob', 0.0):.1%}" if stab.get("type_s_error_prob") is not None else "N/A",
+                    "Type_M_Exaggeration_Ratio": f"{stab.get('type_m_exaggeration_ratio', 0.0):.2f}x" if stab.get("type_m_exaggeration_ratio") is not None else "N/A",
                     "BCa_CI_Low": f"{stab.get('bca_ci_low', 0.0):.4f}" if stab.get("bca_ci_low") is not None else "N/A",
                     "BCa_CI_High": f"{stab.get('bca_ci_high', 0.0):.4f}" if stab.get("bca_ci_high") is not None else "N/A",
                     "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",

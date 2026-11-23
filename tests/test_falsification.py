@@ -65,6 +65,9 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.higgins_h_squared is not None
     assert audit.simpsons_audit.higgins_h_squared >= 1.0
     assert audit.simpsons_audit.galbraith_outlier_count is not None
+    # Verify Woolf's stratified odds ratio heterogeneity test with Haldane-Anscombe correction
+    assert audit.simpsons_audit.woolf_p is not None
+    assert audit.simpsons_audit.woolf_chi2 is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -147,6 +150,12 @@ def test_confounder_variance_loss_and_leakage():
         # Check Altonji-Elder-Taber selection ratio
         assert audit_coffee.confounder_audit.aet_selection_ratio is not None
         assert audit_coffee.confounder_audit.aet_selection_ratio >= 0.0
+        # Check Imbens-Manski partial identification CI and Mallows' Cp criterion
+        assert audit_coffee.confounder_audit.imbens_manski_ci_low is not None
+        assert audit_coffee.confounder_audit.imbens_manski_ci_high is not None
+        assert audit_coffee.confounder_audit.imbens_manski_ci_low <= audit_coffee.confounder_audit.imbens_manski_ci_high
+        assert audit_coffee.confounder_audit.mallows_cp is not None
+        assert audit_coffee.confounder_audit.cp_bias_discrepancy is not None
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -206,6 +215,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.chow_f_stat is not None
     assert audit.stability_audit.chow_p_value is not None
     assert 0.0 <= audit.stability_audit.chow_p_value <= 1.0
+    # Check Gelman-Carlin Type S / Type M design analysis
+    assert audit.stability_audit.type_m_exaggeration_ratio is not None
+    assert audit.stability_audit.type_m_exaggeration_ratio >= 1.0
+    assert audit.stability_audit.type_s_error_prob is not None
+    assert 0.0 <= audit.stability_audit.type_s_error_prob <= 1.0
+    assert audit.stability_audit.retrodesign_power is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -347,6 +362,18 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_galb = narrator.answer_query("Explain Galbraith radial outlier strata and Higgins H-squared", findings)
     assert "Galbraith" in ans_galb or "Higgins" in ans_galb or "Radial" in ans_galb
+
+    ans_woolf = narrator.answer_query("Explain Woolf odds ratio heterogeneity test", findings)
+    assert "Woolf" in ans_woolf or "Heterogeneity" in ans_woolf or "Odds Ratio" in ans_woolf
+
+    ans_im = narrator.answer_query("Explain Imbens-Manski partial identification confidence intervals", findings)
+    assert "Imbens" in ans_im or "Manski" in ans_im or "Partial Identification" in ans_im
+
+    ans_cp = narrator.answer_query("What does Mallows' Cp show?", findings)
+    assert "Mallows" in ans_cp or "Cp" in ans_cp or "Misspecification" in ans_cp
+
+    ans_gelman = narrator.answer_query("Explain Gelman-Carlin Type S and Type M design analysis", findings)
+    assert "Gelman" in ans_gelman or "Type M" in ans_gelman or "Exaggeration" in ans_gelman
 
 
 def test_end_to_end_pipeline(tmp_path):
