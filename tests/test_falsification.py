@@ -134,6 +134,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.akaike_delta_aic is not None
         assert audit_coffee.confounder_audit.akaike_model_weight is not None
         assert 0.0 <= audit_coffee.confounder_audit.akaike_model_weight <= 1.0
+        # Check Rosenbaum sensitivity bounds and Manski partial identification bounds
+        assert audit_coffee.confounder_audit.rosenbaum_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.manski_bound_low is not None
+        assert audit_coffee.confounder_audit.manski_bound_high is not None
+        assert audit_coffee.confounder_audit.manski_bound_low <= audit_coffee.confounder_audit.manski_bound_high
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -170,6 +176,8 @@ def test_vectorized_bootstrap_speed_and_stability():
     # Check Breusch-Pagan test and Quantile Discrepancy Index
     assert audit.stability_audit.breusch_pagan_lm is not None
     assert audit.stability_audit.breusch_pagan_p is not None
+    assert audit.stability_audit.white_lm_stat is not None
+    assert audit.stability_audit.white_lm_p is not None
     assert audit.stability_audit.quantile_discrepancy_index is not None
     assert audit.stability_audit.quantile_discrepancy_index >= 0.0
     # Check DFBETAS and Jarque-Bera residual normality
@@ -310,6 +318,15 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_bca = narrator.answer_query("Explain BCa bootstrap confidence interval", findings)
     assert "BCa" in ans_bca or "Bootstrap" in ans_bca or "Accelerated" in ans_bca
+
+    ans_rosen = narrator.answer_query("Explain Rosenbaum sensitivity bounds", findings)
+    assert "Rosenbaum" in ans_rosen or "Gamma" in ans_rosen or "Γ" in ans_rosen
+
+    ans_white = narrator.answer_query("Explain White's test for heteroscedasticity", findings)
+    assert "White" in ans_white or "Heteroscedasticity" in ans_white
+
+    ans_manski = narrator.answer_query("What are Manski partial identification bounds?", findings)
+    assert "Manski" in ans_manski or "Partial Identification" in ans_manski or "Bounds" in ans_manski
 
 
 def test_end_to_end_pipeline(tmp_path):

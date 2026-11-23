@@ -102,6 +102,12 @@ class ConfounderAudit:
     akaike_delta_aic: Optional[float] = None
     akaike_evidence_ratio: Optional[float] = None
     akaike_model_weight: Optional[float] = None
+    rosenbaum_gamma_crit: Optional[float] = None
+    rosenbaum_p_upper: Optional[float] = None
+    is_rosenbaum_sensitive: bool = False
+    manski_bound_low: Optional[float] = None
+    manski_bound_high: Optional[float] = None
+    manski_contains_zero: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -150,6 +156,9 @@ class StabilityAudit:
     bca_ci_low: Optional[float] = None
     bca_ci_high: Optional[float] = None
     bca_zero_crossing: bool = False
+    white_lm_stat: Optional[float] = None
+    white_lm_p: Optional[float] = None
+    is_white_heteroscedastic: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1105,6 +1114,125 @@ def calculate_bca_bootstrap_ci(
         return ci_l, ci_h, bool(ci_l <= 0.0 <= ci_h)
 
 
+def calculate_rosenbaum_bounds(
+    r_xy: float,
+    n: int,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul Rosenbaum's (1987, 2002) sensitivity bounds (Gamma) for unmeasured confounding.
+    
+    Quantifies the minimum odds ratio difference in treatment/exposure assignment (Gamma >= 1.0)
+    that an unmeasured confounder must produce to explain away the observed statistical significance.
+    Under hidden bias Gamma, the critical threshold Gamma_crit is the value at which the upper-bound p-value exceeds alpha.
+    Gamma_crit < 1.30 indicates high vulnerability to hidden bias; Gamma_crit >= 2.0 indicates strong robustness.
+    """
+    if n < 10 or np.isnan(r_xy) or abs(r_xy) >= 0.9999:
+        return None, None, False
+    try:
+        t_obs = float(abs(r_xy) * np.sqrt(max(1, n - 2)) / np.sqrt(max(1e-9, 1.0 - r_xy ** 2)))
+        z_obs = t_obs
+        z_crit = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        
+        delta = (z_obs - z_crit) / np.sqrt(n)
+        if delta <= 0.0:
+            gamma_crit = 1.0
+        elif delta >= 0.98:
+            gamma_crit = 99.9
+        else:
+            gamma_crit = float((1.0 + delta) / (1.0 - delta))
+        
+        gamma_crit = float(min(99.9, max(1.0, gamma_crit)))
+        
+        # Calculate upper bound p-value at benchmark Gamma = 1.5
+        gamma_test = 1.5
+        shift = ((gamma_test - 1.0) / (gamma_test + 1.0)) * np.sqrt(n)
+        z_upper = z_obs - shift
+        p_upper = float(stats.norm.sf(z_upper))
+        is_sensitive = bool(gamma_crit < 1.30)
+        
+        return gamma_crit, p_upper, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def white_heteroscedasticity_test(
+    x: np.ndarray,
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Halbert White's (1980) general Lagrange Multiplier (LM) test for heteroscedasticity.
+    
+    Regresses squared residuals e_i^2 on [1, x_i, x_i^2] without cross-terms:
+    e_i^2 = alpha_0 + alpha_1 * x_i + alpha_2 * x_i^2 + u_i.
+    LM = n * R^2 ~ chi^2(2).
+    H0: Homoscedasticity. Rejection (p < 0.05) detects general non-linear variance heteroscedasticity,
+    justifying MacKinnon-White HC3 robust standard errors.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9:
+        return None, None, False
+    try:
+        e2 = residuals ** 2
+        e2_mean = float(np.mean(e2))
+        ss_tot = float(np.sum((e2 - e2_mean) ** 2))
+        if ss_tot < 1e-12:
+            return 0.0, 1.0, False
+            
+        x_mat = np.column_stack([np.ones(n), x, x ** 2])
+        beta, _, _, _ = np.linalg.lstsq(x_mat, e2, rcond=None)
+        fit = x_mat @ beta
+        ss_reg = float(np.sum((fit - e2_mean) ** 2))
+        
+        r2 = min(0.9999, max(0.0, ss_reg / ss_tot))
+        lm_stat = float(n * r2)
+        p_val = float(stats.chi2.sf(lm_stat, df=2))
+        is_hetero = bool(p_val < 0.05)
+        return lm_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def calculate_manski_bounds(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Charles Manski's (1990, 2003) non-parametric partial identification bounds.
+    
+    Evaluates worst-case bounds on the treatment/exposure effect under arbitrary non-random selection,
+    without imposing parametric distributions or exclusion restrictions.
+    Binarizes treatment at the median of x (D = 1 if x > median(x)) and computes sharp identification
+    limits [Delta_low, Delta_high] over the empirical support [y_min, y_max].
+    If 0 in [Delta_low, Delta_high], the sign of the effect is non-parametrically indeterminate.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        x_med = float(np.median(x))
+        d = (x > x_med).astype(float)
+        n1 = int(np.sum(d == 1.0))
+        n0 = int(np.sum(d == 0.0))
+        if n1 < 5 or n0 < 5:
+            return None, None, False
+            
+        p1 = float(n1 / n)
+        p0 = float(n0 / n)
+        y1 = y[d == 1.0]
+        y0 = y[d == 0.0]
+        
+        e_y1 = float(np.mean(y1))
+        e_y0 = float(np.mean(y0))
+        y_min = float(np.percentile(y, 1.0))
+        y_max = float(np.percentile(y, 99.0))
+        
+        delta_low = float(p1 * e_y1 + p0 * y_min - (p1 * y_max + p0 * e_y0))
+        delta_high = float(p1 * e_y1 + p0 * y_max - (p1 * y_min + p0 * e_y0))
+        contains_zero = bool(delta_low <= 0.0 <= delta_high)
+        
+        return delta_low, delta_high, contains_zero
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -1621,10 +1749,28 @@ class DevilsAdvocateAgent:
         # Advanced Causal Sensitivity Metric: Cinelli-Hazlett Critical Confounder Boundary R2_crit
         rcrit_val = calculate_cinelli_hazlett_rcrit(best_partial)
 
+        # Advanced Causal Sensitivity Metric: Rosenbaum (1987, 2002) Sensitivity Bounds (Gamma)
+        gamma_crit, p_upper, is_rosen_sens = calculate_rosenbaum_bounds(r_xy, n=n_obs)
+
+        # Advanced Econometric Metric: Manski (1990, 2003) Non-Parametric Partial Identification Bounds
+        sub_pair = df[[source, target]].dropna()
+        if pd.api.types.is_numeric_dtype(sub_pair[source]):
+            x_arr_m = pd.to_numeric(sub_pair[source], errors='coerce').to_numpy(dtype=float)
+        else:
+            x_arr_m = pd.Series(pd.Categorical(sub_pair[source]).codes, index=sub_pair.index, dtype=float).to_numpy()
+        if pd.api.types.is_numeric_dtype(sub_pair[target]):
+            y_arr_m = pd.to_numeric(sub_pair[target], errors='coerce').to_numpy(dtype=float)
+        else:
+            y_arr_m = pd.Series(pd.Categorical(sub_pair[target]).codes, index=sub_pair.index, dtype=float).to_numpy()
+        val_m = ~(np.isnan(x_arr_m) | np.isnan(y_arr_m))
+        manski_l, manski_h, manski_zero = calculate_manski_bounds(x_arr_m[val_m], y_arr_m[val_m])
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
         rv_str = f", RV={rv_point:.2f} (R²crit={rcrit_val:.2f})"
+        rosen_str = f", Rosenbaum Γcrit={gamma_crit:.2f}" if gamma_crit is not None else ""
+        manski_str = f", Manski=[{manski_l:.3f}, {manski_h:.3f}]" if manski_l is not None else ""
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
         bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
@@ -1634,9 +1780,9 @@ class DevilsAdvocateAgent:
         aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{rosen_str}{manski_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{rosen_str}{manski_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -1673,6 +1819,12 @@ class DevilsAdvocateAgent:
             akaike_delta_aic=delta_aic_val,
             akaike_evidence_ratio=er_aic_val,
             akaike_model_weight=w_aic_val,
+            rosenbaum_gamma_crit=gamma_crit,
+            rosenbaum_p_upper=p_upper,
+            is_rosenbaum_sensitive=is_rosen_sens,
+            manski_bound_low=manski_l,
+            manski_bound_high=manski_h,
+            manski_contains_zero=manski_zero,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -1852,6 +2004,9 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Breusch-Pagan Lagrange Multiplier Test for Heteroscedasticity
         bp_lm, bp_p, is_hetero = breusch_pagan_test(x_vals, residuals)
 
+        # Advanced Diagnostic: White (1980) General Heteroscedasticity Lagrange Multiplier Test
+        white_lm, white_p, is_white_hetero = white_heteroscedasticity_test(x_vals, residuals)
+
         # Advanced Diagnostic: Jarque-Bera Goodness-of-Fit Normality Test on Residuals
         jb_stat, jb_p, is_non_norm = jarque_bera_normality_test(residuals)
 
@@ -1877,13 +2032,14 @@ class DevilsAdvocateAgent:
         dffits_str = f", DFFITS_max={max_dffits_val:.3f}" if max_dffits_val > 0 else ""
         dfb_str = f", DFBETAS_max={max_dfbetas_val:.3f}" if max_dfbetas_val > 0 else ""
         bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
+        white_str = f", White_p={white_p:.3e}" if white_p is not None else ""
         jb_str = f", JB_p={jb_p:.3e}" if jb_p is not None else ""
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
         dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
         hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
         ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
         bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{white_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -1927,6 +2083,9 @@ class DevilsAdvocateAgent:
             bca_ci_low=bca_low,
             bca_ci_high=bca_high,
             bca_zero_crossing=bca_zero,
+            white_lm_stat=white_lm,
+            white_lm_p=white_p,
+            is_white_heteroscedastic=is_white_hetero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

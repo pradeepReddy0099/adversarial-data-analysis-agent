@@ -146,6 +146,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Frank's ITCV Threshold: ITCV = {confounder.frank_itcv:.3f} (Observed Impact = {confounder.frank_observed_impact:.3f}) {'[ITCV EXCEEDED - CONFOUNDED]' if confounder.is_itcv_exceeded else '[BELOW ITCV]'}")
             if confounder.akaike_model_weight is not None:
                 rationale["key_evidence"].append(f"Akaike Model Selection: w_AIC = {confounder.akaike_model_weight:.3f} (ΔAIC = {confounder.akaike_delta_aic:+.2f}, ER = {confounder.akaike_evidence_ratio:.2f})")
+            if confounder.rosenbaum_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Sensitivity Bound: Γcrit = {confounder.rosenbaum_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_p_upper:.3e}) {'[SENSITIVE TO HIDDEN BIAS]' if confounder.is_rosenbaum_sensitive else '[ROBUST TO HIDDEN BIAS]'}")
+            if confounder.manski_bound_low is not None:
+                rationale["key_evidence"].append(f"Manski Non-Parametric Bounds: [{confounder.manski_bound_low:.3f}, {confounder.manski_bound_high:.3f}] {'[CONTAINS ZERO - PARTIALLY IDENTIFIED]' if confounder.manski_contains_zero else '[EXCLUDES ZERO - IDENTIFIED SIGN]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -185,6 +189,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Permutation Shuffle Test: p_perm = {stability.permutation_p_value:.3e}")
             if stability.breusch_pagan_p is not None:
                 rationale["key_evidence"].append(f"Breusch-Pagan Heteroscedasticity: LM = {stability.breusch_pagan_lm:.2f} (p = {stability.breusch_pagan_p:.3e}) {'[HETEROSCEDASTIC]' if stability.is_heteroscedastic else '[HOMOSCEDASTIC]'}")
+            if stability.white_lm_p is not None:
+                rationale["key_evidence"].append(f"White Heteroscedasticity Test: LM = {stability.white_lm_stat:.2f} (p = {stability.white_lm_p:.3e}) {'[HETEROSCEDASTIC]' if stability.is_white_heteroscedastic else '[HOMOSCEDASTIC]'}")
             if stability.quantile_discrepancy_index is not None:
                 rationale["key_evidence"].append(f"Quantile Discrepancy Index: QDI = {stability.quantile_discrepancy_index:.2f} {'[HIGH QUANTILE DISCREPANCY]' if stability.qdi_flag else '[UNIFORM]'}")
             if stability.max_dfbetas is not None and stability.max_dfbetas > 0:
@@ -286,6 +292,12 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Theil-Sen Robust Slope: β_TS = {stability.theil_sen_slope:.4f} (Δ_TS = {stability.theil_sen_discrepancy:.1%})")
             if stability.bca_ci_low is not None:
                 rationale["key_evidence"].append(f"BCa Bootstrap 95% CI: [{stability.bca_ci_low:.4f}, {stability.bca_ci_high:.4f}]")
+            if confounder.rosenbaum_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Sensitivity: Γcrit = {confounder.rosenbaum_gamma_crit:.2f}")
+            if confounder.manski_bound_low is not None:
+                rationale["key_evidence"].append(f"Manski Non-Parametric Bounds: [{confounder.manski_bound_low:.3f}, {confounder.manski_bound_high:.3f}]")
+            if stability.white_lm_p is not None:
+                rationale["key_evidence"].append(f"White Heteroscedasticity Test: LM = {stability.white_lm_stat:.2f} (p = {stability.white_lm_p:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

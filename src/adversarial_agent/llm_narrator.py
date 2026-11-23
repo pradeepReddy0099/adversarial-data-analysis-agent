@@ -141,7 +141,7 @@ class LLMNarrator:
                 )
             return "All verified findings are invariant across tested covariates. Proceed with controlled rollouts while monitoring stability metrics."
 
-        if any(w in q_lower for w in ["e-value", "e value", "e_value", "unmeasured", "sensitivity", "hidden confound"]):
+        if any(w in q_lower for w in ["e-value", "e value", "e_value", "vanderweele", "unmeasured"]) or ("sensitivity" in q_lower and "rosenbaum" not in q_lower and "gamma" not in q_lower):
             e_vals = []
             for f in findings:
                 simps_e = f.get("audit", {}).get("simpsons_audit", {}).get("e_value")
@@ -382,7 +382,7 @@ class LLMNarrator:
                 )
             return "Begg's funnel test detects whether effect sizes systematically diverge in small strata."
 
-        if any(w in q_lower for w in ["heteroscedastic", "breusch", "pagan"]):
+        if (any(w in q_lower for w in ["breusch", "pagan"]) or "heteroscedastic" in q_lower) and "white" not in q_lower:
             bp_items = []
             for f in findings:
                 stab = f.get("audit", {}).get("stability_audit", {})
@@ -737,6 +737,63 @@ class LLMNarrator:
                 )
             return "BCa bootstrap intervals provide second-order accurate confidence limits correcting for parameter skew and non-normality."
 
+        if any(w in q_lower for w in ["rosenbaum", "hidden bias", "gamma bound"]) or " gamma " in f" {q_lower} " or "γ" in q_lower:
+            rosen_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                g_crit = conf.get("rosenbaum_gamma_crit")
+                p_up = conf.get("rosenbaum_p_upper")
+                is_sens = conf.get("is_rosenbaum_sensitive", False)
+                if g_crit is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Sensitive to Hidden Bias (Γcrit < 1.30)" if is_sens else " (Robust to Hidden Bias Γcrit ≥ 1.30)"
+                    rosen_items.append(f"• **{v_name}**: Rosenbaum Γcrit = {g_crit:.2f} (p_upper = {p_up:.3e}){flag}")
+            if rosen_items:
+                return (
+                    "**Paul Rosenbaum (1987, 2002) Sensitivity Bounds (Γ) for Hidden Bias:**\n"
+                    "Quantifies the odds ratio differential in treatment assignment that an unmeasured confounder must produce to overturn statistical significance:\n"
+                    + "\n".join(rosen_items)
+                )
+            return "Rosenbaum's Gamma bound determines the degree of hidden bias needed to invalidate causal or empirical conclusions."
+
+        if any(w in q_lower for w in ["white test", "white's test", "white lm", "white heteroscedasticity"]):
+            white_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                w_lm = stab.get("white_lm_stat")
+                w_p = stab.get("white_lm_p")
+                is_w_het = stab.get("is_white_heteroscedastic", False)
+                if w_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ General Heteroscedasticity Detected" if is_w_het else " (Homoscedastic Errors)"
+                    white_items.append(f"• **{v_name}**: White LM = {w_lm:.2f} (p = {w_p:.3e}){flag}")
+            if white_items:
+                return (
+                    "**Halbert White (1980) General Heteroscedasticity Lagrange Multiplier Test:**\n"
+                    "Regresses squared residuals on regressors and their squares (LM = n*R² ~ χ²(2)) to detect non-linear variance heteroscedasticity:\n"
+                    + "\n".join(white_items)
+                )
+            return "White's general heteroscedasticity test evaluates non-linear error variance patterns without assuming normality."
+
+        if any(w in q_lower for w in ["manski", "partial identification", "identification bounds", "sharp bounds"]):
+            manski_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                m_l = conf.get("manski_bound_low")
+                m_h = conf.get("manski_bound_high")
+                m_z = conf.get("manski_contains_zero", False)
+                if m_l is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Contains Zero (Sign Non-Identified)" if m_z else " (Identified Sign - Excludes Zero)"
+                    manski_items.append(f"• **{v_name}**: Manski Bounds = [{m_l:.3f}, {m_h:.3f}]{flag}")
+            if manski_items:
+                return (
+                    "**Charles Manski (1990, 2003) Non-Parametric Partial Identification Bounds:**\n"
+                    "Evaluates worst-case causal effect bounds under arbitrary selection bias without imposing parametric distribution assumptions:\n"
+                    + "\n".join(manski_items)
+                )
+            return "Manski non-parametric bounds establish the sharp identification region under worst-case unmeasured selection bias."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -948,16 +1005,17 @@ class LLMNarrator:
 
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
-        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 9 continuous and categorical stress tests:")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 10 continuous and categorical stress tests:")
         lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Higgins I², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), tests small-stratum funnel asymmetry, estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
         lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
-        lines.append("3. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
-        lines.append("4. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
-        lines.append("5. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
-        lines.append("6. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
-        lines.append("7. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
-        lines.append("8. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, residual Gaussian normality, residual autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
-        lines.append("9. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
+        lines.append("3. **Rosenbaum (1987, 2002) Sensitivity Bounds (Γ) & Manski (1990, 2003) Non-Parametric Partial Identification:** Calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, and computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection.")
+        lines.append("4. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
+        lines.append("5. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
+        lines.append("6. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
+        lines.append("7. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
+        lines.append("8. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
+        lines.append("9. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
+        lines.append("10. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")
