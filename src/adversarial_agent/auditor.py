@@ -155,6 +155,12 @@ class SimpsonsParadoxAudit:
     moses_stat_u: Optional[float] = None
     moses_stat_p: Optional[float] = None
     is_moses_heterogeneous: bool = False
+    schwarzer_test_t: Optional[float] = None
+    schwarzer_test_p: Optional[float] = None
+    is_schwarzer_asymmetric: bool = False
+    westenberg_stat_z: Optional[float] = None
+    westenberg_stat_p: Optional[float] = None
+    is_westenberg_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -287,6 +293,11 @@ class ConfounderAudit:
     lin_interaction_t: Optional[float] = None
     lin_interaction_p: Optional[float] = None
     is_lin_heterogeneous: bool = False
+    rr_variance_ratio: Optional[float] = None
+    rr_variance_p: Optional[float] = None
+    is_rr_variance_imbalanced: bool = False
+    iw_quadratic_diff: Optional[float] = None
+    is_iw_quadratic_excessive: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -428,6 +439,12 @@ class StabilityAudit:
     max_hadi_influence: Optional[float] = None
     hadi_outlier_count: int = 0
     is_hadi_influential: bool = False
+    doornik_hansen_stat: Optional[float] = None
+    doornik_hansen_p: Optional[float] = None
+    is_doornik_hansen_non_normal: bool = False
+    max_welsch_distance: Optional[float] = None
+    welsch_outlier_count: int = 0
+    is_welsch_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5998,6 +6015,324 @@ def hadi_influence_test(
         return None, 0, False
 
 
+def schwarzer_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Guido Schwarzer, G. Antes, & M. Schumacher's (2002, 2007) Arcsine Funnel Asymmetry Test.
+
+    Evaluates publication/reporting and small-stratum bias across stratified 2x2 contingency tables
+    using the arcsine variance-stabilizing transformation:
+      theta*_k = arcsin(sqrt(p_1k)) - arcsin(sqrt(p_0k)),  v_k = 1 / (4 n_1k) + 1 / (4 n_0k).
+    Standardized effect sizes theta*_k / sqrt(v_k) are regressed against precision 1 / sqrt(v_k):
+      theta*_k / sqrt(v_k) = alpha + beta * (1 / sqrt(v_k)) + epsilon_k.
+    Under H_0: alpha = 0 (symmetry and absence of small-stratum bias).
+    t_Schwarzer = alpha_hat / SE(alpha_hat) ~ t(K - 2).
+    Rejection (p < 0.05 or |t_Schwarzer| >= 1.96) certifies funnel asymmetry free of binary variance-mean coupling.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        y_list = []
+        x_list = []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                if len(tab) == 4:
+                    a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+                else:
+                    tab = np.array(tab, dtype=float)
+                    a, b = float(tab[0, 0]), float(tab[0, 1])
+                    c, d = float(tab[1, 0]), float(tab[1, 1])
+            elif isinstance(tab, np.ndarray) and tab.shape == (2, 2):
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            else:
+                arr = np.array(tab, dtype=float).ravel()
+                a, b, c, d = float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3])
+
+            n1 = a + b
+            n0 = c + d
+            if n1 < 1.0 or n0 < 1.0:
+                continue
+
+            p1 = np.clip((a + 0.5) / (n1 + 1.0), 1e-6, 1.0 - 1e-6)
+            p0 = np.clip((c + 0.5) / (n0 + 1.0), 1e-6, 1.0 - 1e-6)
+
+            theta_star = float(np.arcsin(np.sqrt(p1)) - np.arcsin(np.sqrt(p0)))
+            v_k = float(1.0 / (4.0 * n1) + 1.0 / (4.0 * n0))
+            if v_k < 1e-12:
+                continue
+
+            se_k = np.sqrt(v_k)
+            y_k = theta_star / se_k
+            x_k = 1.0 / se_k
+            y_list.append(y_k)
+            x_list.append(x_k)
+
+        k = len(y_list)
+        if k < 3:
+            return None, None, False
+
+        y_arr = np.array(y_list, dtype=float)
+        x_arr = np.array(x_list, dtype=float)
+
+        if np.std(x_arr) < 1e-9:
+            return 0.0, 1.0, False
+
+        X_mat = np.column_stack([np.ones(k), x_arr])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_arr, rcond=None)
+        res = y_arr - X_mat @ beta
+
+        df_e = max(1, k - 2)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_alpha = np.sqrt(max(1e-12, cov_mat[0, 0]))
+
+        t_schw = float(beta[0] / se_alpha)
+        p_val = float(2.0 * stats.t.sf(abs(t_schw), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_schw, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def westenberg_scale_dispersion_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates J. Westenberg's (1948) Interquartile Range Dispersion Test.
+
+    Evaluates scale/spread differences between conditioning groups without assuming normality or symmetry.
+    Computes overall 25th (Q1) and 75th (Q3) percentiles of the pooled sample, and forms a 2x2 contingency
+    table of counts inside versus outside [Q1, Q3] across exposure cohorts.
+    Under H_0 of equal scale, the proportion within [Q1, Q3] is 0.5 for both groups.
+    Computes continuity-corrected Z-score and p-value.
+    Rejection (p < 0.05) certifies non-parametric scale spread heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 6 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        pooled = np.concatenate([s1, s2])
+        q1, q3 = float(np.percentile(pooled, 25)), float(np.percentile(pooled, 75))
+
+        a = int(np.sum((s1 >= q1) & (s1 <= q3)))
+        b = len(s1) - a
+        c = int(np.sum((s2 >= q1) & (s2 <= q3)))
+        d = len(s2) - c
+
+        if (b + d == 0) or (a + c == 0):
+            med = float(np.median(pooled))
+            a = int(np.sum(s1 > med))
+            b = len(s1) - a
+            c = int(np.sum(s2 > med))
+            d = len(s2) - c
+
+        n_tot = float(len(pooled))
+        denom = np.sqrt(max(1.0, float((a + b) * (c + d) * (a + c) * (b + d))))
+        if (a + b == 0) or (c + d == 0) or (a + c == 0) or (b + d == 0):
+            return 0.0, 1.0, False
+
+        diff = abs(a * d - b * c) - n_tot / 2.0
+        z_stat = float(max(0.0, diff) / denom * np.sqrt(n_tot))
+        prop1 = a / max(1, a + b)
+        prop2 = c / max(1, c + d)
+        z_stat = float(z_stat * np.sign(prop1 - prop2))
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_rubin_residual_variance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum & Donald B. Rubin's (1985) Residual Variance Ratio Balance Metric.
+
+    Dichotomizes exposure X at median into treated (D = 1) and control (D = 0) cohorts.
+    Regresses confounder Z on X to obtain orthogonalized residuals: e_Z = Z - (gamma_0 + gamma_1 * X).
+    Evaluates the ratio of residual variances between treated and control cohorts:
+      VR_adj = Var(e_Z1) / Var(e_Z0).
+    Under H_0: sigma_1^2 = sigma_0^2, VR_adj ~ F(n1 - 1, n0 - 1).
+    Rosenbaum & Rubin (1985) specify that VR_adj should fall within [0.80, 1.25] for second-order balance.
+    Rejection (VR_adj outside [0.80, 1.25] or p < 0.05) diagnoses severe residual variance heterogeneity.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x)
+        if np.sum(d) < 6 or np.sum(~d) < 6:
+            return None, None, False
+
+        X_mat = np.column_stack([np.ones(n), x])
+        gamma, _, _, _ = np.linalg.lstsq(X_mat, z, rcond=None)
+        res_z = z - X_mat @ gamma
+
+        res1 = res_z[d]
+        res0 = res_z[~d]
+        n1, n0 = len(res1), len(res0)
+
+        var1 = float(np.var(res1, ddof=1))
+        var0 = float(np.var(res0, ddof=1))
+        if var0 < 1e-12 or var1 < 1e-12:
+            return 1.0, 1.0, False
+
+        vr = float(var1 / var0)
+        p_val = float(2.0 * min(stats.f.cdf(vr, n1 - 1, n0 - 1), stats.f.sf(vr, n1 - 1, n0 - 1)))
+        is_imbal = bool(vr < 0.80 or vr > 1.25 or p_val < 0.05)
+        return vr, p_val, is_imbal
+    except Exception:
+        return None, None, False
+
+
+def imbens_wooldridge_quadratic_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], bool]:
+    """Calculates Guido W. Imbens & Jeffrey M. Wooldridge's (2009) Normalized Quadratic Difference Metric.
+
+    Dichotomizes exposure X at median into treated (D = 1) and control (D = 0) cohorts.
+    Evaluates the normalized difference for the squared confounder term W = Z^2:
+      Delta_{Z^2} = |mean(W_1) - mean(W_0)| / sqrt((Var(W_1) + Var(W_0)) / 2).
+    Threshold: Delta_{Z^2} > 0.25 (or > 0.40) diagnoses severe failure of common support in quadratic covariate terms,
+    signaling dangerous extrapolation bias in linear and polynomial OLS adjustments.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x)
+        w = (z - np.mean(z)) ** 2
+        w1 = w[d]
+        w0 = w[~d]
+        if len(w1) < 6 or len(w0) < 6:
+            return None, False
+
+        var1 = float(np.var(w1, ddof=1))
+        var0 = float(np.var(w0, ddof=1))
+        denom = np.sqrt((var1 + var0) / 2.0)
+        if denom < 1e-12:
+            return 0.0, False
+
+        diff = float(np.abs(np.mean(w1) - np.mean(w0)) / denom)
+        is_excessive = bool(diff > 0.25)
+        return diff, is_excessive
+    except Exception:
+        return None, False
+
+
+def doornik_hansen_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates J. A. Doornik & H. Hansen's (1994, 2008) Omnibus Residual Normality Test (E_DH).
+
+    Evaluates regression residuals by transforming sample skewness and kurtosis into independent
+    standard normal variates z_1 and z_2:
+      E_DH = z_1^2 + z_2^2 ~ chi^2(2).
+    Offers vastly superior finite-sample size and statistical power compared to the classical Jarque-Bera test.
+    Rejection (p < 0.05 or E_DH >= 5.99) certifies residual non-Gaussianity.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 6 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        s_e = np.std(res)
+        if s_e < 1e-12:
+            return 0.0, 1.0, False
+
+        u = (res - np.mean(res)) / s_e
+        m3 = float(np.mean(u ** 3))
+        m4 = float(np.mean(u ** 4))
+
+        beta_s = (3.0 * (n ** 2 + 27.0 * n - 70.0) * (n + 1.0) * (n + 3.0)) / (
+            max(1e-6, (n - 2.0) * (n + 5.0) * (n + 7.0) * (n + 9.0))
+        )
+        w2 = -1.0 + np.sqrt(max(1e-12, 2.0 * (beta_s - 1.0)))
+        if w2 <= 1.0:
+            return None, None, False
+        delta_s = 1.0 / np.sqrt(np.log(w2))
+        y_val = m3 * np.sqrt(max(1e-12, (w2 - 1.0) * (n + 1.0) * (n + 3.0) / (12.0 * (n - 2.0))))
+        z1 = delta_s * np.log(y_val + np.sqrt(y_val ** 2 + 1.0))
+
+        delta_k = (n - 3.0) * (n + 1.0) * (n ** 2 + 15.0 * n - 4.0)
+        if delta_k <= 0:
+            return None, None, False
+        a_k = (n - 2.0) * (n + 5.0) * (n + 7.0) * (n ** 2 + 27.0 * n - 70.0) / (6.0 * delta_k)
+        c_k = (n - 7.0) * (n + 5.0) * (n ** 2 + 2.0 * n - 5.0) / (6.0 * delta_k)
+        l_k = (n + 5.0) * (n + 7.0) * (n ** 3 + 37.0 * n ** 2 + 11.0 * n - 313.0) / (12.0 * delta_k)
+        alpha_k = a_k + c_k * (m3 ** 2)
+        chi_k = 2.0 * l_k * (m4 - 1.0 - m3 ** 2)
+
+        if alpha_k <= 0 or chi_k <= 0:
+            z2 = (m4 - 3.0) / np.sqrt(24.0 / n)
+        else:
+            z2 = np.sqrt(9.0 * alpha_k) * ((chi_k / (2.0 * alpha_k)) ** (1.0 / 3.0) - 1.0 + 1.0 / (9.0 * alpha_k))
+
+        e_dh = float(z1 ** 2 + z2 ** 2)
+        p_val = float(stats.chi2.sf(e_dh, df=2))
+        is_non_norm = bool(p_val < 0.05)
+        return e_dh, p_val, is_non_norm
+    except Exception:
+        return None, None, False
+
+
+def welsch_distance_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Roy E. Welsch's (1982) Distance Influence Metric in Regression (W_i).
+
+    Places enhanced weight on extreme leverage points compared to Cook's distance or DFFITS:
+      W_i = [|r_i^*| / (1 - h_ii)] * sqrt(h_ii / (1 - h_ii)) = |DFFITS_i| * sqrt(n - 1) / (1 - h_ii),
+    where r_i^* is the externally studentized (deleted) residual and h_ii is the leverage.
+    Cutoff threshold: W_crit = 3 * sqrt(p).
+    Flags observations that exert disproportionately severe pull on regression hyperplanes in the presence of leverage.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        df_e = max(1, n - p)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        if s_sq < 1e-12:
+            return 0.0, 0, False
+
+        denom = np.sqrt(np.maximum(1e-12, s_sq * (1.0 - h_diag)))
+        r_int = res / denom
+
+        r_del_sq = (n - p - 1.0) / np.maximum(1e-6, n - p - (r_int ** 2))
+        r_ext = r_int * np.sqrt(np.maximum(0.0, r_del_sq))
+
+        welsch_scores = (np.abs(r_ext) / (1.0 - h_diag)) * np.sqrt(h_diag / (1.0 - h_diag))
+
+        w_crit = float(3.0 * np.sqrt(p))
+        max_w = float(np.max(welsch_scores))
+        outlier_count = int(np.sum(welsch_scores > w_crit))
+        is_infl = bool(outlier_count > 0 and max_w > w_crit)
+        return max_w, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -6375,6 +6710,8 @@ class DevilsAdvocateAgent:
                 tang_t, tang_p, is_tang_asym = tang_funnel_asymmetry_test(tables_2x2)
                 # Pustejovsky & Rodgers (2019) Variance-Stabilized Funnel Asymmetry Test
                 pust_t, pust_p, is_pust_asym = pustejovsky_funnel_asymmetry_test(tables_2x2)
+                # Guido Schwarzer et al. (2002, 2007) Arcsine Funnel Asymmetry Test
+                schw_t, schw_p, is_schw_asym = schwarzer_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -6382,6 +6719,7 @@ class DevilsAdvocateAgent:
             pet_t, pet_p, peese_t, peese_p, is_pet_asym = None, None, None, None, False
             tang_t, tang_p, is_tang_asym = None, None, False
             pust_t, pust_p, is_pust_asym = None, None, False
+            schw_t, schw_p, is_schw_asym = None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -6437,6 +6775,7 @@ class DevilsAdvocateAgent:
 
         # Advanced Metric 11: Kruskal & Wallis (1952) Non-Parametric Rank-Sum Heterogeneity Test
         kw_h, kw_p, is_kw_hetero = None, None, False
+        west_z, west_p, is_west_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -6467,6 +6806,8 @@ class DevilsAdvocateAgent:
             capon_z, capon_p, is_capon_hetero = capon_scale_dispersion_test(kw_samples)
             # Moses (1963) Non-Parametric Sub-Sample Rank Dispersion Test
             moses_u, moses_p, is_moses_hetero = moses_scale_dispersion_test(kw_samples)
+            # Westenberg (1948) Interquartile Range Dispersion Test
+            west_z, west_p, is_west_hetero = westenberg_scale_dispersion_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -6540,6 +6881,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Capon Scale: Z={capon_z:.2f}, p={capon_p:.3e}]"
         if moses_p is not None:
             cmh_note += f" [Moses Scale: U={moses_u:.1f}, p={moses_p:.3e}]"
+        if schw_p is not None:
+            cmh_note += f" [Schwarzer Funnel: t={schw_t:.2f}, p={schw_p:.3e}]"
+        if west_p is not None:
+            cmh_note += f" [Westenberg Scale: Z={west_z:.2f}, p={west_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -6692,6 +7037,12 @@ class DevilsAdvocateAgent:
             moses_stat_u=moses_u,
             moses_stat_p=moses_p,
             is_moses_heterogeneous=is_moses_hetero,
+            schwarzer_test_t=schw_t,
+            schwarzer_test_p=schw_p,
+            is_schwarzer_asymmetric=is_schw_asym,
+            westenberg_stat_z=west_z,
+            westenberg_stat_p=west_p,
+            is_westenberg_heterogeneous=is_west_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -6857,6 +7208,8 @@ class DevilsAdvocateAgent:
         rubin_f, rubin_p, is_rubin_nonpar = None, None, False
         eqq_mean, eqq_max, is_eqq_imbal = None, None, False
         lin_t, lin_p, is_lin_hetero = None, None, False
+        rr_vr, rr_p, is_rr_imbal = None, None, False
+        iw_quad_diff, is_iw_quad_excess = None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -6915,6 +7268,10 @@ class DevilsAdvocateAgent:
                     eqq_mean, eqq_max, is_eqq_imbal = eqq_covariate_balance_test(x_mal, z_mal)
                     # Winston Lin (2013) Agnostic Treatment-Covariate Centered Interaction Test
                     lin_t, lin_p, is_lin_hetero = lin_interaction_heterogeneity_test(x_mal, z_mal, y_mal)
+                    # Paul R. Rosenbaum & Donald B. Rubin (1985) Residual Variance Ratio Balance Metric
+                    rr_vr, rr_p, is_rr_imbal = rosenbaum_rubin_residual_variance_test(x_mal, z_mal)
+                    # Guido W. Imbens & Jeffrey M. Wooldridge (2009) Normalized Quadratic Difference Metric
+                    iw_quad_diff, is_iw_quad_excess = imbens_wooldridge_quadratic_balance_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -7084,6 +7441,11 @@ class DevilsAdvocateAgent:
             lin_interaction_t=lin_t,
             lin_interaction_p=lin_p,
             is_lin_heterogeneous=is_lin_hetero,
+            rr_variance_ratio=rr_vr,
+            rr_variance_p=rr_p,
+            is_rr_variance_imbalanced=is_rr_imbal,
+            iw_quadratic_diff=iw_quad_diff,
+            is_iw_quadratic_excessive=is_iw_quad_excess,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -7374,6 +7736,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Ali S. Hadi (1992) Measure of Overall Potential Influence in Regression
         hadi_max, hadi_cnt, is_hadi_infl = hadi_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: J. A. Doornik & H. Hansen (1994, 2008) Omnibus Residual Normality Test
+        dh_stat, dh_p, is_dh_non_normal = doornik_hansen_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Roy E. Welsch (1982) Distance Influence Metric in Regression
+        welsch_max, welsch_cnt, is_welsch_infl = welsch_distance_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -7540,6 +7908,12 @@ class DevilsAdvocateAgent:
             max_hadi_influence=hadi_max,
             hadi_outlier_count=hadi_cnt,
             is_hadi_influential=is_hadi_infl,
+            doornik_hansen_stat=dh_stat,
+            doornik_hansen_p=dh_p,
+            is_doornik_hansen_non_normal=is_dh_non_normal,
+            max_welsch_distance=welsch_max,
+            welsch_outlier_count=welsch_cnt,
+            is_welsch_influential=is_welsch_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

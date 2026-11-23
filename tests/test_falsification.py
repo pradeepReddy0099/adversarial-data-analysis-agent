@@ -142,6 +142,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.pustejovsky_test_p is not None
     assert audit.simpsons_audit.moses_stat_u is not None
     assert audit.simpsons_audit.moses_stat_p is not None
+    # Verify Schwarzer arcsine funnel asymmetry and Westenberg IQR scale dispersion
+    assert audit.simpsons_audit.schwarzer_test_t is not None
+    assert audit.simpsons_audit.schwarzer_test_p is not None
+    assert audit.simpsons_audit.westenberg_stat_z is not None
+    assert audit.simpsons_audit.westenberg_stat_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -293,6 +298,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.eqq_max_diff is not None
         assert audit_coffee.confounder_audit.lin_interaction_t is not None
         assert audit_coffee.confounder_audit.lin_interaction_p is not None
+        # Check Rosenbaum-Rubin residual variance ratio and Imbens-Wooldridge quadratic balance
+        assert audit_coffee.confounder_audit.rr_variance_ratio is not None
+        assert audit_coffee.confounder_audit.rr_variance_ratio >= 0.0
+        assert audit_coffee.confounder_audit.iw_quadratic_diff is not None
+        assert audit_coffee.confounder_audit.iw_quadratic_diff >= 0.0
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -428,6 +438,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.shapiro_wilk_p is not None
     assert audit.stability_audit.max_hadi_influence is not None
     assert audit.stability_audit.max_hadi_influence >= 0.0
+    # Check Doornik-Hansen transformed omnibus normality and Welsch distance influence
+    assert audit.stability_audit.doornik_hansen_stat is not None
+    assert audit.stability_audit.doornik_hansen_stat >= 0.0
+    assert audit.stability_audit.doornik_hansen_p is not None
+    assert audit.stability_audit.max_welsch_distance is not None
+    assert audit.stability_audit.max_welsch_distance >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -827,6 +843,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_hadi = narrator.answer_query("Explain Ali Hadi measure of overall potential influence in regression", findings)
     assert "Hadi" in ans_hadi or "Potential" in ans_hadi or "Influence" in ans_hadi or "Residual" in ans_hadi
+
+    ans_schw = narrator.answer_query("Explain Guido Schwarzer arcsine transformed funnel asymmetry test", findings)
+    assert "Schwarzer" in ans_schw or "Arcsine" in ans_schw or "Funnel" in ans_schw or "Asymmetry" in ans_schw
+
+    ans_west = narrator.answer_query("Explain J. Westenberg interquartile range dispersion test", findings)
+    assert "Westenberg" in ans_west or "Interquartile" in ans_west or "Scale" in ans_west or "Dispersion" in ans_west
+
+    ans_rr = narrator.answer_query("Explain Paul Rosenbaum and Donald Rubin residual variance ratio balance test", findings)
+    assert "Rosenbaum" in ans_rr or "Rubin" in ans_rr or "Residual" in ans_rr or "Variance" in ans_rr
+
+    ans_iw = narrator.answer_query("Explain Guido Imbens and Jeffrey Wooldridge normalized quadratic difference metric", findings)
+    assert "Imbens" in ans_iw or "Wooldridge" in ans_iw or "Quadratic" in ans_iw or "Balance" in ans_iw
+
+    ans_dh = narrator.answer_query("Explain Doornik and Hansen omnibus residual normality test", findings)
+    assert "Doornik" in ans_dh or "Hansen" in ans_dh or "Normality" in ans_dh or "DH" in ans_dh
+
+    ans_welsch = narrator.answer_query("Explain Roy Welsch distance influence metric in regression", findings)
+    assert "Welsch" in ans_welsch or "Distance" in ans_welsch or "Influence" in ans_welsch or "Residual" in ans_welsch
 
 
 def test_end_to_end_pipeline(tmp_path):
