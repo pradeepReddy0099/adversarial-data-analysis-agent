@@ -137,6 +137,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.tang_test_p is not None
     assert audit.simpsons_audit.capon_stat_z is not None
     assert audit.simpsons_audit.capon_p_value is not None
+    # Verify Pustejovsky-Rodgers variance-stabilized funnel asymmetry and Moses sub-sample scale dispersion
+    assert audit.simpsons_audit.pustejovsky_test_t is not None
+    assert audit.simpsons_audit.pustejovsky_test_p is not None
+    assert audit.simpsons_audit.moses_stat_u is not None
+    assert audit.simpsons_audit.moses_stat_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -282,6 +287,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.l1_multivariate_imbalance >= 0.0
         assert audit_coffee.confounder_audit.rubin_parallelism_f is not None
         assert audit_coffee.confounder_audit.rubin_parallelism_p is not None
+        # Check Ho-Imai-King-Stuart eQQ covariate balance and Winston Lin centered interaction
+        assert audit_coffee.confounder_audit.eqq_mean_diff is not None
+        assert audit_coffee.confounder_audit.eqq_mean_diff >= 0.0
+        assert audit_coffee.confounder_audit.eqq_max_diff is not None
+        assert audit_coffee.confounder_audit.lin_interaction_t is not None
+        assert audit_coffee.confounder_audit.lin_interaction_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -411,6 +422,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.hosking_l_p is not None
     assert audit.stability_audit.max_atkinson_distance is not None
     assert audit.stability_audit.max_atkinson_distance >= 0.0
+    # Check Shapiro-Wilk omnibus residual normality and Hadi potential influence
+    assert audit.stability_audit.shapiro_wilk_w is not None
+    assert audit.stability_audit.shapiro_wilk_w > 0.0
+    assert audit.stability_audit.shapiro_wilk_p is not None
+    assert audit.stability_audit.max_hadi_influence is not None
+    assert audit.stability_audit.max_hadi_influence >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -792,6 +809,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_atk = narrator.answer_query("Explain Anthony Atkinson modified leverage-weighted influence metric", findings)
     assert "Atkinson" in ans_atk or "Influence" in ans_atk or "Leverage" in ans_atk or "Residual" in ans_atk
+
+    ans_pust = narrator.answer_query("Explain Pustejovsky and Rodgers variance-stabilized funnel asymmetry test", findings)
+    assert "Pustejovsky" in ans_pust or "Rodgers" in ans_pust or "Funnel" in ans_pust or "Variance" in ans_pust
+
+    ans_moses = narrator.answer_query("Explain Lincoln Moses non-parametric sub-sample rank dispersion test", findings)
+    assert "Moses" in ans_moses or "Scale" in ans_moses or "Dispersion" in ans_moses or "Sub-Sample" in ans_moses
+
+    ans_eqq = narrator.answer_query("Explain Ho Imai King Stuart empirical qq quantile balance metric", findings)
+    assert "eQQ" in ans_eqq or "Quantile" in ans_eqq or "Balance" in ans_eqq or "Stuart" in ans_eqq
+
+    ans_lin = narrator.answer_query("Explain Winston Lin treatment-covariate centered interaction test", findings)
+    assert "Lin" in ans_lin or "Interaction" in ans_lin or "Treatment" in ans_lin or "Heterogeneity" in ans_lin
+
+    ans_sw = narrator.answer_query("Explain Samuel Shapiro and Martin Wilk omnibus residual normality test", findings)
+    assert "Shapiro" in ans_sw or "Wilk" in ans_sw or "Normality" in ans_sw or "W" in ans_sw
+
+    ans_hadi = narrator.answer_query("Explain Ali Hadi measure of overall potential influence in regression", findings)
+    assert "Hadi" in ans_hadi or "Potential" in ans_hadi or "Influence" in ans_hadi or "Residual" in ans_hadi
 
 
 def test_end_to_end_pipeline(tmp_path):

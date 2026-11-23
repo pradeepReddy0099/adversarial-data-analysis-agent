@@ -157,6 +157,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Tang-Liu Linear Funnel Test: t = {simpsons.tang_test_t:.2f} (p = {simpsons.tang_test_p:.3e}) {'[PRECISION-WEIGHTED ASYMMETRY]' if simpsons.is_tang_asymmetric else '[SYMMETRIC LINEAR PRECISION LIMIT]'}")
             if simpsons.capon_p_value is not None:
                 rationale["key_evidence"].append(f"Capon Normal Scores Scale Test: Z = {simpsons.capon_stat_z:.2f} (p = {simpsons.capon_p_value:.3e}) {'[LMP NORMAL-SCORES SCALE DIVERGENCE]' if simpsons.is_capon_heterogeneous else '[HOMOGENEOUS NORMAL ORDER SPREAD]'}")
+            if simpsons.pustejovsky_test_p is not None:
+                rationale["key_evidence"].append(f"Pustejovsky-Rodgers Funnel Test: t = {simpsons.pustejovsky_test_t:.2f} (p = {simpsons.pustejovsky_test_p:.3e}) {'[VARIANCE-STABILIZED ASYMMETRY]' if simpsons.is_pustejovsky_asymmetric else '[SYMMETRIC VARIANCE-STABILIZED PRECISION]'}")
+            if simpsons.moses_stat_p is not None:
+                rationale["key_evidence"].append(f"Moses Sub-Sample Scale Test: U = {simpsons.moses_stat_u:.1f} (p = {simpsons.moses_stat_p:.3e}) {'[NON-PARAMETRIC SUB-SAMPLE SCALE DISPERSION]' if simpsons.is_moses_heterogeneous else '[HOMOGENEOUS SUB-SAMPLE SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -266,6 +270,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Iacus-King-Porro L1 Distance: L1 = {confounder.l1_multivariate_imbalance:.3f} {'[SEVERE MULTIVARIATE IMBALANCE / POSITIVITY DEFICIT]' if confounder.is_l1_imbalanced else '[SUFFICIENT COMMON SUPPORT OVERLAP]'}")
             if confounder.rubin_parallelism_p is not None:
                 rationale["key_evidence"].append(f"Rubin Regression Surface Parallelism: F = {confounder.rubin_parallelism_f:.2f} (p = {confounder.rubin_parallelism_p:.3e}) {'[NON-PARALLEL RESPONSE SURFACES / EFFECT HETEROGENEITY]' if confounder.is_rubin_nonparallel else '[PARALLEL COVARIATE RESPONSE SLOPES]'}")
+            if confounder.eqq_mean_diff is not None:
+                rationale["key_evidence"].append(f"Ho-Imai-King-Stuart eQQ Balance: Mean Diff = {confounder.eqq_mean_diff:.3f} (Max = {confounder.eqq_max_diff:.3f}) {'[SEVERE QUANTILE-QUANTILE DISTRIBUTIONAL IMBALANCE]' if confounder.is_eqq_imbalanced else '[SATISFACTORY EMPIRICAL Q-Q BALANCE]'}")
+            if confounder.lin_interaction_p is not None:
+                rationale["key_evidence"].append(f"Winston Lin Centered Interaction: t = {confounder.lin_interaction_t:.2f} (p = {confounder.lin_interaction_p:.3e}) {'[AGNOSTIC TREATMENT EFFECT HETEROGENEITY]' if confounder.is_lin_heterogeneous else '[HOMOGENEOUS TREATMENT-COVARIATE EFFECT]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -376,6 +384,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Hosking L-Moments Ratio Normality: L = {stability.hosking_l_stat:.2f} (p = {stability.hosking_l_p:.3e}) {'[L-MOMENTS RESIDUAL NON-NORMALITY]' if stability.is_hosking_non_normal else '[L-MOMENTS GAUSSIAN RESIDUAL FIT]'}")
             if stability.max_atkinson_distance is not None:
                 rationale["key_evidence"].append(f"Atkinson Modified Influence: Max A = {stability.max_atkinson_distance:.2f} ({stability.atkinson_outlier_count} influential) {'[LEVERAGE-AMPLIFIED RESIDUAL DISTORTION]' if stability.is_atkinson_influential else '[BOUNDED ATKINSON INFLUENCE]'}")
+            if stability.shapiro_wilk_p is not None:
+                rationale["key_evidence"].append(f"Shapiro-Wilk Residual Normality: W = {stability.shapiro_wilk_w:.4f} (p = {stability.shapiro_wilk_p:.3e}) {'[OMNIBUS GAUSSIAN RESIDUAL VIOLATION]' if stability.is_shapiro_wilk_non_normal else '[NORMAL GAUSSIAN RESIDUAL FIT]'}")
+            if stability.max_hadi_influence is not None:
+                rationale["key_evidence"].append(f"Hadi Potential Influence: Max H² = {stability.max_hadi_influence:.2f} ({stability.hadi_outlier_count} influential) {'[HIGH POTENTIAL-RESIDUAL INFLUENCE]' if stability.is_hadi_influential else '[BOUNDED HADI INFLUENCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -619,6 +631,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Hosking L-Moments Normality: L = {stability.hosking_l_stat:.2f} (p = {stability.hosking_l_p:.3e})")
             if stability.max_atkinson_distance is not None:
                 rationale["key_evidence"].append(f"Atkinson Influence: Max A = {stability.max_atkinson_distance:.2f}")
+            if simpsons.pustejovsky_test_p is not None:
+                rationale["key_evidence"].append(f"Pustejovsky-Rodgers Funnel Test: t = {simpsons.pustejovsky_test_t:.2f} (p = {simpsons.pustejovsky_test_p:.3e})")
+            if simpsons.moses_stat_p is not None:
+                rationale["key_evidence"].append(f"Moses Scale Test: U = {simpsons.moses_stat_u:.1f} (p = {simpsons.moses_stat_p:.3e})")
+            if confounder.eqq_mean_diff is not None:
+                rationale["key_evidence"].append(f"eQQ Covariate Balance: Mean Diff = {confounder.eqq_mean_diff:.3f}")
+            if confounder.lin_interaction_p is not None:
+                rationale["key_evidence"].append(f"Lin Centered Interaction: t = {confounder.lin_interaction_t:.2f} (p = {confounder.lin_interaction_p:.3e})")
+            if stability.shapiro_wilk_p is not None:
+                rationale["key_evidence"].append(f"Shapiro-Wilk Normality: W = {stability.shapiro_wilk_w:.4f} (p = {stability.shapiro_wilk_p:.3e})")
+            if stability.max_hadi_influence is not None:
+                rationale["key_evidence"].append(f"Hadi Potential Influence: Max H² = {stability.max_hadi_influence:.2f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -149,6 +149,12 @@ class SimpsonsParadoxAudit:
     capon_stat_z: Optional[float] = None
     capon_p_value: Optional[float] = None
     is_capon_heterogeneous: bool = False
+    pustejovsky_test_t: Optional[float] = None
+    pustejovsky_test_p: Optional[float] = None
+    is_pustejovsky_asymmetric: bool = False
+    moses_stat_u: Optional[float] = None
+    moses_stat_p: Optional[float] = None
+    is_moses_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -275,6 +281,12 @@ class ConfounderAudit:
     rubin_parallelism_f: Optional[float] = None
     rubin_parallelism_p: Optional[float] = None
     is_rubin_nonparallel: bool = False
+    eqq_mean_diff: Optional[float] = None
+    eqq_max_diff: Optional[float] = None
+    is_eqq_imbalanced: bool = False
+    lin_interaction_t: Optional[float] = None
+    lin_interaction_p: Optional[float] = None
+    is_lin_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -410,6 +422,12 @@ class StabilityAudit:
     max_atkinson_distance: Optional[float] = None
     atkinson_outlier_count: int = 0
     is_atkinson_influential: bool = False
+    shapiro_wilk_w: Optional[float] = None
+    shapiro_wilk_p: Optional[float] = None
+    is_shapiro_wilk_non_normal: bool = False
+    max_hadi_influence: Optional[float] = None
+    hadi_outlier_count: int = 0
+    is_hadi_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5686,6 +5704,300 @@ def atkinson_influence_test(
         return None, 0, False
 
 
+def pustejovsky_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Pustejovsky & Rodgers' (2019) Variance-Stabilized Funnel Asymmetry Test.
+
+    Evaluates reporting and publication bias across stratified 2x2 contingency tables
+    by regressing variance-stabilized log odds ratios against effective sample precision:
+      y_k = ln(OR_k) * sqrt(n_tilde_k) = beta_0 + beta_1 * sqrt(n_tilde_k) + epsilon_k,
+    where n_tilde_k = (n_1k * n_2k) / (n_1k + n_2k) is the effective stratum sample size.
+    Testing H_0: beta_0 = 0 (symmetry and absence of small-study sample-size distortion).
+    t_PR = beta_0 / SE(beta_0) ~ t(K - 2).
+    Rejection (p < 0.05 or |t_PR| >= 1.96) flags significant sample-size distortion across strata.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        y_list = []
+        prec_list = []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                if len(tab) == 4:
+                    a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+                else:
+                    tab = np.array(tab, dtype=float)
+                    a, b = float(tab[0, 0]), float(tab[0, 1])
+                    c, d = float(tab[1, 0]), float(tab[1, 1])
+            elif isinstance(tab, np.ndarray) and tab.shape == (2, 2):
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            else:
+                arr = np.array(tab, dtype=float).ravel()
+                a, b, c, d = float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3])
+
+            # Haldane-Anscombe continuity correction
+            a_c, b_c, c_c, d_c = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            theta = np.log((a_c * d_c) / (b_c * c_c))
+            n1 = a + b
+            n2 = c + d
+            n_tot = n1 + n2
+            if n_tot < 1.0 or n1 < 0.5 or n2 < 0.5:
+                continue
+            n_tilde = (n1 * n2) / n_tot
+            prec = np.sqrt(n_tilde)
+            y_k = theta * prec
+            y_list.append(y_k)
+            prec_list.append(prec)
+
+        k = len(y_list)
+        if k < 3:
+            return None, None, False
+
+        y_arr = np.array(y_list, dtype=float)
+        p_arr = np.array(prec_list, dtype=float)
+
+        if np.std(p_arr) < 1e-9:
+            return 0.0, 1.0, False
+
+        X_mat = np.column_stack([np.ones(k), p_arr])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_arr, rcond=None)
+        res = y_arr - X_mat @ beta
+
+        df_e = max(1, k - 2)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_intercept = np.sqrt(max(1e-12, cov_mat[0, 0]))
+
+        t_pr = float(beta[0] / se_intercept)
+        p_val = float(2.0 * stats.t.sf(abs(t_pr), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_pr, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def moses_scale_dispersion_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Lincoln E. Moses' (1963) Non-Parametric Sub-Sample Rank Dispersion Test.
+
+    Evaluates scale/spread differences between conditioning groups without assuming equal medians or Gaussianity.
+    Divides observations into disjoint sub-samples of size k=3, computes within-subsample sum of squared deviations,
+    and applies a Mann-Whitney U test to the sub-sample dispersion values.
+    Under H_0: sigma_1 = sigma_2, the distribution of sub-sample dispersions is identical.
+    Rejection (p < 0.05) certifies non-parametric scale spread heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 6 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+
+        k_sub = 3
+        m1 = len(s1) // k_sub
+        m2 = len(s2) // k_sub
+        if m1 < 2 or m2 < 2:
+            k_sub = 2
+            m1 = len(s1) // k_sub
+            m2 = len(s2) // k_sub
+            if m1 < 2 or m2 < 2:
+                return None, None, False
+
+        # Compute within-subsample sum of squared deviations
+        c1 = []
+        for i in range(m1):
+            sub = s1[i * k_sub : (i + 1) * k_sub]
+            c1.append(float(np.sum((sub - np.mean(sub)) ** 2)))
+        c2 = []
+        for j in range(m2):
+            sub = s2[j * k_sub : (j + 1) * k_sub]
+            c2.append(float(np.sum((sub - np.mean(sub)) ** 2)))
+
+        c1 = np.array(c1, dtype=float)
+        c2 = np.array(c2, dtype=float)
+
+        res = stats.mannwhitneyu(c1, c2, alternative='two-sided')
+        u_stat = float(res.statistic)
+        p_val = float(res.pvalue)
+        is_hetero = bool(p_val < 0.05)
+        return u_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def eqq_covariate_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Ho, Imai, King, & Stuart's (2007) Empirical Q-Q Covariate Balance Metric.
+
+    Dichotomizes exposure X at median into treated (D = 1) and control (D = 0) cohorts.
+    Evaluates empirical quantile-quantile differences across 99 percentiles, standardized
+    by the pooled standard deviation of candidate confounder Z:
+      eQQ_mean = (1 / 99) * sum_{k=1}^{99} |q_{1, k} - q_{0, k}| / sigma_pooled,
+      eQQ_max  = max_{k} |q_{1, k} - q_{0, k}| / sigma_pooled.
+    Threshold: eQQ_mean > 0.15 certifies severe distributional imbalance across the common support.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        z1 = z[treated]
+        z0 = z[~treated]
+        n1 = len(z1)
+        n0 = len(z0)
+        if n1 < 6 or n0 < 6:
+            return None, None, False
+
+        s1_var, s0_var = float(np.var(z1, ddof=1)), float(np.var(z0, ddof=1))
+        s_pooled = np.sqrt(((n1 - 1) * s1_var + (n0 - 1) * s0_var) / max(1, n1 + n0 - 2))
+        if s_pooled < 1e-9:
+            return 0.0, 0.0, False
+
+        percentiles = np.linspace(1, 99, 99)
+        q1 = np.percentile(z1, percentiles)
+        q0 = np.percentile(z0, percentiles)
+
+        abs_diffs = np.abs(q1 - q0) / s_pooled
+        eqq_mean = float(np.mean(abs_diffs))
+        eqq_max = float(np.max(abs_diffs))
+        is_imbal = bool(eqq_mean > 0.15 or eqq_max > 0.35)
+        return eqq_mean, eqq_max, is_imbal
+    except Exception:
+        return None, None, False
+
+
+def lin_interaction_heterogeneity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Winston Lin's (2013) Agnostic Treatment-Covariate Centered Interaction Test.
+
+    Evaluates effect heterogeneity across confounder gradients using centered exposure and confounder:
+      Y = beta_0 + beta_1 * (D - D_bar) + beta_2 * (Z - Z_bar) + beta_3 * (D - D_bar)*(Z - Z_bar) + epsilon.
+    Under H_0: beta_3 = 0 (constant treatment effect, invariant across confounder levels).
+    t_Lin = beta_3 / SE(beta_3) ~ t(n - 4).
+    Rejection (p < 0.05 or |t_Lin| >= 1.96) proves treatment effect heterogeneity along the confounder gradient,
+    demonstrating that standard constant-effect adjustment is misspecified.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x).astype(float)
+        if np.std(d) < 1e-9:
+            return None, None, False
+
+        d_cent = d - np.mean(d)
+        z_cent = z - np.mean(z)
+        dz_inter = d_cent * z_cent
+
+        X_mat = np.column_stack([np.ones(n), d_cent, z_cent, dz_inter])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        df_e = max(1, n - 4)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_int = np.sqrt(max(1e-12, cov_mat[3, 3]))
+
+        t_lin = float(beta[3] / se_int)
+        p_val = float(2.0 * stats.t.sf(abs(t_lin), df=df_e))
+        is_hetero = bool(p_val < 0.05)
+        return t_lin, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def shapiro_wilk_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Shapiro & Wilk's (1965) Omnibus Residual Normality Test (W).
+
+    Evaluates regression residuals against the Gaussian null using the ratio of the best linear
+    unbiased estimator of variance (based on order statistics) to the sample variance:
+      W = (sum a_i e_{(i)})^2 / sum (e_i - e_bar)^2.
+    Rejection (p < 0.05) provides optimal power against diverse non-Gaussian alternatives
+    (asymmetry, leptokurtosis, platykurtosis, multimodality).
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        if np.std(res) < 1e-12:
+            return 1.0, 1.0, False
+
+        # In case n > 5000, take representative sample for Shapiro-Wilk calculation if needed
+        res_calc = res if n <= 5000 else np.random.RandomState(42).choice(res, 5000, replace=False)
+        w_stat, p_val = stats.shapiro(res_calc)
+        w_stat = float(w_stat)
+        p_val = float(p_val)
+        is_non_norm = bool(p_val < 0.05)
+        return w_stat, p_val, is_non_norm
+    except Exception:
+        return None, None, False
+
+
+def hadi_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Ali S. Hadi's (1992) Measure of Overall Potential Influence in Regression (H_i^2).
+
+    Decomposes observation influence into residual potential and leverage potential:
+      H_i^2 = [(p + 1) / (1 - h_ii)] * [e_i^2 / ((1 - h_ii) * SSE)] + [h_ii / (1 - h_ii)].
+    Cutoff threshold: H_crit = mean(H^2) + 2 * std(H^2) or 3 * (p / n).
+    Flags observations that exert disproportionate potential influence on both the fitted hyperplane
+    and the covariance structure.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        sse = float(np.sum(res ** 2))
+        if sse < 1e-12:
+            return 0.0, 0, False
+
+        # Hadi's influence measure
+        term1 = ((p + 1.0) / (1.0 - h_diag)) * ((res ** 2) / ((1.0 - h_diag) * sse))
+        term2 = h_diag / (1.0 - h_diag)
+        hadi_scores = term1 + term2
+
+        mean_h = np.mean(hadi_scores)
+        std_h = np.std(hadi_scores)
+        threshold = float(mean_h + 2.0 * std_h)
+        if threshold < (3.0 * p / n):
+            threshold = float(3.0 * p / n)
+
+        max_hadi = float(np.max(hadi_scores))
+        outlier_count = int(np.sum(hadi_scores > threshold))
+        is_influential = bool(outlier_count > 0 and max_hadi > threshold)
+        return max_hadi, outlier_count, is_influential
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -6061,12 +6373,15 @@ class DevilsAdvocateAgent:
                 pet_t, pet_p, peese_t, peese_p, is_pet_asym = pet_peese_meta_regression_test(tables_2x2)
                 # Tang & Liu (2000) Linear Regression Funnel Asymmetry Test
                 tang_t, tang_p, is_tang_asym = tang_funnel_asymmetry_test(tables_2x2)
+                # Pustejovsky & Rodgers (2019) Variance-Stabilized Funnel Asymmetry Test
+                pust_t, pust_p, is_pust_asym = pustejovsky_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
             bd_stat, bd_p = None, None
             pet_t, pet_p, peese_t, peese_p, is_pet_asym = None, None, None, None, False
             tang_t, tang_p, is_tang_asym = None, None, False
+            pust_t, pust_p, is_pust_asym = None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -6150,6 +6465,8 @@ class DevilsAdvocateAgent:
             sukhatme_z, sukhatme_p, is_sukhatme_hetero = sukhatme_scale_dispersion_test(kw_samples)
             # Capon (1961) Expected Normal Order Statistics Scale Dispersion Test
             capon_z, capon_p, is_capon_hetero = capon_scale_dispersion_test(kw_samples)
+            # Moses (1963) Non-Parametric Sub-Sample Rank Dispersion Test
+            moses_u, moses_p, is_moses_hetero = moses_scale_dispersion_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -6217,8 +6534,12 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Sukhatme Scale: Z={sukhatme_z:.2f}, p={sukhatme_p:.3e}]"
         if tang_p is not None:
             cmh_note += f" [Tang Funnel: t={tang_t:.2f}, p={tang_p:.3e}]"
+        if pust_p is not None:
+            cmh_note += f" [Pustejovsky Funnel: t={pust_t:.2f}, p={pust_p:.3e}]"
         if capon_p is not None:
             cmh_note += f" [Capon Scale: Z={capon_z:.2f}, p={capon_p:.3e}]"
+        if moses_p is not None:
+            cmh_note += f" [Moses Scale: U={moses_u:.1f}, p={moses_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -6365,6 +6686,12 @@ class DevilsAdvocateAgent:
             capon_stat_z=capon_z,
             capon_p_value=capon_p,
             is_capon_heterogeneous=is_capon_hetero,
+            pustejovsky_test_t=pust_t,
+            pustejovsky_test_p=pust_p,
+            is_pustejovsky_asymmetric=is_pust_asym,
+            moses_stat_u=moses_u,
+            moses_stat_p=moses_p,
+            is_moses_heterogeneous=is_moses_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -6528,6 +6855,8 @@ class DevilsAdvocateAgent:
         austin_ks_d, austin_ks_p, is_austin_ks_imbal = None, None, False
         l1_val, is_l1_imbal = None, False
         rubin_f, rubin_p, is_rubin_nonpar = None, None, False
+        eqq_mean, eqq_max, is_eqq_imbal = None, None, False
+        lin_t, lin_p, is_lin_hetero = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -6582,6 +6911,10 @@ class DevilsAdvocateAgent:
                     l1_val, is_l1_imbal = l1_multivariate_imbalance_test(x_mal, z_mal)
                     # Donald B. Rubin (1979) Regression Surface Non-Parallelism Test
                     rubin_f, rubin_p, is_rubin_nonpar = rubin_parallelism_interaction_test(x_mal, z_mal, y_mal)
+                    # Ho, Imai, King, & Stuart (2007) Empirical Q-Q Covariate Balance Metric
+                    eqq_mean, eqq_max, is_eqq_imbal = eqq_covariate_balance_test(x_mal, z_mal)
+                    # Winston Lin (2013) Agnostic Treatment-Covariate Centered Interaction Test
+                    lin_t, lin_p, is_lin_hetero = lin_interaction_heterogeneity_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -6745,6 +7078,12 @@ class DevilsAdvocateAgent:
             rubin_parallelism_f=rubin_f,
             rubin_parallelism_p=rubin_p,
             is_rubin_nonparallel=is_rubin_nonpar,
+            eqq_mean_diff=eqq_mean,
+            eqq_max_diff=eqq_max,
+            is_eqq_imbalanced=is_eqq_imbal,
+            lin_interaction_t=lin_t,
+            lin_interaction_p=lin_p,
+            is_lin_heterogeneous=is_lin_hetero,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -7029,6 +7368,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Anthony C. Atkinson (1981, 1985) Modified Leverage-Weighted Influence Metric
         atkinson_max, atkinson_cnt, is_atkinson_infl = atkinson_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Samuel S. Shapiro & Martin B. Wilk (1965) Omnibus Residual Normality Test
+        sw_w, sw_p, is_sw_non_normal = shapiro_wilk_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Ali S. Hadi (1992) Measure of Overall Potential Influence in Regression
+        hadi_max, hadi_cnt, is_hadi_infl = hadi_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -7189,6 +7534,12 @@ class DevilsAdvocateAgent:
             max_atkinson_distance=atkinson_max,
             atkinson_outlier_count=atkinson_cnt,
             is_atkinson_influential=is_atkinson_infl,
+            shapiro_wilk_w=sw_w,
+            shapiro_wilk_p=sw_p,
+            is_shapiro_wilk_non_normal=is_sw_non_normal,
+            max_hadi_influence=hadi_max,
+            hadi_outlier_count=hadi_cnt,
+            is_hadi_influential=is_hadi_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

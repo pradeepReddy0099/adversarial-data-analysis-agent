@@ -300,6 +300,12 @@ with col_right:
                         if simpsons.get("capon_p_value") is not None:
                             capon_flag = " ⚠️ LMP Normal Order Scale Dispersion (p < 0.05)" if simpsons.get("is_capon_heterogeneous") else " (Homogeneous Normal Order Spread)"
                             st.markdown(f"**Capon Normal Scores Scale:** Z = `{simpsons.get('capon_stat_z', 0.0):.2f}` (p = `{simpsons.get('capon_p_value', 0.0):.3e}`){capon_flag}")
+                        if simpsons.get("pustejovsky_test_p") is not None:
+                            pust_flag = " ⚠️ Variance-Stabilized Asymmetry (p < 0.05)" if simpsons.get("is_pustejovsky_asymmetric") else " (Symmetric Precision Limit)"
+                            st.markdown(f"**Pustejovsky-Rodgers Funnel Asymmetry:** t = `{simpsons.get('pustejovsky_test_t', 0.0):.2f}` (p = `{simpsons.get('pustejovsky_test_p', 0.0):.3e}`){pust_flag}")
+                        if simpsons.get("moses_stat_p") is not None:
+                            moses_flag = " ⚠️ Sub-Sample Scale Dispersion (p < 0.05)" if simpsons.get("is_moses_heterogeneous") else " (Homogeneous Sub-Sample Spread)"
+                            st.markdown(f"**Moses Sub-Sample Scale:** U = `{simpsons.get('moses_stat_u', 0.0):.1f}` (p = `{simpsons.get('moses_stat_p', 0.0):.3e}`){moses_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -388,6 +394,12 @@ with col_right:
                         if conf_aud.get("rubin_parallelism_p") is not None:
                             rp_flag = " ⚠️ Non-Parallel Surfaces / Effect Heterogeneity (p < 0.05)" if conf_aud.get("is_rubin_nonparallel") else " (Parallel Covariate Slopes)"
                             st.markdown(f"**Rubin Surface Non-Parallelism:** F = `{conf_aud.get('rubin_parallelism_f', 0.0):.2f}` (p = `{conf_aud.get('rubin_parallelism_p', 0.0):.3e}`){rp_flag}")
+                        if conf_aud.get("eqq_mean_diff") is not None:
+                            eqq_flag = " ⚠️ Severe Quantile Imbalance (eQQ > 0.15)" if conf_aud.get("is_eqq_imbalanced") else " (Satisfactory Empirical Q-Q Overlap)"
+                            st.markdown(f"**Ho-Imai-King-Stuart eQQ Balance:** Mean Diff = `{conf_aud.get('eqq_mean_diff', 0.0):.3f}` (Max = `{conf_aud.get('eqq_max_diff', 0.0):.3f}`){eqq_flag}")
+                        if conf_aud.get("lin_interaction_p") is not None:
+                            lin_flag = " ⚠️ Agnostic Effect Heterogeneity (p < 0.05)" if conf_aud.get("is_lin_heterogeneous") else " (Homogeneous Covariate Slopes)"
+                            st.markdown(f"**Winston Lin Centered Interaction:** t = `{conf_aud.get('lin_interaction_t', 0.0):.2f}` (p = `{conf_aud.get('lin_interaction_p', 0.0):.3e}`){lin_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -530,6 +542,12 @@ with col_right:
                         if stab_aud.get("max_atkinson_distance") is not None:
                             atk_flag = f" ⚠️ Leverage-Amplified Influence ({stab_aud.get('atkinson_outlier_count', 0)} influential)" if stab_aud.get("is_atkinson_influential") else " (Bounded Atkinson Influence)"
                             st.markdown(f"**Atkinson Modified Influence:** Max A = `{stab_aud.get('max_atkinson_distance', 0.0):.2f}`{atk_flag}")
+                        if stab_aud.get("shapiro_wilk_p") is not None:
+                            sw_flag = f" ⚠️ Non-Gaussian Residuals (p = {stab_aud['shapiro_wilk_p']:.3e})" if stab_aud.get("is_shapiro_wilk_non_normal") else f" (Normal Gaussian Fit, p = {stab_aud['shapiro_wilk_p']:.3e})"
+                            st.markdown(f"**Shapiro-Wilk Omnibus Normality:** W = `{stab_aud.get('shapiro_wilk_w', 0.0):.4f}` (p = `{stab_aud['shapiro_wilk_p']:.3e}`){sw_flag}")
+                        if stab_aud.get("max_hadi_influence") is not None:
+                            hadi_flag = f" ⚠️ Potential Influence Outliers ({stab_aud.get('hadi_outlier_count', 0)} influential)" if stab_aud.get("is_hadi_influential") else " (Bounded Potential Influence)"
+                            st.markdown(f"**Hadi Potential Influence:** Max H² = `{stab_aud.get('max_hadi_influence', 0.0):.2f}`{hadi_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -877,6 +895,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain J. R. M. Hosking L-moments ratio residual normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain J. R. M. Hosking L-moments ratio residual normality test", findings, dataset_name=dataset_name)
 
+            sug_col46, sug_col47, sug_col48 = st.columns(3)
+            with sug_col46:
+                if st.button("📉 Pustejovsky-Rodgers Funnel", key="sug_pust"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Pustejovsky and Rodgers variance-stabilized funnel asymmetry test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Pustejovsky and Rodgers variance-stabilized funnel asymmetry test", findings, dataset_name=dataset_name)
+            with sug_col47:
+                if st.button("⚖️ eQQ Covariate Balance", key="sug_eqq"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Ho Imai King Stuart empirical qq quantile balance metric"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Ho Imai King Stuart empirical qq quantile balance metric", findings, dataset_name=dataset_name)
+            with sug_col48:
+                if st.button("📐 Shapiro-Wilk Normality", key="sug_shapiro"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Samuel Shapiro and Martin Wilk omnibus residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Samuel Shapiro and Martin Wilk omnibus residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -981,6 +1016,10 @@ with col_right:
                     "Sukhatme_Scale_p": f"{simp.get('sukhatme_p_value', 0.0):.3e}" if simp.get("sukhatme_p_value") is not None else "N/A",
                     "Capon_Scale_Z": f"{simp.get('capon_stat_z', 0.0):.2f}" if simp.get("capon_stat_z") is not None else "N/A",
                     "Capon_Scale_p": f"{simp.get('capon_p_value', 0.0):.3e}" if simp.get("capon_p_value") is not None else "N/A",
+                    "Pustejovsky_Funnel_t": f"{simp.get('pustejovsky_test_t', 0.0):.2f}" if simp.get("pustejovsky_test_t") is not None else "N/A",
+                    "Pustejovsky_Funnel_p": f"{simp.get('pustejovsky_test_p', 0.0):.3e}" if simp.get("pustejovsky_test_p") is not None else "N/A",
+                    "Moses_Scale_U": f"{simp.get('moses_stat_u', 0.0):.1f}" if simp.get("moses_stat_u") is not None else "N/A",
+                    "Moses_Scale_p": f"{simp.get('moses_stat_p', 0.0):.3e}" if simp.get("moses_stat_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -1039,6 +1078,10 @@ with col_right:
                     "L1_Multivariate_Imbalance": f"{conf.get('l1_multivariate_imbalance', 0.0):.3f}" if conf.get("l1_multivariate_imbalance") is not None else "N/A",
                     "Rubin_Parallelism_F": f"{conf.get('rubin_parallelism_f', 0.0):.2f}" if conf.get("rubin_parallelism_f") is not None else "N/A",
                     "Rubin_Parallelism_p": f"{conf.get('rubin_parallelism_p', 0.0):.3e}" if conf.get("rubin_parallelism_p") is not None else "N/A",
+                    "eQQ_Mean_Diff": f"{conf.get('eqq_mean_diff', 0.0):.3f}" if conf.get("eqq_mean_diff") is not None else "N/A",
+                    "eQQ_Max_Diff": f"{conf.get('eqq_max_diff', 0.0):.3f}" if conf.get("eqq_max_diff") is not None else "N/A",
+                    "Lin_Interaction_t": f"{conf.get('lin_interaction_t', 0.0):.2f}" if conf.get("lin_interaction_t") is not None else "N/A",
+                    "Lin_Interaction_p": f"{conf.get('lin_interaction_p', 0.0):.3e}" if conf.get("lin_interaction_p") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -1105,6 +1148,10 @@ with col_right:
                     "Hosking_L_p": f"{stab.get('hosking_l_p', 0.0):.3e}" if stab.get("hosking_l_p") is not None else "N/A",
                     "Max_Atkinson_Distance": f"{stab.get('max_atkinson_distance', 0.0):.2f}" if stab.get("max_atkinson_distance") is not None else "N/A",
                     "Atkinson_Outlier_Count": f"{stab.get('atkinson_outlier_count', 0)}" if stab.get("atkinson_outlier_count") is not None else "N/A",
+                    "Shapiro_Wilk_W": f"{stab.get('shapiro_wilk_w', 0.0):.4f}" if stab.get("shapiro_wilk_w") is not None else "N/A",
+                    "Shapiro_Wilk_p": f"{stab.get('shapiro_wilk_p', 0.0):.3e}" if stab.get("shapiro_wilk_p") is not None else "N/A",
+                    "Max_Hadi_Influence": f"{stab.get('max_hadi_influence', 0.0):.2f}" if stab.get("max_hadi_influence") is not None else "N/A",
+                    "Hadi_Outlier_Count": f"{stab.get('hadi_outlier_count', 0)}" if stab.get("hadi_outlier_count") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
