@@ -872,7 +872,7 @@ class LLMNarrator:
                 )
             return "Woolf's test assesses odds ratio homogeneity across stratified contingency tables using inverse-variance weights."
 
-        if any(w in q_lower for w in ["imbens", "manski ci", "im ci", "partially identified ci"]):
+        if any(w in q_lower for w in ["imbens", "manski ci", "im ci", "partially identified ci"]) and not any(k in q_lower for k in ["aipw", "doubly robust", "crump"]):
             im_items = []
             for f in findings:
                 conf = f.get("audit", {}).get("confounder_audit", {})
@@ -1473,6 +1473,120 @@ class LLMNarrator:
                 )
             return "The Breusch-Godfrey LM test checks for higher-order serial correlation that invalidates naive OLS inference."
 
+        if any(w in q_lower for w in ["macaskill", "macaskill test", "sample-size weighted regression", "macaskill asymmetry"]):
+            mac_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                m_t = simp.get("macaskill_test_t")
+                m_p = simp.get("macaskill_test_p")
+                is_asym = simp.get("is_macaskill_asymmetric", False)
+                if m_t is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Small-Study / Strata-Size Selection Bias (p = {m_p:.3e})" if is_asym else f" (Symmetric Strata Size, p = {m_p:.3e})"
+                    mac_items.append(f"• **{v_name}**: Macaskill Funnel Asymmetry t = {m_t:.2f} (p = {m_p:.3e}){flag}")
+            if mac_items:
+                return (
+                    "**Peter Macaskill et al.'s (2001) Sample-Size Weighted Funnel Regression Test:**\n"
+                    "Regresses stratum log-odds ratios on inverse sample size 1/N_k weighted by inverse-variance to detect small-stratum bias without Egger's false-positive inflation:\n"
+                    + "\n".join(mac_items)
+                )
+            return "Macaskill's test evaluates whether stratum effect estimates systematically depend on stratum sample sizes."
+
+        if any(w in q_lower for w in ["bartlett", "bartlett test", "bartlett scale", "bartlett's"]) and not any(w in q_lower for w in ["newey", "kernel"]):
+            bart_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                b_stat = simp.get("bartlett_stat")
+                b_p = simp.get("bartlett_p")
+                is_het = simp.get("is_bartlett_heterogeneous", False)
+                if b_stat is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Scale Heterogeneity / Unequal Variances (p = {b_p:.3e})" if is_het else f" (Homoscedastic Strata Spread, p = {b_p:.3e})"
+                    bart_items.append(f"• **{v_name}**: Bartlett Scale Homogeneity B = {b_stat:.2f} (p = {b_p:.3e}){flag}")
+            if bart_items:
+                return (
+                    "**Maurice Bartlett's (1937) Likelihood Ratio Scale Homogeneity Test:**\n"
+                    "Evaluates the equality of conditional target variances across K conditioning strata:\n"
+                    + "\n".join(bart_items)
+                )
+            return "Bartlett's test evaluates whether residual variances are homogeneous across conditioning strata to protect against Behrens-Fisher distortions."
+
+        if any(w in q_lower for w in ["aipw", "doubly robust", "augmented inverse probability", "robins"]):
+            aipw_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                a_tau = conf.get("aipw_treatment_effect")
+                a_disc = conf.get("aipw_discrepancy")
+                is_conf = conf.get("is_aipw_confounded", False)
+                if a_tau is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Selection Confounding (Δ = {a_disc:.1%})" if is_conf else f" (Robust Doubly Identified, Δ = {a_disc:.1%})"
+                    aipw_items.append(f"• **{v_name}**: AIPW Doubly Robust τ = {a_tau:.4f} (Discrepancy Δ_AIPW = {a_disc:.1%}){flag}")
+            if aipw_items:
+                return (
+                    "**Robins-Rotnitzky-Zhao (1994) & Imbens (2004) AIPW Doubly Robust Treatment Effect:**\n"
+                    "Combines propensity score weighting with outcome regression to ensure consistent causal effect estimation even if one model is misspecified:\n"
+                    + "\n".join(aipw_items)
+                )
+            return "AIPW doubly robust estimation combines propensity weighting with outcome regression models to guard against treatment selection bias."
+
+        if any(w in q_lower for w in ["leamer", "extreme bounds", "eba", "leamer's", "fragility"]):
+            leamer_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                l_min = conf.get("leamer_bound_min")
+                l_max = conf.get("leamer_bound_max")
+                is_frag = conf.get("is_leamer_fragile", False)
+                if l_min is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Leamer Fragile (0 ∈ [{l_min:.3f}, {l_max:.3f}])" if is_frag else f" (Leamer Robust, [{l_min:.3f}, {l_max:.3f}] excludes 0)"
+                    leamer_items.append(f"• **{v_name}**: Leamer EBA Range = [{l_min:.4f}, {l_max:.4f}]{flag}")
+            if leamer_items:
+                return (
+                    "**Edward Leamer's (1983) Extreme Bounds Analysis (EBA):**\n"
+                    "Evaluates the focal regression slope across all subsets of candidate confounders to determine whether empirical findings are fragile to control variable selection:\n"
+                    + "\n".join(leamer_items)
+                )
+            return "Leamer's Extreme Bounds Analysis searches across all confounder subsets to verify if the regression slope sign can be overturned by changing control variables."
+
+        if any(w in q_lower for w in ["runs test", "wald-wolfowitz", "residual independence", "runs_z", "wolfowitz"]):
+            runs_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                r_z = stab.get("runs_test_z")
+                r_p = stab.get("runs_test_p")
+                has_drift = stab.get("has_runs_nonrandomness", False)
+                if r_z is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Non-Random Residual Clustering / Drift (p = {r_p:.3e})" if has_drift else f" (Independent Residuals, p = {r_p:.3e})"
+                    runs_items.append(f"• **{v_name}**: Wald-Wolfowitz Runs Z = {r_z:.2f} (p = {r_p:.3e}){flag}")
+            if runs_items:
+                return (
+                    "**Abraham Wald & Jacob Wolfowitz's (1940) Non-Parametric Runs Test for Residual Independence:**\n"
+                    "Evaluates whether the sequence of regression residual signs exhibits non-random clustering or persistence along sorted regressors:\n"
+                    + "\n".join(runs_items)
+                )
+            return "The Wald-Wolfowitz runs test checks whether regression residual signs are randomly distributed along regressor orderings."
+
+        if any(w in q_lower for w in ["kendall", "tau-b", "kendall's", "concordance discrepancy", "rank concordance"]):
+            kend_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                k_tau = stab.get("kendall_tau_b")
+                k_disc = stab.get("kendall_discrepancy")
+                is_dist = stab.get("is_kendall_distorted", False)
+                if k_tau is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Rank Discrepancy / Leverage Distortion (Δ = {k_disc:.1%})" if is_dist else f" (Robust Rank Concordance, Δ = {k_disc:.1%})"
+                    kend_items.append(f"• **{v_name}**: Kendall τ_b = {k_tau:.4f} (Discrepancy Δ_Kendall = {k_disc:.1%}){flag}")
+            if kend_items:
+                return (
+                    "**Maurice Kendall's (1938) Tau-b Rank Concordance Discrepancy:**\n"
+                    "Evaluates pairwise concordant vs discordant pairs with exact tie corrections to detect gross bivariate leverage and outlier distortion:\n"
+                    + "\n".join(kend_items)
+                )
+            return "Kendall's Tau-b evaluates pairwise rank concordance with exact tie adjustments to expose leverage points inflating linear Pearson correlation."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -1685,15 +1799,15 @@ class LLMNarrator:
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
         lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 10 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Woolf Stratified Test, Freeman-Tukey Double-Arcsine Homogeneity, Peto Odds Ratio & Heterogeneity, Harbord Modified Score Funnel Asymmetry, Peters Regression Asymmetry Test, Gerta Rücker Arcsine Asymmetry Test, Leslie Kish Stratification Design Effect, Howard Levene Scale Homogeneity, Brown-Forsythe Scale Homogeneity, Fligner-Killeen Variance Homogeneity, Kruskal-Wallis Rank Heterogeneity, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance with Haldane-Anscombe continuity corrections (Woolf's test), applies variance-stabilizing angular transformations (Freeman-Tukey test), computes assumption-free hypergeometric one-step odds ratios and cross-stratum heterogeneity (Peto's method), detects sparse-stratum funnel plot asymmetry without artifactual Type I error inflation (Harbord's modified score test, Peters' weighted regression test, and Rücker's arcsine transformation test), evaluates stratum sample-size imbalance and variance efficiency (Kish's design effect $D_{\\text{Kish}}$ and stratified variance ratio), evaluates classical and median-aligned scale spread (Levene and Brown-Forsythe tests), tests non-parametric variance scale equality (Fligner-Killeen test), tests non-parametric median shifts across strata (Kruskal-Wallis $H$), quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
-        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit), Cohen's f², Mallows' Cp Criterion, Davidson-MacKinnon J-Test, Durbin-Wu-Hausman Endogeneity Test, Stock-Yogo First-Stage Relevance, Belsley-Kuh-Welsch Condition Index (κ), Sargan-Hansen Overidentifying Restrictions (J), Crump Propensity Score Overlap, Bruce Hansen Structural Threshold F-Test, David Hosmer & Stanley Lemeshow Propensity Calibration Test & Whitney Newey & Kenneth West HAC Variance Ratio:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, unique variance effect sizes ($f^2$), Mallows' $C_p$ model misspecification discrepancy ($\\Delta C_p > 2.0$), Davidson-MacKinnon $J$-tests arbitrating non-nested specification dominance between bivariate claims and rival confounder models, Durbin-Wu-Hausman two-stage specification tests detecting omitted variable bias endogeneity ($F_{\\text{DWH}}$), Stock-Yogo first-stage relevance benchmarks ($F \\ge 10.0$), Belsley-Kuh-Welsch singular value condition indices and variance decomposition proportions isolating collinear dependencies ($\\kappa \\ge 15.0$), Sargan-Hansen overidentifying restrictions testing instrument orthogonality ($J_{\\text{Sargan}}$), Crump et al. propensity score common support trimming diagnostics, Hansen (2000) supremum threshold regime-switching tests, Hosmer-Lemeshow decile goodness-of-fit calibration tests certifying exposure model validity, and Newey-West HAC kernel standard error adjustments certifying resistance to residual autocorrelation.")
+        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Woolf Stratified Test, Freeman-Tukey Double-Arcsine Homogeneity, Peto Odds Ratio & Heterogeneity, Harbord Modified Score Funnel Asymmetry, Peters Regression Asymmetry Test, Gerta Rücker Arcsine Asymmetry Test, Peter Macaskill Funnel Regression Asymmetry Test, Leslie Kish Stratification Design Effect, Howard Levene Scale Homogeneity, Maurice Bartlett Likelihood Ratio Scale Homogeneity, Brown-Forsythe Scale Homogeneity, Fligner-Killeen Variance Homogeneity, Kruskal-Wallis Rank Heterogeneity, Higgins I² & H², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Galbraith Radial Outliers, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance with Haldane-Anscombe continuity corrections (Woolf's test), applies variance-stabilizing angular transformations (Freeman-Tukey test), computes assumption-free hypergeometric one-step odds ratios and cross-stratum heterogeneity (Peto's method), detects sparse-stratum funnel plot asymmetry without artifactual Type I error inflation (Harbord's modified score test, Peters' weighted regression test, Rücker's arcsine transformation test, and Macaskill's sample-size weighted regression test), evaluates stratum sample-size imbalance and variance efficiency (Kish's design effect $D_{\\text{Kish}}$ and stratified variance ratio), evaluates parametric and non-parametric scale spread (Levene mean-centered, Bartlett likelihood ratio, and Brown-Forsythe median-aligned tests), tests non-parametric variance scale equality (Fligner-Killeen test), tests non-parametric median shifts across strata (Kruskal-Wallis $H$), quantifies true heterogeneity percentage ($I^2$) and excess variance inflation ($H^2, \\tau^2$), flags leverage-inducing strata via Galbraith radial standardized deviations ($|z_i| \\ge 2.0$), estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
+        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit), Cohen's f², Mallows' Cp Criterion, Davidson-MacKinnon J-Test, Durbin-Wu-Hausman Endogeneity Test, Stock-Yogo First-Stage Relevance, Belsley-Kuh-Welsch Condition Index (κ), Sargan-Hansen Overidentifying Restrictions (J), Crump Propensity Score Overlap, Bruce Hansen Structural Threshold F-Test, David Hosmer & Stanley Lemeshow Propensity Calibration Test, Whitney Newey & Kenneth West HAC Variance Ratio, Robins-Rotnitzky-Zhao & Imbens AIPW Doubly Robust Treatment Effect, & Edward Leamer Extreme Bounds Analysis (EBA):** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, unique variance effect sizes ($f^2$), Mallows' $C_p$ model misspecification discrepancy ($\\Delta C_p > 2.0$), Davidson-MacKinnon $J$-tests arbitrating non-nested specification dominance between bivariate claims and rival confounder models, Durbin-Wu-Hausman two-stage specification tests detecting omitted variable bias endogeneity ($F_{\\text{DWH}}$), Stock-Yogo first-stage relevance benchmarks ($F \\ge 10.0$), Belsley-Kuh-Welsch singular value condition indices and variance decomposition proportions isolating collinear dependencies ($\\kappa \\ge 15.0$), Sargan-Hansen overidentifying restrictions testing instrument orthogonality ($J_{\\text{Sargan}}$), Crump et al. propensity score common support trimming diagnostics, Hansen (2000) supremum threshold regime-switching tests, Hosmer-Lemeshow decile goodness-of-fit calibration tests certifying exposure model validity, Newey-West HAC kernel standard error adjustments certifying resistance to residual autocorrelation, Augmented Inverse Probability Weighted (AIPW) doubly robust estimators guaranteeing consistent causal effects under dual-misspecification protection, and Leamer's Extreme Bounds Analysis evaluating coefficient fragility across all candidate confounder subsets.")
         lines.append("3. **Altonji-Elder-Taber (AET 2005) Selection Ratio, Rosenbaum (1987, 2002) Sensitivity Bounds (Γ), Manski (1990, 2003) Non-Parametric Partial Identification & Imbens-Manski (2004) Asymptotically Valid CIs:** Evaluates the relative selection ratio ($R_{\\text{AET}}$) on unobservables required to attribute effects to selection bias, calculates critical odds ratio differential threshold ($\\Gamma_{\\text{crit}}$) required for hidden bias to overturn findings, computes worst-case non-parametric sharp identification intervals $[\\Delta_{\\text{low}}, \\Delta_{\\text{high}}]$ under arbitrary selection, and constructs exact Imbens-Manski confidence intervals accounting for boundary sampling variability.")
         lines.append("4. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
         lines.append("5. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
         lines.append("6. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
         lines.append("7. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
         lines.append("8. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
-        lines.append("9. **Gregory Chow (1960) Structural Break Test, Donald Andrews (1993) Supremum Wald Test (Sup W), Brown-Durbin-Evans (1975) CUSUM & CUSUMSQ Tests, Koenker (1981) Studentized Breusch-Pagan Test, Harvey & Collier (1977) Recursive Linearity Test, Huber (1964) Robust M-Estimator Regression, Rousseeuw (1984) Least Trimmed Squares (LTS), Andrew Siegel (1982) Repeated Medians High-Breakdown Slope, Trevor Breusch & Leslie Godfrey (1978) Higher-Order Serial Correlation LM Test, Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), detects structural change points at unknown locations along sorted regressors (Andrews $\\operatorname{Sup} W$), tracks recursive residual parameter drift (Brown-Durbin-Evans CUSUM) and structural variance shifts (CUSUMSQ), tests heteroscedasticity robust to non-normal kurtosis (Koenker studentized test), evaluates functional form linearity through standardized recursive forecast errors (Harvey-Collier $t$-test), quantifies resistance to influential outliers via Huber robust M-regression slopes ($\\Delta_{\\text{Huber}}$), high-breakdown Least Trimmed Squares ($\\Delta_{\\text{LTS}}$), and Siegel's 50% breakdown repeated medians estimator ($\\Delta_{\\text{Siegel}}$), tests higher-order autoregressive errors (Breusch-Godfrey LM test), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
+        lines.append("9. **Gregory Chow (1960) Structural Break Test, Donald Andrews (1993) Supremum Wald Test (Sup W), Brown-Durbin-Evans (1975) CUSUM & CUSUMSQ Tests, Koenker (1981) Studentized Breusch-Pagan Test, Harvey & Collier (1977) Recursive Linearity Test, Huber (1964) Robust M-Estimator Regression, Rousseeuw (1984) Least Trimmed Squares (LTS), Andrew Siegel (1982) Repeated Medians High-Breakdown Slope, Trevor Breusch & Leslie Godfrey (1978) Higher-Order Serial Correlation LM Test, Abraham Wald & Jacob Wolfowitz (1940) Runs Test for Residual Randomness, Maurice Kendall (1938) Tau-b Rank Concordance, Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, White LM, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates parameter invariance across data partitions (Chow $F$-test), detects structural change points at unknown locations along sorted regressors (Andrews $\\operatorname{Sup} W$), tracks recursive residual parameter drift (Brown-Durbin-Evans CUSUM) and structural variance shifts (CUSUMSQ), tests heteroscedasticity robust to non-normal kurtosis (Koenker studentized test), evaluates functional form linearity through standardized recursive forecast errors (Harvey-Collier $t$-test), quantifies resistance to influential outliers via Huber robust M-regression slopes ($\\Delta_{\\text{Huber}}$), high-breakdown Least Trimmed Squares ($\\Delta_{\\text{LTS}}$), and Siegel's 50% breakdown repeated medians estimator ($\\Delta_{\\text{Siegel}}$), tests higher-order autoregressive errors (Breusch-Godfrey LM test), evaluates non-parametric residual sequence randomness and cyclic drift (Wald-Wolfowitz runs test), tests bivariate ordinal concordance and outlier leverage resistance with exact tie adjustments (Kendall $\\tau_b$), empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), linear & non-linear heteroscedasticity (Breusch-Pagan, White LM), residual Gaussian normality, autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
         lines.append("10. **Andrew Gelman & John Carlin (2014) Type S/M Design Analysis, Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, quantifies Type S sign error probabilities and Type M exaggeration ratios to safeguard against the Winner's Curse, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")

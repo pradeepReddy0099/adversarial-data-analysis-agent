@@ -96,6 +96,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.rucker_test_p is not None
     assert audit.simpsons_audit.levene_stat is not None
     assert audit.simpsons_audit.levene_p is not None
+    # Verify Macaskill sample-size weighted regression test and Bartlett scale test
+    assert audit.simpsons_audit.macaskill_test_t is not None
+    assert audit.simpsons_audit.macaskill_test_p is not None
+    assert audit.simpsons_audit.bartlett_stat is not None
+    assert audit.simpsons_audit.bartlett_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -206,6 +211,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.hosmer_lemeshow_p is not None
         assert audit_coffee.confounder_audit.newey_west_hac_se is not None
         assert audit_coffee.confounder_audit.hac_se_ratio is not None
+        # Check AIPW doubly robust effect and Leamer Extreme Bounds Analysis
+        assert audit_coffee.confounder_audit.aipw_treatment_effect is not None
+        assert audit_coffee.confounder_audit.aipw_discrepancy is not None
+        assert audit_coffee.confounder_audit.leamer_bound_min is not None
+        assert audit_coffee.confounder_audit.leamer_bound_max is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -294,6 +304,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.siegel_slope_discrepancy is not None
     assert audit.stability_audit.breusch_godfrey_lm is not None
     assert audit.stability_audit.breusch_godfrey_p is not None
+    # Check Wald-Wolfowitz runs test for residual randomness and Kendall Tau-b rank concordance
+    assert audit.stability_audit.runs_test_z is not None
+    assert audit.stability_audit.runs_test_p is not None
+    assert audit.stability_audit.kendall_tau_b is not None
+    assert audit.stability_audit.kendall_discrepancy is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -531,6 +546,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_bg = narrator.answer_query("Explain Breusch-Godfrey test for higher-order serial correlation", findings)
     assert "Breusch" in ans_bg or "Godfrey" in ans_bg or "Autocorrelation" in ans_bg or "Serial" in ans_bg
+
+    ans_mac = narrator.answer_query("Explain Peter Macaskill sample-size weighted regression funnel test", findings)
+    assert "Macaskill" in ans_mac or "Sample-Size" in ans_mac or "Funnel" in ans_mac or "Weighted" in ans_mac
+
+    ans_bart = narrator.answer_query("Explain Maurice Bartlett likelihood ratio scale homogeneity test", findings)
+    assert "Bartlett" in ans_bart or "Scale" in ans_bart or "Variances" in ans_bart
+
+    ans_aipw = narrator.answer_query("Explain Robins-Rotnitzky-Zhao and Imbens AIPW doubly robust treatment effect", findings)
+    assert "AIPW" in ans_aipw or "Doubly Robust" in ans_aipw or "Robins" in ans_aipw or "Treatment Effect" in ans_aipw
+
+    ans_leamer = narrator.answer_query("Explain Edward Leamer Extreme Bounds Analysis (EBA)", findings)
+    assert "Leamer" in ans_leamer or "Extreme Bounds" in ans_leamer or "EBA" in ans_leamer or "Fragility" in ans_leamer
+
+    ans_runs = narrator.answer_query("Explain Abraham Wald and Jacob Wolfowitz runs test for residual independence", findings)
+    assert "Wald" in ans_runs or "Wolfowitz" in ans_runs or "Runs" in ans_runs or "Independence" in ans_runs
+
+    ans_kendall = narrator.answer_query("Explain Maurice Kendall Tau-b rank concordance discrepancy", findings)
+    assert "Kendall" in ans_kendall or "Tau" in ans_kendall or "Concordance" in ans_kendall or "Rank" in ans_kendall
 
 
 def test_end_to_end_pipeline(tmp_path):

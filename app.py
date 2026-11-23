@@ -252,6 +252,12 @@ with col_right:
                         if simpsons.get("levene_p") is not None:
                             lev_flag = " ⚠️ Unequal Scale Spread (p < 0.05)" if simpsons.get("is_levene_heterogeneous") else " (Homoscedastic Strata Spread)"
                             st.markdown(f"**Levene Scale Homogeneity:** W = `{simpsons.get('levene_stat', 0.0):.2f}` (p = `{simpsons.get('levene_p', 0.0):.3e}`){lev_flag}")
+                        if simpsons.get("macaskill_test_p") is not None:
+                            mac_flag = " ⚠️ Funnel Asymmetry / Small Strata Bias (p < 0.05)" if simpsons.get("is_macaskill_asymmetric") else " (Symmetric Strata Precision)"
+                            st.markdown(f"**Macaskill Weighted Funnel Asymmetry:** t = `{simpsons.get('macaskill_test_t', 0.0):.2f}` (p = `{simpsons.get('macaskill_test_p', 0.0):.3e}`){mac_flag}")
+                        if simpsons.get("bartlett_p") is not None:
+                            bart_flag = " ⚠️ Unequal Scale Spread (p < 0.05)" if simpsons.get("is_bartlett_heterogeneous") else " (Homoscedastic Strata Spread)"
+                            st.markdown(f"**Bartlett Scale Homogeneity:** B = `{simpsons.get('bartlett_stat', 0.0):.2f}` (p = `{simpsons.get('bartlett_p', 0.0):.3e}`){bart_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -292,6 +298,12 @@ with col_right:
                         if conf_aud.get("hac_se_ratio") is not None:
                             hac_flag = f" ⚠️ Autocorrelation Inflation (ρ = {conf_aud['hac_se_ratio']:.2f} > 1.25)" if conf_aud.get("is_hac_inflated") else f" (Robust to Serial Correlation, ρ = {conf_aud['hac_se_ratio']:.2f})"
                             st.markdown(f"**Newey-West HAC Variance Ratio:** ρ_HAC = `{conf_aud['hac_se_ratio']:.2f}` (HAC SE = `{conf_aud.get('newey_west_hac_se', 0.0):.4f}`){hac_flag}")
+                        if conf_aud.get("aipw_discrepancy") is not None:
+                            aipw_flag = f" ⚠️ Selection Confounded (Δ = {conf_aud['aipw_discrepancy']:.1%})" if conf_aud.get("is_aipw_confounded") else f" (Robust Doubly Identified, Δ = {conf_aud['aipw_discrepancy']:.1%})"
+                            st.markdown(f"**AIPW Doubly Robust Treatment Effect:** τ_AIPW = `{conf_aud.get('aipw_treatment_effect', 0.0):.4f}` (Discrepancy Δ_AIPW = `{conf_aud['aipw_discrepancy']:.1%}`){aipw_flag}")
+                        if conf_aud.get("leamer_bound_min") is not None:
+                            leamer_flag = " ⚠️ Fragile (0 ∈ EBA)" if conf_aud.get("is_leamer_fragile") else " (Robust to Covariate Selection)"
+                            st.markdown(f"**Leamer Extreme Bounds Analysis (EBA):** β ∈ `[{conf_aud.get('leamer_bound_min', 0.0):.4f}, {conf_aud.get('leamer_bound_max', 0.0):.4f}]`{leamer_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -386,6 +398,12 @@ with col_right:
                         if stab_aud.get("breusch_godfrey_p") is not None:
                             bg_flag = f" ⚠️ Higher-Order Autocorrelation (p = {stab_aud['breusch_godfrey_p']:.3e})" if stab_aud.get("has_higher_order_autocorrelation") else f" (Independent Residuals, p = {stab_aud['breusch_godfrey_p']:.3e})"
                             st.markdown(f"**Breusch-Godfrey Serial Correlation Test:** LM = `{stab_aud.get('breusch_godfrey_lm', 0.0):.2f}` (p = `{stab_aud['breusch_godfrey_p']:.3e}`){bg_flag}")
+                        if stab_aud.get("runs_test_p") is not None:
+                            runs_flag = f" ⚠️ Non-Random Residual Drift (p = {stab_aud['runs_test_p']:.3e})" if stab_aud.get("has_runs_nonrandomness") else f" (Independent Residuals, p = {stab_aud['runs_test_p']:.3e})"
+                            st.markdown(f"**Wald-Wolfowitz Runs Test:** Z = `{stab_aud.get('runs_test_z', 0.0):.2f}` (p = `{stab_aud['runs_test_p']:.3e}`){runs_flag}")
+                        if stab_aud.get("kendall_discrepancy") is not None:
+                            kend_flag = " ⚠️ Leverage Distortion / Rank Discrepancy" if stab_aud.get("is_kendall_distorted") else " (Robust Concordance)"
+                            st.markdown(f"**Kendall Tau-b Rank Concordance:** τ_b = `{stab_aud.get('kendall_tau_b', 0.0):.4f}` (Δ_Kendall = `{stab_aud.get('kendall_discrepancy', 0.0):.1%}`){kend_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -597,6 +615,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Siegel Repeated Medians high-breakdown robust slope"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Siegel Repeated Medians high-breakdown robust slope", findings, dataset_name=dataset_name)
 
+            sug_col22, sug_col23, sug_col24 = st.columns(3)
+            with sug_col22:
+                if st.button("📊 Macaskill Asymmetry Test", key="sug_macaskill"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Peter Macaskill sample-size weighted regression funnel test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Peter Macaskill sample-size weighted regression funnel test", findings, dataset_name=dataset_name)
+            with sug_col23:
+                if st.button("🔬 AIPW Doubly Robust Effect", key="sug_aipw"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Robins-Rotnitzky-Zhao and Imbens AIPW doubly robust treatment effect"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Robins-Rotnitzky-Zhao and Imbens AIPW doubly robust treatment effect", findings, dataset_name=dataset_name)
+            with sug_col24:
+                if st.button("📉 Leamer Extreme Bounds", key="sug_leamer"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Edward Leamer Extreme Bounds Analysis (EBA)"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Edward Leamer Extreme Bounds Analysis (EBA)", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -668,6 +703,10 @@ with col_right:
                     "Rucker_Arcsine_p": f"{simp.get('rucker_test_p', 0.0):.3e}" if simp.get("rucker_test_p") is not None else "N/A",
                     "Levene_Scale_W": f"{simp.get('levene_stat', 0.0):.2f}" if simp.get("levene_stat") is not None else "N/A",
                     "Levene_Scale_p": f"{simp.get('levene_p', 0.0):.3e}" if simp.get("levene_p") is not None else "N/A",
+                    "Macaskill_Funnel_t": f"{simp.get('macaskill_test_t', 0.0):.2f}" if simp.get("macaskill_test_t") is not None else "N/A",
+                    "Macaskill_Funnel_p": f"{simp.get('macaskill_test_p', 0.0):.3e}" if simp.get("macaskill_test_p") is not None else "N/A",
+                    "Bartlett_Scale_B": f"{simp.get('bartlett_stat', 0.0):.2f}" if simp.get("bartlett_stat") is not None else "N/A",
+                    "Bartlett_Scale_p": f"{simp.get('bartlett_p', 0.0):.3e}" if simp.get("bartlett_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -700,6 +739,10 @@ with col_right:
                     "Hansen_Threshold_p": f"{conf.get('hansen_threshold_p', 0.0):.3e}" if conf.get("hansen_threshold_p") is not None else "N/A",
                     "Hosmer_Lemeshow_p": f"{conf.get('hosmer_lemeshow_p', 0.0):.3e}" if conf.get("hosmer_lemeshow_p") is not None else "N/A",
                     "Newey_West_HAC_Ratio": f"{conf.get('hac_se_ratio', 0.0):.2f}" if conf.get("hac_se_ratio") is not None else "N/A",
+                    "AIPW_Treatment_Effect": f"{conf.get('aipw_treatment_effect', 0.0):.4f}" if conf.get("aipw_treatment_effect") is not None else "N/A",
+                    "AIPW_Discrepancy": f"{conf.get('aipw_discrepancy', 0.0):.1%}" if conf.get("aipw_discrepancy") is not None else "N/A",
+                    "Leamer_Bound_Min": f"{conf.get('leamer_bound_min', 0.0):.4f}" if conf.get("leamer_bound_min") is not None else "N/A",
+                    "Leamer_Bound_Max": f"{conf.get('leamer_bound_max', 0.0):.4f}" if conf.get("leamer_bound_max") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -734,6 +777,10 @@ with col_right:
                     "Siegel_Slope": f"{stab.get('siegel_slope', 0.0):.4f}" if stab.get("siegel_slope") is not None else "N/A",
                     "Siegel_Slope_Discrepancy": f"{stab.get('siegel_slope_discrepancy', 0.0):.1%}" if stab.get("siegel_slope_discrepancy") is not None else "N/A",
                     "Breusch_Godfrey_p": f"{stab.get('breusch_godfrey_p', 0.0):.3e}" if stab.get("breusch_godfrey_p") is not None else "N/A",
+                    "Runs_Test_Z": f"{stab.get('runs_test_z', 0.0):.2f}" if stab.get("runs_test_z") is not None else "N/A",
+                    "Runs_Test_p": f"{stab.get('runs_test_p', 0.0):.3e}" if stab.get("runs_test_p") is not None else "N/A",
+                    "Kendall_Tau_b": f"{stab.get('kendall_tau_b', 0.0):.4f}" if stab.get("kendall_tau_b") is not None else "N/A",
+                    "Kendall_Discrepancy": f"{stab.get('kendall_discrepancy', 0.0):.1%}" if stab.get("kendall_discrepancy") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

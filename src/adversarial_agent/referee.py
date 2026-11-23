@@ -125,6 +125,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rücker Arcsine Asymmetry Test: t = {simpsons.rucker_test_t:.2f} (p = {simpsons.rucker_test_p:.3e}) {'[SPARSE-STRATUM ARCSINE ASYMMETRY]' if simpsons.is_rucker_asymmetric else '[SYMMETRIC ARCSINE PRECISION]'}")
             if simpsons.levene_p is not None:
                 rationale["key_evidence"].append(f"Levene Scale Homogeneity: W = {simpsons.levene_stat:.2f} (p = {simpsons.levene_p:.3e}) {'[CONDITIONAL SCALE HETEROGENEITY]' if simpsons.is_levene_heterogeneous else '[HOMOSCEDASTIC STRATA SPREAD]'}")
+            if simpsons.macaskill_test_p is not None:
+                rationale["key_evidence"].append(f"Macaskill Funnel Asymmetry Test: t = {simpsons.macaskill_test_t:.2f} (p = {simpsons.macaskill_test_p:.3e}) {'[SMALL-STRATUM SELECTION BIAS / ASYMMETRY]' if simpsons.is_macaskill_asymmetric else '[SYMMETRIC STRATA PRECISION]'}")
+            if simpsons.bartlett_p is not None:
+                rationale["key_evidence"].append(f"Bartlett Scale Homogeneity: B = {simpsons.bartlett_stat:.2f} (p = {simpsons.bartlett_p:.3e}) {'[CONDITIONAL VARIANCE HETEROGENEITY]' if simpsons.is_bartlett_heterogeneous else '[HOMOSCEDASTIC STRATA VARIANCE]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -202,6 +206,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Hosmer-Lemeshow Propensity Calibration: χ² = {confounder.hosmer_lemeshow_chi2:.2f} (p = {confounder.hosmer_lemeshow_p:.3e}) {'[PROPENSITY MODEL MISCALIBRATED]' if confounder.is_propensity_miscalibrated else '[WELL-CALIBRATED PROPENSITY]'}")
             if confounder.hac_se_ratio is not None:
                 rationale["key_evidence"].append(f"Newey-West HAC Variance Ratio: ρ_HAC = {confounder.hac_se_ratio:.2f} (SE = {confounder.newey_west_hac_se:.4f}) {'[AUTOCORRELATION INFLATION - SE UNDERESTIMATED]' if confounder.is_hac_inflated else '[STABLE HAC INFERENCE]'}")
+            if confounder.aipw_discrepancy is not None:
+                rationale["key_evidence"].append(f"AIPW Doubly Robust Treatment Effect: τ_AIPW = {confounder.aipw_treatment_effect:.4f} (Discrepancy Δ_AIPW = {confounder.aipw_discrepancy:.1%}) {'[TREATMENT SELECTION CONVOLUTION / CONFOUNDING]' if confounder.is_aipw_confounded else '[ROBUST DOUBLY IDENTIFIED]'}")
+            if confounder.leamer_bound_min is not None:
+                rationale["key_evidence"].append(f"Leamer Extreme Bounds Analysis: β ∈ [{confounder.leamer_bound_min:.4f}, {confounder.leamer_bound_max:.4f}] {'[LEAMER FRAGILE - 0 IN EBA BOUNDS]' if confounder.is_leamer_fragile else '[LEAMER ROBUST - BOUNDS EXCLUDE 0]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -280,6 +288,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Siegel Repeated Medians Robust Slope: β_Siegel = {stability.siegel_slope:.4f} (Discrepancy Δ_Siegel = {stability.siegel_slope_discrepancy:.1%}) {'[50% BREAKDOWN OUTLIER DISTORTION]' if stability.is_siegel_outlier_distorted else '[RESISTANT TO GROSS OUTLIERS]'}")
             if stability.breusch_godfrey_p is not None:
                 rationale["key_evidence"].append(f"Breusch-Godfrey Higher-Order Autocorrelation: LM = {stability.breusch_godfrey_lm:.2f} (p = {stability.breusch_godfrey_p:.3e}) {'[HIGHER-ORDER SERIAL CORRELATION DETECTED]' if stability.has_higher_order_autocorrelation else '[INDEPENDENT RESIDUALS]'}")
+            if stability.runs_test_p is not None:
+                rationale["key_evidence"].append(f"Wald-Wolfowitz Runs Test for Residual Independence: Z = {stability.runs_test_z:.2f} (p = {stability.runs_test_p:.3e}) {'[NON-RANDOM RESIDUAL CLUSTERING / DRIFT]' if stability.has_runs_nonrandomness else '[INDEPENDENT RANDOM RESIDUALS]'}")
+            if stability.kendall_discrepancy is not None:
+                rationale["key_evidence"].append(f"Kendall Tau-b Rank Concordance: τ_b = {stability.kendall_tau_b:.4f} (Discrepancy Δ_Kendall = {stability.kendall_discrepancy:.1%}) {'[GROSS LEVERAGE DISTORTION / RANK CONFLICT]' if stability.is_kendall_distorted else '[ROBUST RANK CONCORDANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -427,6 +439,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Siegel Repeated Medians Robust Slope: β_Siegel = {stability.siegel_slope:.4f} (Δ_Siegel = {stability.siegel_slope_discrepancy:.1%})")
             if stability.breusch_godfrey_p is not None:
                 rationale["key_evidence"].append(f"Breusch-Godfrey Autocorrelation LM: LM = {stability.breusch_godfrey_lm:.2f} (p = {stability.breusch_godfrey_p:.3e})")
+            if simpsons.macaskill_test_p is not None:
+                rationale["key_evidence"].append(f"Macaskill Funnel Asymmetry Test: t = {simpsons.macaskill_test_t:.2f} (p = {simpsons.macaskill_test_p:.3e})")
+            if simpsons.bartlett_p is not None:
+                rationale["key_evidence"].append(f"Bartlett Scale Homogeneity: B = {simpsons.bartlett_stat:.2f} (p = {simpsons.bartlett_p:.3e})")
+            if confounder.aipw_discrepancy is not None:
+                rationale["key_evidence"].append(f"AIPW Doubly Robust Treatment Effect: τ_AIPW = {confounder.aipw_treatment_effect:.4f} (Δ_AIPW = {confounder.aipw_discrepancy:.1%})")
+            if confounder.leamer_bound_min is not None:
+                rationale["key_evidence"].append(f"Leamer Extreme Bounds Analysis: β ∈ [{confounder.leamer_bound_min:.4f}, {confounder.leamer_bound_max:.4f}]")
+            if stability.runs_test_p is not None:
+                rationale["key_evidence"].append(f"Wald-Wolfowitz Runs Test: Z = {stability.runs_test_z:.2f} (p = {stability.runs_test_p:.3e})")
+            if stability.kendall_discrepancy is not None:
+                rationale["key_evidence"].append(f"Kendall Tau-b Rank Concordance: τ_b = {stability.kendall_tau_b:.4f} (Δ_Kendall = {stability.kendall_discrepancy:.1%})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
