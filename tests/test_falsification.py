@@ -111,6 +111,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.thompson_sharp_p is not None
     assert audit.simpsons_audit.ansari_bradley_stat is not None
     assert audit.simpsons_audit.ansari_bradley_p is not None
+    # Verify Moreno variance-weighted funnel test and Siegel-Tukey scale test
+    assert audit.simpsons_audit.moreno_test_t is not None
+    assert audit.simpsons_audit.moreno_test_p is not None
+    assert audit.simpsons_audit.siegel_tukey_stat is not None
+    assert audit.simpsons_audit.siegel_tukey_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -235,6 +240,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.rubin_r_ratio is not None
         assert audit_coffee.confounder_audit.brunner_munzel_w is not None
         assert audit_coffee.confounder_audit.brunner_munzel_p is not None
+        # Check Rosenbaum-Rubin SMD balance and Imbens-Rubin normalized difference
+        assert audit_coffee.confounder_audit.smd_covariate_balance is not None
+        assert audit_coffee.confounder_audit.mahalanobis_distance is not None
+        assert audit_coffee.confounder_audit.imbens_normalized_diff is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -338,6 +347,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.dagostino_pearson_p is not None
     assert audit.stability_audit.glejser_t_stat is not None
     assert audit.stability_audit.glejser_p_value is not None
+    # Check Anderson-Darling EDF residual normality and Harvey multiplicative heteroskedasticity test
+    assert audit.stability_audit.anderson_darling_stat is not None
+    assert audit.stability_audit.anderson_darling_crit is not None
+    assert audit.stability_audit.harvey_lm_stat is not None
+    assert audit.stability_audit.harvey_lm_p is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -629,6 +643,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_glejser = narrator.answer_query("Explain Herbert Glejser absolute residual regression heteroskedasticity test", findings)
     assert "Glejser" in ans_glejser or "Heteroskedasticity" in ans_glejser or "Residual" in ans_glejser
+
+    ans_moreno = narrator.answer_query("Explain Moreno variance-weighted funnel plot asymmetry test", findings)
+    assert "Moreno" in ans_moreno or "Funnel" in ans_moreno or "Variance" in ans_moreno
+
+    ans_st = narrator.answer_query("Explain Siegel-Tukey rank extremes scale dispersion test", findings)
+    assert "Siegel" in ans_st or "Tukey" in ans_st or "Extremes" in ans_st or "Dispersion" in ans_st
+
+    ans_smd = narrator.answer_query("Explain Rosenbaum and Rubin standardized mean difference and Mahalanobis balance", findings)
+    assert "Rosenbaum" in ans_smd or "Rubin" in ans_smd or "SMD" in ans_smd or "Mahalanobis" in ans_smd
+
+    ans_imb = narrator.answer_query("Explain Imbens-Rubin normalized difference metric for common support overlap", findings)
+    assert "Imbens" in ans_imb or "Normalized" in ans_imb or "Overlap" in ans_imb or "Difference" in ans_imb
+
+    ans_ad = narrator.answer_query("Explain Anderson-Darling empirical distribution function residual normality test", findings)
+    assert "Anderson" in ans_ad or "Darling" in ans_ad or "Normality" in ans_ad
+
+    ans_harv = narrator.answer_query("Explain Andrew Harvey multiplicative heteroskedasticity LM test", findings)
+    assert "Harvey" in ans_harv or "Multiplicative" in ans_harv or "Heteroskedasticity" in ans_harv or "LM" in ans_harv
 
 
 def test_end_to_end_pipeline(tmp_path):

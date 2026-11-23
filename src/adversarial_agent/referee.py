@@ -137,6 +137,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Thompson-Sharp Random-Effects Funnel Test: t = {simpsons.thompson_sharp_t:.2f} (p = {simpsons.thompson_sharp_p:.3e}) {'[RANDOM-EFFECTS SMALL-STUDY ASYMMETRY]' if simpsons.is_thompson_asymmetric else '[SYMMETRIC BETWEEN-STRATA PRECISION]'}")
             if simpsons.ansari_bradley_p is not None:
                 rationale["key_evidence"].append(f"Ansari-Bradley Scale Dispersion: W = {simpsons.ansari_bradley_stat:.2f} (p = {simpsons.ansari_bradley_p:.3e}) {'[NON-PARAMETRIC SCALE DISPERSION HETEROGENEITY]' if simpsons.is_ansari_heterogeneous else '[HOMOGENEOUS STRATA DISPERSIONS]'}")
+            if simpsons.moreno_test_p is not None:
+                rationale["key_evidence"].append(f"Moreno Variance-Weighted Funnel Test: t = {simpsons.moreno_test_t:.2f} (p = {simpsons.moreno_test_p:.3e}) {'[VARIANCE-DEPENDENT REPORTING ASYMMETRY]' if simpsons.is_moreno_asymmetric else '[SYMMETRIC VARIANCE-WEIGHTED PRECISION]'}")
+            if simpsons.siegel_tukey_p is not None:
+                rationale["key_evidence"].append(f"Siegel-Tukey Rank Extremes Scale Test: W = {simpsons.siegel_tukey_stat:.2f} (p = {simpsons.siegel_tukey_p:.3e}) {'[EXTREME-RANK SCALE DIVERGENCE]' if simpsons.is_siegel_tukey_heterogeneous else '[EQUIDISPERSED STRATA SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -226,6 +230,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rubin Covariate Balance: B = {confounder.rubin_b_score:.1f}%, R = {confounder.rubin_r_ratio:.2f} {'[SEVERE COVARIATE IMBALANCE - MODEL DEPENDENT]' if confounder.is_rubin_imbalanced else '[SUFFICIENT COVARIATE BALANCE]'}")
             if confounder.brunner_munzel_p is not None:
                 rationale["key_evidence"].append(f"Brunner-Munzel Relative Treatment Effect: W = {confounder.brunner_munzel_w:.2f} (p = {confounder.brunner_munzel_p:.3e}) {'[STOCHASTIC TREATMENT EFFECT]' if confounder.has_brunner_munzel_effect else '[NO STOCHASTIC SEPARATION]'}")
+            if confounder.smd_covariate_balance is not None:
+                rationale["key_evidence"].append(f"Rosenbaum-Rubin SMD Balance: SMD = {confounder.smd_covariate_balance:.3f}, Mahalanobis D² = {confounder.mahalanobis_distance:.3f} {'[SEVERE OBSERVATIONAL COVARIATE IMBALANCE]' if confounder.is_smd_imbalanced else '[BALANCED OBSERVATIONAL COVARIATES]'}")
+            if confounder.imbens_normalized_diff is not None:
+                rationale["key_evidence"].append(f"Imbens-Rubin Normalized Difference: Δ_Norm = {confounder.imbens_normalized_diff:.3f} {'[POSITIVITY DEFICIT / TRUNCATED SUPPORT]' if confounder.is_imbens_diff_excessive else '[SATISFACTORY COMMON SUPPORT OVERLAP]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -316,6 +324,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"D'Agostino-Pearson Omnibus Normality: K² = {stability.dagostino_pearson_k2:.2f} (p = {stability.dagostino_pearson_p:.3e}) {'[RESIDUAL SKEW/KURTOSIS NON-NORMALITY]' if stability.is_dagostino_non_normal else '[NORMAL GAUSSIAN SKEW/KURTOSIS]'}")
             if stability.glejser_p_value is not None:
                 rationale["key_evidence"].append(f"Glejser Regression Heteroskedasticity: t = {stability.glejser_t_stat:.2f} (p = {stability.glejser_p_value:.3e}) {'[ERROR DISPERSION REGRESSOR-DEPENDENCE]' if stability.has_glejser_heteroskedasticity else '[HOMOSCEDASTIC ERROR SPREAD]'}")
+            if stability.anderson_darling_stat is not None:
+                rationale["key_evidence"].append(f"Anderson-Darling EDF Normality: A² = {stability.anderson_darling_stat:.3f} (crit 5% = {stability.anderson_darling_crit:.3f}) {'[EMPIRICAL CDF TAIL NON-NORMALITY]' if stability.is_anderson_non_normal else '[NORMAL EMPIRICAL CDF RESIDUALS]'}")
+            if stability.harvey_lm_p is not None:
+                rationale["key_evidence"].append(f"Harvey Multiplicative Heteroskedasticity: LM = {stability.harvey_lm_stat:.2f} (p = {stability.harvey_lm_p:.3e}) {'[EXPONENTIAL VARIANCE INFLATION]' if stability.has_harvey_heteroskedasticity else '[HOMOSCEDASTIC MULTIPLICATIVE VARIANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -499,6 +511,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"D'Agostino-Pearson Normality: K² = {stability.dagostino_pearson_k2:.2f} (p = {stability.dagostino_pearson_p:.3e})")
             if stability.glejser_p_value is not None:
                 rationale["key_evidence"].append(f"Glejser Heteroskedasticity: t = {stability.glejser_t_stat:.2f} (p = {stability.glejser_p_value:.3e})")
+            if simpsons.moreno_test_p is not None:
+                rationale["key_evidence"].append(f"Moreno Funnel Test: t = {simpsons.moreno_test_t:.2f} (p = {simpsons.moreno_test_p:.3e})")
+            if simpsons.siegel_tukey_p is not None:
+                rationale["key_evidence"].append(f"Siegel-Tukey Scale: W = {simpsons.siegel_tukey_stat:.2f} (p = {simpsons.siegel_tukey_p:.3e})")
+            if confounder.smd_covariate_balance is not None:
+                rationale["key_evidence"].append(f"Rosenbaum-Rubin SMD: {confounder.smd_covariate_balance:.3f}, Mahal D² = {confounder.mahalanobis_distance:.3f}")
+            if confounder.imbens_normalized_diff is not None:
+                rationale["key_evidence"].append(f"Imbens Normalized Diff: Δ_Norm = {confounder.imbens_normalized_diff:.3f}")
+            if stability.anderson_darling_stat is not None:
+                rationale["key_evidence"].append(f"Anderson-Darling Normality: A² = {stability.anderson_darling_stat:.3f}")
+            if stability.harvey_lm_p is not None:
+                rationale["key_evidence"].append(f"Harvey LM Heteroskedasticity: LM = {stability.harvey_lm_stat:.2f} (p = {stability.harvey_lm_p:.3e})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -270,6 +270,12 @@ with col_right:
                         if simpsons.get("ansari_bradley_p") is not None:
                             ab_flag = " ⚠️ Unequal Rank-Sum Dispersion (p < 0.05)" if simpsons.get("is_ansari_heterogeneous") else " (Homogeneous Scale Spread)"
                             st.markdown(f"**Ansari-Bradley Scale Dispersion:** W = `{simpsons.get('ansari_bradley_stat', 0.0):.2f}` (p = `{simpsons.get('ansari_bradley_p', 0.0):.3e}`){ab_flag}")
+                        if simpsons.get("moreno_test_p") is not None:
+                            moreno_flag = " ⚠️ Variance-Dependent Funnel Asymmetry (p < 0.05)" if simpsons.get("is_moreno_asymmetric") else " (Symmetric Precision)"
+                            st.markdown(f"**Moreno Funnel Asymmetry Test:** t = `{simpsons.get('moreno_test_t', 0.0):.2f}` (p = `{simpsons.get('moreno_test_p', 0.0):.3e}`){moreno_flag}")
+                        if simpsons.get("siegel_tukey_p") is not None:
+                            st_flag = " ⚠️ Unequal Rank Extremes Dispersion (p < 0.05)" if simpsons.get("is_siegel_tukey_heterogeneous") else " (Equidispersed Extremes)"
+                            st.markdown(f"**Siegel-Tukey Rank Extremes Scale:** W = `{simpsons.get('siegel_tukey_stat', 0.0):.2f}` (p = `{simpsons.get('siegel_tukey_p', 0.0):.3e}`){st_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -328,6 +334,12 @@ with col_right:
                         if conf_aud.get("brunner_munzel_p") is not None:
                             bm_flag = " (Significant Relative Effect)" if conf_aud.get("has_brunner_munzel_effect") else " ⚠️ No Stochastic Effect (p ≥ 0.05)"
                             st.markdown(f"**Brunner-Munzel Relative Effect:** W = `{conf_aud.get('brunner_munzel_w', 0.0):.2f}` (p = `{conf_aud.get('brunner_munzel_p', 0.0):.3e}`){bm_flag}")
+                        if conf_aud.get("smd_covariate_balance") is not None:
+                            smd_flag = " ⚠️ Severe Covariate Imbalance (SMD > 0.10 or D² > 0.25)" if conf_aud.get("is_smd_imbalanced") else " (Balanced Covariates)"
+                            st.markdown(f"**Rosenbaum-Rubin SMD & Mahalanobis:** SMD = `{conf_aud['smd_covariate_balance']:.3f}`, D² = `{conf_aud.get('mahalanobis_distance', 0.0):.3f}`{smd_flag}")
+                        if conf_aud.get("imbens_normalized_diff") is not None:
+                            imb_flag = " ⚠️ Positivity Deficit (Δ_Norm > 0.25)" if conf_aud.get("is_imbens_diff_excessive") else " (Adequate Support)"
+                            st.markdown(f"**Imbens-Rubin Normalized Diff:** Δ_Norm = `{conf_aud['imbens_normalized_diff']:.3f}`{imb_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -440,6 +452,12 @@ with col_right:
                         if stab_aud.get("glejser_p_value") is not None:
                             gl_flag = f" ⚠️ Scale Dispersion Scales with X (p = {stab_aud['glejser_p_value']:.3e})" if stab_aud.get("has_glejser_heteroskedasticity") else f" (Homoscedastic Error Spread, p = {stab_aud['glejser_p_value']:.3e})"
                             st.markdown(f"**Glejser Heteroskedasticity Test:** t = `{stab_aud.get('glejser_t_stat', 0.0):.2f}` (p = `{stab_aud['glejser_p_value']:.3e}`){gl_flag}")
+                        if stab_aud.get("anderson_darling_stat") is not None:
+                            ad_flag = f" ⚠️ Heavy Tail Non-Gaussianity (A² > {stab_aud.get('anderson_darling_crit', 0.75):.3f})" if stab_aud.get("is_anderson_non_normal") else f" (Normal Empirical CDF, A² = {stab_aud['anderson_darling_stat']:.3f})"
+                            st.markdown(f"**Anderson-Darling EDF Normality:** A² = `{stab_aud['anderson_darling_stat']:.3f}` (5% crit = `{stab_aud.get('anderson_darling_crit', 0.75):.3f}`){ad_flag}")
+                        if stab_aud.get("harvey_lm_p") is not None:
+                            harv_flag = f" ⚠️ Multiplicative Heteroskedasticity (p = {stab_aud['harvey_lm_p']:.3e})" if stab_aud.get("has_harvey_heteroskedasticity") else f" (Homoscedastic Log Variance, p = {stab_aud['harvey_lm_p']:.3e})"
+                            st.markdown(f"**Harvey Multiplicative Heteroskedasticity:** LM = `{stab_aud.get('harvey_lm_stat', 0.0):.2f}` (p = `{stab_aud['harvey_lm_p']:.3e}`){harv_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -702,6 +720,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Ralph D'Agostino and E. S. Pearson omnibus normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Ralph D'Agostino and E. S. Pearson omnibus normality test", findings, dataset_name=dataset_name)
 
+            sug_col31, sug_col32, sug_col33 = st.columns(3)
+            with sug_col31:
+                if st.button("📊 Moreno Funnel Test", key="sug_moreno"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Moreno variance-weighted funnel plot asymmetry test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Moreno variance-weighted funnel plot asymmetry test", findings, dataset_name=dataset_name)
+            with sug_col32:
+                if st.button("⚖️ Rosenbaum-Rubin SMD Balance", key="sug_smd"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Rosenbaum and Rubin standardized mean difference and Mahalanobis balance"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Rosenbaum and Rubin standardized mean difference and Mahalanobis balance", findings, dataset_name=dataset_name)
+            with sug_col33:
+                if st.button("📐 Anderson-Darling Normality", key="sug_ad"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Anderson-Darling empirical distribution function residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Anderson-Darling empirical distribution function residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -785,6 +820,10 @@ with col_right:
                     "Thompson_Sharp_p": f"{simp.get('thompson_sharp_p', 0.0):.3e}" if simp.get("thompson_sharp_p") is not None else "N/A",
                     "Ansari_Bradley_W": f"{simp.get('ansari_bradley_stat', 0.0):.2f}" if simp.get("ansari_bradley_stat") is not None else "N/A",
                     "Ansari_Bradley_p": f"{simp.get('ansari_bradley_p', 0.0):.3e}" if simp.get("ansari_bradley_p") is not None else "N/A",
+                    "Moreno_Funnel_t": f"{simp.get('moreno_test_t', 0.0):.2f}" if simp.get("moreno_test_t") is not None else "N/A",
+                    "Moreno_Funnel_p": f"{simp.get('moreno_test_p', 0.0):.3e}" if simp.get("moreno_test_p") is not None else "N/A",
+                    "Siegel_Tukey_W": f"{simp.get('siegel_tukey_stat', 0.0):.2f}" if simp.get("siegel_tukey_stat") is not None else "N/A",
+                    "Siegel_Tukey_p": f"{simp.get('siegel_tukey_p', 0.0):.3e}" if simp.get("siegel_tukey_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -828,6 +867,9 @@ with col_right:
                     "Rubin_R_Ratio": f"{conf.get('rubin_r_ratio', 0.0):.2f}" if conf.get("rubin_r_ratio") is not None else "N/A",
                     "Brunner_Munzel_W": f"{conf.get('brunner_munzel_w', 0.0):.2f}" if conf.get("brunner_munzel_w") is not None else "N/A",
                     "Brunner_Munzel_p": f"{conf.get('brunner_munzel_p', 0.0):.3e}" if conf.get("brunner_munzel_p") is not None else "N/A",
+                    "Rosenbaum_Rubin_SMD": f"{conf.get('smd_covariate_balance', 0.0):.3f}" if conf.get("smd_covariate_balance") is not None else "N/A",
+                    "Mahalanobis_Distance": f"{conf.get('mahalanobis_distance', 0.0):.3f}" if conf.get("mahalanobis_distance") is not None else "N/A",
+                    "Imbens_Normalized_Diff": f"{conf.get('imbens_normalized_diff', 0.0):.3f}" if conf.get("imbens_normalized_diff") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -874,6 +916,9 @@ with col_right:
                     "DAgostino_Pearson_p": f"{stab.get('dagostino_pearson_p', 0.0):.3e}" if stab.get("dagostino_pearson_p") is not None else "N/A",
                     "Glejser_t": f"{stab.get('glejser_t_stat', 0.0):.2f}" if stab.get("glejser_t_stat") is not None else "N/A",
                     "Glejser_p": f"{stab.get('glejser_p_value', 0.0):.3e}" if stab.get("glejser_p_value") is not None else "N/A",
+                    "Anderson_Darling_A2": f"{stab.get('anderson_darling_stat', 0.0):.3f}" if stab.get("anderson_darling_stat") is not None else "N/A",
+                    "Harvey_LM_Stat": f"{stab.get('harvey_lm_stat', 0.0):.2f}" if stab.get("harvey_lm_stat") is not None else "N/A",
+                    "Harvey_LM_p": f"{stab.get('harvey_lm_p', 0.0):.3e}" if stab.get("harvey_lm_p") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
