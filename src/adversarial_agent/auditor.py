@@ -143,6 +143,12 @@ class SimpsonsParadoxAudit:
     sukhatme_stat_z: Optional[float] = None
     sukhatme_p_value: Optional[float] = None
     is_sukhatme_heterogeneous: bool = False
+    tang_test_t: Optional[float] = None
+    tang_test_p: Optional[float] = None
+    is_tang_asymmetric: bool = False
+    capon_stat_z: Optional[float] = None
+    capon_p_value: Optional[float] = None
+    is_capon_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -264,6 +270,11 @@ class ConfounderAudit:
     austin_ks_stat: Optional[float] = None
     austin_ks_p_value: Optional[float] = None
     is_austin_ks_imbalanced: bool = False
+    l1_multivariate_imbalance: Optional[float] = None
+    is_l1_imbalanced: bool = False
+    rubin_parallelism_f: Optional[float] = None
+    rubin_parallelism_p: Optional[float] = None
+    is_rubin_nonparallel: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -393,6 +404,12 @@ class StabilityAudit:
     max_covratio_dev: Optional[float] = None
     covratio_outlier_count: int = 0
     is_covratio_influential: bool = False
+    hosking_l_stat: Optional[float] = None
+    hosking_l_p: Optional[float] = None
+    is_hosking_non_normal: bool = False
+    max_atkinson_distance: Optional[float] = None
+    atkinson_outlier_count: int = 0
+    is_atkinson_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -5348,6 +5365,327 @@ def covratio_influence_test(
         return None, 0, False
 
 
+def tang_funnel_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Tang & Liu's (2000) Linear Regression Funnel Asymmetry Test.
+
+    Evaluates funnel asymmetry in stratified 2x2 contingency tables by regressing
+    standardized effect size z_k = theta_k / SE_k on stratum precision sqrt(n_k):
+      z_k = alpha + beta * sqrt(n_k) + epsilon_k.
+    Under H_0: beta = 0 (symmetry and absence of small-study sample-size distortion).
+    t_Tang = beta_hat / SE(beta_hat) ~ t(K - 2).
+    Rejection (p < 0.05 or |t_Tang| >= 1.96) flags significant sample-size distortion across strata.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        z_list = []
+        prec_list = []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                if len(tab) == 4:
+                    a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+                else:
+                    tab = np.array(tab, dtype=float)
+                    a, b = float(tab[0, 0]), float(tab[0, 1])
+                    c, d = float(tab[1, 0]), float(tab[1, 1])
+            elif isinstance(tab, np.ndarray) and tab.shape == (2, 2):
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            else:
+                arr = np.array(tab, dtype=float).ravel()
+                a, b, c, d = float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3])
+            # Haldane-Anscombe continuity correction
+            a_c, b_c, c_c, d_c = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            theta = np.log((a_c * d_c) / (b_c * c_c))
+            v_k = 1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c
+            se_k = np.sqrt(v_k)
+            n_k = a + b + c + d
+            z_k = theta / se_k
+            z_list.append(z_k)
+            prec_list.append(np.sqrt(max(1.0, n_k)))
+
+        k = len(z_list)
+        if k < 3:
+            return None, None, False
+
+        z_arr = np.array(z_list, dtype=float)
+        p_arr = np.array(prec_list, dtype=float)
+
+        if np.std(p_arr) < 1e-9:
+            return 0.0, 1.0, False
+
+        X_mat = np.column_stack([np.ones(k), p_arr])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, z_arr, rcond=None)
+        res = z_arr - X_mat @ beta
+
+        df_e = max(1, k - 2)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_slope = np.sqrt(max(1e-12, cov_mat[1, 1]))
+
+        t_tang = float(beta[1] / se_slope)
+        p_val = float(2.0 * stats.t.sf(abs(t_tang), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_tang, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def capon_scale_dispersion_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Capon's (1961) Expected Normal Order Statistics Scale Dispersion Test.
+
+    Evaluates non-parametric scale dispersion between two conditioning strata.
+    Centers observations by their stratum medians u_i = s_1i - median(s_1), v_j = s_2j - median(s_2).
+    Ranks the combined absolute deviations |u_i|, |v_j| (N = n_1 + n_2).
+    Assigns normal order score weights using Blom's (1958) formula:
+      a(i) = [Phi^{-1}((r_i - 3/8) / (N + 1/4))]^2.
+    Test statistic C = sum_{i in s_1} a(i).
+    Under H_0: sigma_1 = sigma_2, E[C] = n_1 * a_bar, Var(C) = [n_1 * n_2 / (N(N-1))] * sum (a(i) - a_bar)^2.
+    Z_Capon = (C - E[C]) / sqrt(Var(C)) ~ N(0, 1).
+    Rejection (|Z_Capon| >= 1.96, p < 0.05) certifies non-parametric scale dispersion heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        s1 = valid_samples[0]
+        s2 = valid_samples[1]
+        n1 = len(s1)
+        n2 = len(s2)
+        N = n1 + n2
+
+        u = np.abs(s1 - np.median(s1))
+        v = np.abs(s2 - np.median(s2))
+        combined = np.concatenate([u, v])
+
+        ranks = stats.rankdata(combined)
+        q = np.clip((ranks - 0.375) / (N + 0.25), 1e-6, 1.0 - 1e-6)
+        norm_scores = stats.norm.ppf(q) ** 2
+
+        c_stat = float(np.sum(norm_scores[:n1]))
+        a_bar = float(np.mean(norm_scores))
+        var_a = float(np.sum((norm_scores - a_bar) ** 2))
+        var_c = (n1 * n2 / (N * (N - 1.0))) * var_a
+
+        if var_c < 1e-12:
+            return 0.0, 1.0, False
+
+        z_capon = float((c_stat - n1 * a_bar) / np.sqrt(var_c))
+        p_val = float(2.0 * stats.norm.sf(abs(z_capon)))
+        is_hetero = bool(p_val < 0.05)
+        return z_capon, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def l1_multivariate_imbalance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], bool]:
+    """Calculates Stefano M. Iacus, Gary King, & Giuseppe Porro's (2011, 2012) L1 Multivariate Imbalance Metric.
+
+    Evaluates global empirical distributional divergence of candidate confounder Z between exposure cohorts.
+    Dichotomizes exposure X at median into treated (D = 1) and control (D = 0) cohorts.
+    Discretizes confounder Z into empirical quantile bins and calculates:
+      L1 = 0.5 * sum_{k=1}^K |n_{1k}/n_1 - n_{0k}/n_0| in [0, 1].
+    Threshold: L1 > 0.25 certifies severe empirical multivariate imbalance and lack of causal common support.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, False
+    try:
+        med_x = float(np.median(x))
+        treated = (x > med_x)
+        z1 = z[treated]
+        z0 = z[~treated]
+        n1 = len(z1)
+        n0 = len(z0)
+        if n1 < 6 or n0 < 6:
+            return None, False
+
+        n_bins = int(np.clip(np.floor(np.cbrt(n) * 2), 4, 10))
+        quantiles = np.linspace(0, 1, n_bins + 1)
+        bin_edges = np.quantile(z, quantiles)
+        bin_edges[0] -= 1e-6
+        bin_edges[-1] += 1e-6
+
+        hist1, _ = np.histogram(z1, bins=bin_edges)
+        hist0, _ = np.histogram(z0, bins=bin_edges)
+
+        freq1 = hist1 / float(n1)
+        freq0 = hist0 / float(n0)
+
+        l1_stat = float(0.5 * np.sum(np.abs(freq1 - freq0)))
+        is_imbal = bool(l1_stat > 0.25)
+        return l1_stat, is_imbal
+    except Exception:
+        return None, False
+
+
+def rubin_parallelism_interaction_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Donald B. Rubin's (1979) Regression Surface Non-Parallelism Test.
+
+    Evaluates whether the slope of outcome Y on confounder Z differs across exposure cohorts (D = I(X > median(X))):
+      Restricted Model (parallel surfaces):   Y = b_0 + b_1*D + b_2*Z + e
+      Unrestricted Model (interaction):      Y = b_0 + b_1*D + b_2*Z + gamma*(D*Z) + eta
+      F_Rubin = ((SSR_R - SSR_UR) / 1) / (SSR_UR / (N - 4)) ~ F(1, N - 4).
+    Rejection (F >= 3.841, p < 0.05) certifies non-parallel response surfaces, proving that linear adjustment
+    is misspecified due to treatment effect heterogeneity.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9 or np.std(z) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x).astype(float)
+        if np.std(d) < 1e-9:
+            return None, None, False
+
+        # Restricted design matrix [1, D, Z]
+        X_res = np.column_stack([np.ones(n), d, z])
+        b_res, _, _, _ = np.linalg.lstsq(X_res, y, rcond=None)
+        ssr_res = float(np.sum((y - X_res @ b_res) ** 2))
+
+        # Unrestricted design matrix [1, D, Z, D * Z]
+        X_unres = np.column_stack([np.ones(n), d, z, d * z])
+        b_unres, _, _, _ = np.linalg.lstsq(X_unres, y, rcond=None)
+        ssr_unres = float(np.sum((y - X_unres @ b_unres) ** 2))
+
+        df_num = 1
+        df_den = max(1, n - 4)
+
+        if ssr_unres < 1e-12:
+            return 0.0, 1.0, False
+
+        f_stat = float(((ssr_res - ssr_unres) / df_num) / (ssr_unres / df_den))
+        f_stat = max(0.0, f_stat)
+        p_val = float(stats.f.sf(f_stat, df_num, df_den))
+        is_nonparallel = bool(f_stat >= 3.841 and p_val < 0.05)
+        return f_stat, p_val, is_nonparallel
+    except Exception:
+        return None, None, False
+
+
+def hosking_l_moments_normality_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates J. R. M. Hosking's (1990) L-Moments Ratio Residual Normality Test.
+
+    Evaluates standardized OLS residuals using unbiased sample L-moments (linear combinations of order statistics):
+      t_3 = l_3 / l_2 (sample L-skewness),  t_4 = l_4 / l_2 (sample L-kurtosis).
+    For a Gaussian distribution, tau_3 = 0, tau_4 = 0.122602.
+    Asymptotic variances: Var(t_3) = 0.1866 / n,  Var(t_4) = 0.0883 / n.
+      L_stat = (t_3^2 / Var(t_3)) + ((t_4 - 0.122602)^2 / Var(t_4)) ~ Chi-squared(2).
+    Rejection (L_stat >= 5.991, p < 0.05) certifies residual non-Gaussianity robust against extreme outlier distortion.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 4 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        s = float(np.std(res))
+        if s < 1e-12:
+            return 0.0, 1.0, False
+
+        z_sorted = np.sort(res / s)
+
+        i_vec = np.arange(1, n + 1, dtype=float)
+        c1 = i_vec - 1.0
+        c1_rev = n - i_vec
+
+        comb_n_2 = n * (n - 1.0) / 2.0
+        comb_n_3 = n * (n - 1.0) * (n - 2.0) / 6.0
+        comb_n_4 = n * (n - 1.0) * (n - 2.0) * (n - 3.0) / 24.0
+
+        if comb_n_4 < 1.0:
+            return None, None, False
+
+        w2 = (c1 - c1_rev)
+        l2 = float(np.sum(w2 * z_sorted) / (2.0 * comb_n_2))
+        if abs(l2) < 1e-12:
+            return 0.0, 1.0, False
+
+        w3 = (c1 * (c1 - 1.0) / 2.0 - 2.0 * c1 * c1_rev + c1_rev * (c1_rev - 1.0) / 2.0)
+        l3 = float(np.sum(w3 * z_sorted) / (3.0 * comb_n_3))
+
+        w4 = (c1 * (c1 - 1.0) * (c1 - 2.0) / 6.0
+              - 3.0 * (c1 * (c1 - 1.0) / 2.0) * c1_rev
+              + 3.0 * c1 * (c1_rev * (c1_rev - 1.0) / 2.0)
+              - c1_rev * (c1_rev - 1.0) * (c1_rev - 2.0) / 6.0)
+        l4 = float(np.sum(w4 * z_sorted) / (4.0 * comb_n_4))
+
+        t3 = l3 / l2
+        t4 = l4 / l2
+
+        var_t3 = 0.1866 / n
+        var_t4 = 0.0883 / n
+
+        l_stat = float((t3 ** 2) / var_t3 + ((t4 - 0.122602) ** 2) / var_t4)
+        p_val = float(stats.chi2.sf(l_stat, df=2))
+        is_non_normal = bool(l_stat >= 5.991 and p_val < 0.05)
+        return l_stat, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def atkinson_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Anthony C. Atkinson's (1981, 1985) Modified Leverage-Weighted Influence Metric.
+
+    Evaluates observation influence by amplifying studentized deleted residuals with design leverage:
+      A_i = |t_i| * sqrt([(n - p) / p] * [h_ii / (1 - h_ii)]),
+    where t_i = e_i * sqrt((n - p - 1) / (SSE * (1 - h_ii) - e_i^2)).
+    Cutoff threshold: A_thresh = 2.0 * sqrt(p / (n - p)).
+    Flags influential observations that distort OLS parameters without triggering standard Cook's distance alerts.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        sse = float(np.sum(res ** 2))
+        if sse < 1e-12:
+            return 0.0, 0, False
+
+        # Externally studentized (deleted) residuals
+        denom = sse * (1.0 - h_diag) - (res ** 2)
+        denom = np.maximum(1e-12, denom)
+        t_deleted = res * np.sqrt((n - p - 1.0) / denom)
+
+        leverage_factor = np.sqrt(((n - p) / float(p)) * (h_diag / (1.0 - h_diag)))
+        atkinson_scores = np.abs(t_deleted) * leverage_factor
+
+        threshold = 2.0 * np.sqrt(float(p) / max(1.0, float(n - p)))
+        max_atkinson = float(np.max(atkinson_scores))
+        outlier_count = int(np.sum(atkinson_scores > threshold))
+        is_influential = bool(outlier_count > 0 and max_atkinson > threshold)
+        return max_atkinson, outlier_count, is_influential
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -5721,11 +6059,14 @@ class DevilsAdvocateAgent:
                 lfk_val, is_lfk_asym = lfk_index_asymmetry_test(tables_2x2)
                 # Stanley & Doucouliagos (2012, 2014) PET-PEESE Meta-Regression Falsification Test
                 pet_t, pet_p, peese_t, peese_p, is_pet_asym = pet_peese_meta_regression_test(tables_2x2)
+                # Tang & Liu (2000) Linear Regression Funnel Asymmetry Test
+                tang_t, tang_p, is_tang_asym = tang_funnel_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
             bd_stat, bd_p = None, None
             pet_t, pet_p, peese_t, peese_p, is_pet_asym = None, None, None, None, False
+            tang_t, tang_p, is_tang_asym = None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -5807,6 +6148,8 @@ class DevilsAdvocateAgent:
             conover_stat, conover_p, is_conover_hetero = conover_squared_ranks_scale_test(kw_samples)
             # B. V. Sukhatme (1957, 1958) Non-Parametric Rank-Order Scale Dispersion Test
             sukhatme_z, sukhatme_p, is_sukhatme_hetero = sukhatme_scale_dispersion_test(kw_samples)
+            # Capon (1961) Expected Normal Order Statistics Scale Dispersion Test
+            capon_z, capon_p, is_capon_hetero = capon_scale_dispersion_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -5872,6 +6215,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [PEESE Limit: t={peese_t:.2f}, p={peese_p:.3e}]"
         if sukhatme_p is not None:
             cmh_note += f" [Sukhatme Scale: Z={sukhatme_z:.2f}, p={sukhatme_p:.3e}]"
+        if tang_p is not None:
+            cmh_note += f" [Tang Funnel: t={tang_t:.2f}, p={tang_p:.3e}]"
+        if capon_p is not None:
+            cmh_note += f" [Capon Scale: Z={capon_z:.2f}, p={capon_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -6012,6 +6359,12 @@ class DevilsAdvocateAgent:
             sukhatme_stat_z=sukhatme_z,
             sukhatme_p_value=sukhatme_p,
             is_sukhatme_heterogeneous=is_sukhatme_hetero,
+            tang_test_t=tang_t,
+            tang_test_p=tang_p,
+            is_tang_asymmetric=is_tang_asym,
+            capon_stat_z=capon_z,
+            capon_p_value=capon_p,
+            is_capon_heterogeneous=is_capon_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -6173,6 +6526,8 @@ class DevilsAdvocateAgent:
         caliper_rate, caliper_rad, is_caliper_disc = None, None, False
         gps_r, gps_t, gps_p, is_gps_imbal = None, None, None, False
         austin_ks_d, austin_ks_p, is_austin_ks_imbal = None, None, False
+        l1_val, is_l1_imbal = None, False
+        rubin_f, rubin_p, is_rubin_nonpar = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -6223,6 +6578,10 @@ class DevilsAdvocateAgent:
                     gps_r, gps_t, gps_p, is_gps_imbal = imai_van_dyk_gps_balance_test(x_mal, z_mal)
                     # Peter C. Austin (2008, 2011) Kolmogorov-Smirnov Distributional Covariate Balance Test
                     austin_ks_d, austin_ks_p, is_austin_ks_imbal = austin_ks_covariate_balance_test(x_mal, z_mal)
+                    # Stefano M. Iacus, Gary King, & Giuseppe Porro (2011, 2012) L1 Multivariate Imbalance Metric
+                    l1_val, is_l1_imbal = l1_multivariate_imbalance_test(x_mal, z_mal)
+                    # Donald B. Rubin (1979) Regression Surface Non-Parallelism Test
+                    rubin_f, rubin_p, is_rubin_nonpar = rubin_parallelism_interaction_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -6381,6 +6740,11 @@ class DevilsAdvocateAgent:
             austin_ks_stat=austin_ks_d,
             austin_ks_p_value=austin_ks_p,
             is_austin_ks_imbalanced=is_austin_ks_imbal,
+            l1_multivariate_imbalance=l1_val,
+            is_l1_imbalanced=is_l1_imbal,
+            rubin_parallelism_f=rubin_f,
+            rubin_parallelism_p=rubin_p,
+            is_rubin_nonparallel=is_rubin_nonpar,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -6659,6 +7023,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Belsley, Kuh, & Welsch (1980) COVRATIO Covariance Determinant Influence Diagnostic
         covratio_max_dev, covratio_cnt, is_covratio_infl = covratio_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: J. R. M. Hosking (1990) L-Moments Ratio Residual Normality Test
+        hosking_l, hosking_p, is_hosking_non_normal = hosking_l_moments_normality_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Anthony C. Atkinson (1981, 1985) Modified Leverage-Weighted Influence Metric
+        atkinson_max, atkinson_cnt, is_atkinson_infl = atkinson_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -6813,6 +7183,12 @@ class DevilsAdvocateAgent:
             max_covratio_dev=covratio_max_dev,
             covratio_outlier_count=covratio_cnt,
             is_covratio_influential=is_covratio_infl,
+            hosking_l_stat=hosking_l,
+            hosking_l_p=hosking_p,
+            is_hosking_non_normal=is_hosking_non_normal,
+            max_atkinson_distance=atkinson_max,
+            atkinson_outlier_count=atkinson_cnt,
+            is_atkinson_influential=is_atkinson_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

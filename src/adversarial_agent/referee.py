@@ -153,6 +153,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"PET-PEESE Meta-Regression: t_PET = {simpsons.pet_test_t:.2f} (p = {simpsons.pet_test_p:.3e}), t_PEESE = {simpsons.peese_test_t:.2f} {'[SMALL-STRATUM SELECTION ASYMMETRY]' if simpsons.is_pet_asymmetric else '[GENUINE INFINITE-PRECISION LIMIT]'}")
             if simpsons.sukhatme_p_value is not None:
                 rationale["key_evidence"].append(f"Sukhatme Rank-Order Scale Test: Z = {simpsons.sukhatme_stat_z:.2f} (p = {simpsons.sukhatme_p_value:.3e}) {'[NON-PARAMETRIC SCALE SPREAD DIVERGENCE]' if simpsons.is_sukhatme_heterogeneous else '[HOMOGENEOUS STRATUM SCALE DISPERSION]'}")
+            if simpsons.tang_test_p is not None:
+                rationale["key_evidence"].append(f"Tang-Liu Linear Funnel Test: t = {simpsons.tang_test_t:.2f} (p = {simpsons.tang_test_p:.3e}) {'[PRECISION-WEIGHTED ASYMMETRY]' if simpsons.is_tang_asymmetric else '[SYMMETRIC LINEAR PRECISION LIMIT]'}")
+            if simpsons.capon_p_value is not None:
+                rationale["key_evidence"].append(f"Capon Normal Scores Scale Test: Z = {simpsons.capon_stat_z:.2f} (p = {simpsons.capon_p_value:.3e}) {'[LMP NORMAL-SCORES SCALE DIVERGENCE]' if simpsons.is_capon_heterogeneous else '[HOMOGENEOUS NORMAL ORDER SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -258,6 +262,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Imai-van Dyk GPS Covariate Balance: r_GPS = {confounder.gps_balance_r:.3f} (t = {confounder.gps_balance_t:.2f}, p = {confounder.gps_balance_p:.3e}) {'[RESIDUAL COVARIATE DEPENDENCE / PROPENSITY IMBALANCE]' if confounder.is_gps_imbalanced else '[GENERALIZED PROPENSITY BALANCE CONFIRMED]'}")
             if confounder.austin_ks_p_value is not None:
                 rationale["key_evidence"].append(f"Austin Kolmogorov-Smirnov Distributional Balance: D_KS = {confounder.austin_ks_stat:.3f} (p = {confounder.austin_ks_p_value:.3e}) {'[HIGHER-MOMENT COVARIATE IMBALANCE]' if confounder.is_austin_ks_imbalanced else '[SATISFACTORY DISTRIBUTIONAL OVERLAP]'}")
+            if confounder.l1_multivariate_imbalance is not None:
+                rationale["key_evidence"].append(f"Iacus-King-Porro L1 Distance: L1 = {confounder.l1_multivariate_imbalance:.3f} {'[SEVERE MULTIVARIATE IMBALANCE / POSITIVITY DEFICIT]' if confounder.is_l1_imbalanced else '[SUFFICIENT COMMON SUPPORT OVERLAP]'}")
+            if confounder.rubin_parallelism_p is not None:
+                rationale["key_evidence"].append(f"Rubin Regression Surface Parallelism: F = {confounder.rubin_parallelism_f:.2f} (p = {confounder.rubin_parallelism_p:.3e}) {'[NON-PARALLEL RESPONSE SURFACES / EFFECT HETEROGENEITY]' if confounder.is_rubin_nonparallel else '[PARALLEL COVARIATE RESPONSE SLOPES]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -364,6 +372,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Kuiper Invariant EDF Normality: V = {stability.kuiper_v_stat:.3f} (V* = {stability.kuiper_v_star:.3f}, p = {stability.kuiper_p_value:.3e}) {'[CYCLIC/TAIL EDF RESIDUAL NON-NORMALITY]' if stability.is_kuiper_non_normal else '[INVARIANT EDF GAUSSIAN RESIDUALS]'}")
             if stability.max_covratio_dev is not None:
                 rationale["key_evidence"].append(f"Belsley COVRATIO Covariance Influence: Max |COVRATIO - 1| = {stability.max_covratio_dev:.3f} ({stability.covratio_outlier_count} influential) {'[COVARIANCE PRECISION DEGRADATION]' if stability.is_covratio_influential else '[STABLE COVARIANCE DETERMINANT]'}")
+            if stability.hosking_l_p is not None:
+                rationale["key_evidence"].append(f"Hosking L-Moments Ratio Normality: L = {stability.hosking_l_stat:.2f} (p = {stability.hosking_l_p:.3e}) {'[L-MOMENTS RESIDUAL NON-NORMALITY]' if stability.is_hosking_non_normal else '[L-MOMENTS GAUSSIAN RESIDUAL FIT]'}")
+            if stability.max_atkinson_distance is not None:
+                rationale["key_evidence"].append(f"Atkinson Modified Influence: Max A = {stability.max_atkinson_distance:.2f} ({stability.atkinson_outlier_count} influential) {'[LEVERAGE-AMPLIFIED RESIDUAL DISTORTION]' if stability.is_atkinson_influential else '[BOUNDED ATKINSON INFLUENCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -595,6 +607,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Kuiper Invariant Normality: V* = {stability.kuiper_v_star:.3f} (p = {stability.kuiper_p_value:.3e})")
             if stability.max_covratio_dev is not None:
                 rationale["key_evidence"].append(f"COVRATIO Influence: Max Dev = {stability.max_covratio_dev:.3f}")
+            if simpsons.tang_test_p is not None:
+                rationale["key_evidence"].append(f"Tang-Liu Funnel Test: t = {simpsons.tang_test_t:.2f} (p = {simpsons.tang_test_p:.3e})")
+            if simpsons.capon_p_value is not None:
+                rationale["key_evidence"].append(f"Capon Scale Test: Z = {simpsons.capon_stat_z:.2f} (p = {simpsons.capon_p_value:.3e})")
+            if confounder.l1_multivariate_imbalance is not None:
+                rationale["key_evidence"].append(f"Iacus-King-Porro L1 Distance: L1 = {confounder.l1_multivariate_imbalance:.3f}")
+            if confounder.rubin_parallelism_p is not None:
+                rationale["key_evidence"].append(f"Rubin Parallelism Test: F = {confounder.rubin_parallelism_f:.2f} (p = {confounder.rubin_parallelism_p:.3e})")
+            if stability.hosking_l_p is not None:
+                rationale["key_evidence"].append(f"Hosking L-Moments Normality: L = {stability.hosking_l_stat:.2f} (p = {stability.hosking_l_p:.3e})")
+            if stability.max_atkinson_distance is not None:
+                rationale["key_evidence"].append(f"Atkinson Influence: Max A = {stability.max_atkinson_distance:.2f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -294,6 +294,12 @@ with col_right:
                         if simpsons.get("sukhatme_p_value") is not None:
                             sukh_flag = " ⚠️ Unequal Scale Dispersion (p < 0.05)" if simpsons.get("is_sukhatme_heterogeneous") else " (Homogeneous Scale Spread)"
                             st.markdown(f"**Sukhatme Rank Dispersion Scale:** Z = `{simpsons.get('sukhatme_stat_z', 0.0):.2f}` (p = `{simpsons.get('sukhatme_p_value', 0.0):.3e}`){sukh_flag}")
+                        if simpsons.get("tang_test_p") is not None:
+                            tang_flag = " ⚠️ Small-Study Reporting Bias (p < 0.05)" if simpsons.get("is_tang_asymmetric") else " (Symmetric Precision Limit)"
+                            st.markdown(f"**Tang-Liu Funnel Asymmetry:** t = `{simpsons.get('tang_test_t', 0.0):.2f}` (p = `{simpsons.get('tang_test_p', 0.0):.3e}`){tang_flag}")
+                        if simpsons.get("capon_p_value") is not None:
+                            capon_flag = " ⚠️ LMP Normal Order Scale Dispersion (p < 0.05)" if simpsons.get("is_capon_heterogeneous") else " (Homogeneous Normal Order Spread)"
+                            st.markdown(f"**Capon Normal Scores Scale:** Z = `{simpsons.get('capon_stat_z', 0.0):.2f}` (p = `{simpsons.get('capon_p_value', 0.0):.3e}`){capon_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -376,6 +382,12 @@ with col_right:
                         if conf_aud.get("austin_ks_p_value") is not None:
                             ks_flag = " ⚠️ Distributional Imbalance (D_KS > 0.10, p < 0.05)" if conf_aud.get("is_austin_ks_imbalanced") else " (Satisfactory Distributional Overlap)"
                             st.markdown(f"**Austin Kolmogorov-Smirnov Balance:** D_KS = `{conf_aud.get('austin_ks_stat', 0.0):.3f}` (p = `{conf_aud.get('austin_ks_p_value', 0.0):.3e}`){ks_flag}")
+                        if conf_aud.get("l1_multivariate_imbalance") is not None:
+                            l1_flag = " ⚠️ Severe Multivariate Imbalance (L1 > 0.25)" if conf_aud.get("is_l1_imbalanced") else " (Sufficient Common Support)"
+                            st.markdown(f"**Iacus-King-Porro L1 Imbalance:** L1 = `{conf_aud.get('l1_multivariate_imbalance', 0.0):.3f}`{l1_flag}")
+                        if conf_aud.get("rubin_parallelism_p") is not None:
+                            rp_flag = " ⚠️ Non-Parallel Surfaces / Effect Heterogeneity (p < 0.05)" if conf_aud.get("is_rubin_nonparallel") else " (Parallel Covariate Slopes)"
+                            st.markdown(f"**Rubin Surface Non-Parallelism:** F = `{conf_aud.get('rubin_parallelism_f', 0.0):.2f}` (p = `{conf_aud.get('rubin_parallelism_p', 0.0):.3e}`){rp_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -512,6 +524,12 @@ with col_right:
                         if stab_aud.get("max_covratio_dev") is not None:
                             covr_flag = f" ⚠️ Precision Degradation ({stab_aud.get('covratio_outlier_count', 0)} influential)" if stab_aud.get("is_covratio_influential") else " (Stable Covariance Precision)"
                             st.markdown(f"**Belsley COVRATIO Covariance Influence:** Max |COVRATIO - 1| = `{stab_aud.get('max_covratio_dev', 0.0):.3f}`{covr_flag}")
+                        if stab_aud.get("hosking_l_p") is not None:
+                            hosk_flag = f" ⚠️ Non-Gaussian L-Moments (p = {stab_aud['hosking_l_p']:.3e})" if stab_aud.get("is_hosking_non_normal") else f" (Gaussian L-Moments Fit, p = {stab_aud['hosking_l_p']:.3e})"
+                            st.markdown(f"**Hosking L-Moments Ratio Normality:** L = `{stab_aud.get('hosking_l_stat', 0.0):.2f}` (p = `{stab_aud['hosking_l_p']:.3e}`){hosk_flag}")
+                        if stab_aud.get("max_atkinson_distance") is not None:
+                            atk_flag = f" ⚠️ Leverage-Amplified Influence ({stab_aud.get('atkinson_outlier_count', 0)} influential)" if stab_aud.get("is_atkinson_influential") else " (Bounded Atkinson Influence)"
+                            st.markdown(f"**Atkinson Modified Influence:** Max A = `{stab_aud.get('max_atkinson_distance', 0.0):.2f}`{atk_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -842,6 +860,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Nicolaas Kuiper invariant empirical distribution function residual normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Nicolaas Kuiper invariant empirical distribution function residual normality test", findings, dataset_name=dataset_name)
 
+            sug_col43, sug_col44, sug_col45 = st.columns(3)
+            with sug_col43:
+                if st.button("📊 Tang-Liu Funnel Test", key="sug_tang"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Tang and Liu linear regression funnel asymmetry test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Tang and Liu linear regression funnel asymmetry test", findings, dataset_name=dataset_name)
+            with sug_col44:
+                if st.button("⚖️ Iacus-King-Porro L1", key="sug_l1"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Stefano Iacus Gary King and Giuseppe Porro L1 multivariate imbalance metric"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Stefano Iacus Gary King and Giuseppe Porro L1 multivariate imbalance metric", findings, dataset_name=dataset_name)
+            with sug_col45:
+                if st.button("📐 Hosking L-Moments", key="sug_hosking"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain J. R. M. Hosking L-moments ratio residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain J. R. M. Hosking L-moments ratio residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -938,10 +973,14 @@ with col_right:
                     "Conover_Scale_p": f"{simp.get('conover_p_value', 0.0):.3e}" if simp.get("conover_p_value") is not None else "N/A",
                     "PET_Test_t": f"{simp.get('pet_test_t', 0.0):.2f}" if simp.get("pet_test_t") is not None else "N/A",
                     "PET_Test_p": f"{simp.get('pet_test_p', 0.0):.3e}" if simp.get("pet_test_p") is not None else "N/A",
+                    "Tang_Funnel_t": f"{simp.get('tang_test_t', 0.0):.2f}" if simp.get("tang_test_t") is not None else "N/A",
+                    "Tang_Funnel_p": f"{simp.get('tang_test_p', 0.0):.3e}" if simp.get("tang_test_p") is not None else "N/A",
                     "PEESE_Test_t": f"{simp.get('peese_test_t', 0.0):.2f}" if simp.get("peese_test_t") is not None else "N/A",
                     "PEESE_Test_p": f"{simp.get('peese_test_p', 0.0):.3e}" if simp.get("peese_test_p") is not None else "N/A",
                     "Sukhatme_Scale_Z": f"{simp.get('sukhatme_stat_z', 0.0):.2f}" if simp.get("sukhatme_stat_z") is not None else "N/A",
                     "Sukhatme_Scale_p": f"{simp.get('sukhatme_p_value', 0.0):.3e}" if simp.get("sukhatme_p_value") is not None else "N/A",
+                    "Capon_Scale_Z": f"{simp.get('capon_stat_z', 0.0):.2f}" if simp.get("capon_stat_z") is not None else "N/A",
+                    "Capon_Scale_p": f"{simp.get('capon_p_value', 0.0):.3e}" if simp.get("capon_p_value") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -997,6 +1036,9 @@ with col_right:
                     "GPS_Balance_p": f"{conf.get('gps_balance_p', 0.0):.3e}" if conf.get("gps_balance_p") is not None else "N/A",
                     "Austin_KS_Stat": f"{conf.get('austin_ks_stat', 0.0):.3f}" if conf.get("austin_ks_stat") is not None else "N/A",
                     "Austin_KS_p": f"{conf.get('austin_ks_p_value', 0.0):.3e}" if conf.get("austin_ks_p_value") is not None else "N/A",
+                    "L1_Multivariate_Imbalance": f"{conf.get('l1_multivariate_imbalance', 0.0):.3f}" if conf.get("l1_multivariate_imbalance") is not None else "N/A",
+                    "Rubin_Parallelism_F": f"{conf.get('rubin_parallelism_f', 0.0):.2f}" if conf.get("rubin_parallelism_f") is not None else "N/A",
+                    "Rubin_Parallelism_p": f"{conf.get('rubin_parallelism_p', 0.0):.3e}" if conf.get("rubin_parallelism_p") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -1059,6 +1101,10 @@ with col_right:
                     "Kuiper_p": f"{stab.get('kuiper_p_value', 0.0):.3e}" if stab.get("kuiper_p_value") is not None else "N/A",
                     "Max_COVRATIO_Dev": f"{stab.get('max_covratio_dev', 0.0):.3f}" if stab.get("max_covratio_dev") is not None else "N/A",
                     "COVRATIO_Outlier_Count": f"{stab.get('covratio_outlier_count', 0)}" if stab.get("covratio_outlier_count") is not None else "N/A",
+                    "Hosking_L_Stat": f"{stab.get('hosking_l_stat', 0.0):.2f}" if stab.get("hosking_l_stat") is not None else "N/A",
+                    "Hosking_L_p": f"{stab.get('hosking_l_p', 0.0):.3e}" if stab.get("hosking_l_p") is not None else "N/A",
+                    "Max_Atkinson_Distance": f"{stab.get('max_atkinson_distance', 0.0):.2f}" if stab.get("max_atkinson_distance") is not None else "N/A",
+                    "Atkinson_Outlier_Count": f"{stab.get('atkinson_outlier_count', 0)}" if stab.get("atkinson_outlier_count") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

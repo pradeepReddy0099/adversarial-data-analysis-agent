@@ -132,6 +132,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.peese_test_p is not None
     assert audit.simpsons_audit.sukhatme_stat_z is not None
     assert audit.simpsons_audit.sukhatme_p_value is not None
+    # Verify Tang-Liu funnel asymmetry and Capon expected normal order scale dispersion
+    assert audit.simpsons_audit.tang_test_t is not None
+    assert audit.simpsons_audit.tang_test_p is not None
+    assert audit.simpsons_audit.capon_stat_z is not None
+    assert audit.simpsons_audit.capon_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -272,6 +277,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.gps_balance_p is not None
         assert audit_coffee.confounder_audit.austin_ks_stat is not None
         assert audit_coffee.confounder_audit.austin_ks_p_value is not None
+        # Check Iacus-King-Porro L1 multivariate distance and Rubin surface non-parallelism
+        assert audit_coffee.confounder_audit.l1_multivariate_imbalance is not None
+        assert audit_coffee.confounder_audit.l1_multivariate_imbalance >= 0.0
+        assert audit_coffee.confounder_audit.rubin_parallelism_f is not None
+        assert audit_coffee.confounder_audit.rubin_parallelism_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -396,6 +406,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.kuiper_p_value is not None
     assert audit.stability_audit.max_covratio_dev is not None
     assert audit.stability_audit.max_covratio_dev >= 0.0
+    # Check Hosking L-moments residual normality and Atkinson modified influence
+    assert audit.stability_audit.hosking_l_stat is not None
+    assert audit.stability_audit.hosking_l_p is not None
+    assert audit.stability_audit.max_atkinson_distance is not None
+    assert audit.stability_audit.max_atkinson_distance >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -759,6 +774,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_covr = narrator.answer_query("Explain David Belsley COVRATIO covariance influence diagnostic", findings)
     assert "COVRATIO" in ans_covr or "Belsley" in ans_covr or "Influence" in ans_covr or "Determinant" in ans_covr
+
+    ans_tang = narrator.answer_query("Explain Tang and Liu linear regression funnel asymmetry test", findings)
+    assert "Tang" in ans_tang or "Liu" in ans_tang or "Funnel" in ans_tang or "Precision" in ans_tang
+
+    ans_capon = narrator.answer_query("Explain Jack Capon expected normal order statistics scale dispersion test", findings)
+    assert "Capon" in ans_capon or "Scale" in ans_capon or "Dispersion" in ans_capon or "Normal" in ans_capon
+
+    ans_l1 = narrator.answer_query("Explain Stefano Iacus Gary King and Giuseppe Porro L1 multivariate imbalance metric", findings)
+    assert "Iacus" in ans_l1 or "King" in ans_l1 or "L1" in ans_l1 or "Imbalance" in ans_l1
+
+    ans_rubin_par = narrator.answer_query("Explain Donald Rubin regression surface non-parallelism test", findings)
+    assert "Rubin" in ans_rubin_par or "Parallelism" in ans_rubin_par or "Surface" in ans_rubin_par or "Interaction" in ans_rubin_par
+
+    ans_hosk = narrator.answer_query("Explain J. R. M. Hosking L-moments ratio residual normality test", findings)
+    assert "Hosking" in ans_hosk or "L-Moments" in ans_hosk or "Normality" in ans_hosk
+
+    ans_atk = narrator.answer_query("Explain Anthony Atkinson modified leverage-weighted influence metric", findings)
+    assert "Atkinson" in ans_atk or "Influence" in ans_atk or "Leverage" in ans_atk or "Residual" in ans_atk
 
 
 def test_end_to_end_pipeline(tmp_path):
