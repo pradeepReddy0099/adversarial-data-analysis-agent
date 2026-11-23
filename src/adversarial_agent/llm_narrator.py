@@ -259,7 +259,7 @@ class LLMNarrator:
                 )
             return "Benjamini-Hochberg FDR q-values adjust raw p-values across all discovered candidate claims."
 
-        if any(w in q_lower for w in ["robustness value", "cinelli", "hazlett", "rv"]):
+        if any(w in q_lower for w in ["robustness value", "cinelli", "hazlett"]) or " rv " in f" {q_lower} " or "(rv)" in q_lower or "rv_" in q_lower:
             rv_items = []
             for f in findings:
                 conf = f.get("audit", {}).get("confounder_audit", {})
@@ -621,6 +621,122 @@ class LLMNarrator:
                 )
             return "MacKinnon-White HC3 test evaluates whether findings retain statistical significance under robust sandwich covariance estimation."
 
+        if any(w in q_lower for w in ["vuong", "non-nested", "kullback", "model selection"]):
+            vuong_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                z_v = simp.get("vuong_z")
+                p_v = simp.get("vuong_p")
+                fav = simp.get("is_stratification_favored", False)
+                if p_v is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Stratified Model Significantly Favored (Rejects Pooled)" if fav else " (Models Statistically Equivalent)"
+                    vuong_items.append(f"• **{v_name}** stratified by **{conf}**: Vuong z = {z_v:.2f} (p = {p_v:.3e}){flag}")
+            if vuong_items:
+                return (
+                    "**Vuong (1989) Likelihood Ratio Non-Nested Model Selection Test:**\n"
+                    "Compares pooled OLS vs subgroup-stratified model in Kullback-Leibler information distance (rejection indicates pooled claim is misspecified):\n"
+                    + "\n".join(vuong_items)
+                )
+            return "Vuong's non-nested likelihood ratio test rigorously determines whether stratified conditioning provides superior probabilistic fit over crude unstratified claims."
+
+        if any(w in q_lower for w in ["breslow-day", "breslow day", "odds ratio homogeneity"]):
+            bd_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                bd_chi2 = simp.get("breslow_day_chi2")
+                bd_p = simp.get("breslow_day_p")
+                if bd_p is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    flag = " ⚠️ Heterogeneous Odds Ratios" if bd_p < 0.05 else " (Homogeneous Across Strata)"
+                    bd_items.append(f"• **{v_name}** across **{conf}**: Breslow-Day χ² = {bd_chi2:.2f} (p = {bd_p:.3e}){flag}")
+            if bd_items:
+                return (
+                    "**Breslow-Day (1980) Test for Odds Ratio Homogeneity:**\n"
+                    "Tests null hypothesis of equal odds ratios across 2x2xK contingency tables:\n"
+                    + "\n".join(bd_items)
+                )
+            return "Breslow-Day diagnostic tests whether subgroup odds ratios are homogeneous across strata."
+
+        if any(w in q_lower for w in ["itcv", "frank", "impact threshold"]):
+            itcv_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                itcv = conf.get("frank_itcv")
+                impact = conf.get("frank_observed_impact")
+                exceeded = conf.get("is_itcv_exceeded", False)
+                if itcv is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ ITCV Exceeded (Inference Invalidated)" if exceeded else " (Below Threshold)"
+                    itcv_items.append(f"• **{v_name}** vs **{c_name}**: ITCV = {itcv:.3f}, Observed Impact = {impact:.3f}{flag}")
+            if itcv_items:
+                return (
+                    "**Kenneth Frank (2000) Impact Threshold for a Confounding Variable (ITCV):**\n"
+                    "Quantifies the exact correlation product (r_xz * r_yz) an unmeasured confounder must have to nullify empirical significance:\n"
+                    + "\n".join(itcv_items)
+                )
+            return "Frank's ITCV determines the minimum product of confounder correlations needed to overturn statistical significance."
+
+        if any(w in q_lower for w in ["akaike", "aic weight", "evidence ratio", "aicc"]):
+            aic_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                daic = conf.get("akaike_delta_aic")
+                er = conf.get("akaike_evidence_ratio")
+                w_aic = conf.get("akaike_model_weight")
+                if w_aic is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    flag = " ⚠️ Decisive Confounder Support (w1 > 0.95)" if w_aic > 0.95 else f" (w1 = {w_aic:.3f})"
+                    aic_items.append(f"• **{v_name}** vs **{c_name}**: ΔAIC = {daic:+.2f}, Evidence Ratio = {er:.2f}, Model Weight = {w_aic:.3f}{flag}")
+            if aic_items:
+                return (
+                    "**Burnham-Anderson / Akaike AIC Evidence Ratios & Information Model Weights:**\n"
+                    "Computes relative likelihood and posterior model probabilities between unadjusted and confounder-adjusted models:\n"
+                    + "\n".join(aic_items)
+                )
+            return "Akaike model weights quantify the probability that the confounder-adjusted model represents the true data-generating process."
+
+        if any(w in q_lower for w in ["theil-sen", "theil sen", "median slope", "robust regression"]):
+            ts_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                ts_slope = stab.get("theil_sen_slope")
+                ts_disc = stab.get("theil_sen_discrepancy")
+                if ts_slope is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ High Discrepancy ({ts_disc:.1%})" if ts_disc and ts_disc > 0.20 else f" (Discrepancy = {ts_disc:.1%})"
+                    ts_items.append(f"• **{v_name}**: Theil-Sen β_TS = {ts_slope:.4f}{flag}")
+            if ts_items:
+                return (
+                    "**Theil-Sen (1950) Robust Non-Parametric Median Slope Estimator:**\n"
+                    "High breakdown-point (29.3%) non-parametric median pairwise slope resisting catastrophic outlier distortion:\n"
+                    + "\n".join(ts_items)
+                )
+            return "Theil-Sen robust estimator computes the median of all pairwise slopes to certify resistance against non-Gaussian outliers."
+
+        if any(w in q_lower for w in ["bca", "bias corrected", "accelerated bootstrap", "bca bootstrap"]):
+            bca_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                bca_l = stab.get("bca_ci_low")
+                bca_h = stab.get("bca_ci_high")
+                bca_z = stab.get("bca_zero_crossing", False)
+                if bca_l is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Zero-Crossing Detected" if bca_z else " (Stable Non-Zero)"
+                    bca_items.append(f"• **{v_name}**: BCa 95% CI = [{bca_l:.4f}, {bca_h:.4f}]{flag}")
+            if bca_items:
+                return (
+                    "**Efron & Tibshirani (1993) Bias-Corrected and Accelerated (BCa) Bootstrap:**\n"
+                    "Second-order accurate bootstrap confidence intervals adjusting for median bias (z0) and skewness acceleration (a):\n"
+                    + "\n".join(bca_items)
+                )
+            return "BCa bootstrap intervals provide second-order accurate confidence limits correcting for parameter skew and non-normality."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -832,14 +948,16 @@ class LLMNarrator:
 
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
-        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 8 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Duval-Tweedie Trim & Fill & Hausman Endogeneity:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), tests small-stratum funnel asymmetry, estimates missing strata via Trim & Fill, and verifies endogeneity via Hausman specification test.")
-        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV) & Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
-        lines.append("3. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
-        lines.append("4. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
-        lines.append("5. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
-        lines.append("6. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, residual Gaussian normality, residual autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
-        lines.append("7. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 9 continuous and categorical stress tests:")
+        lines.append("1. **Cochran-Mantel-Haenszel, Breslow-Day & Tarone Homogeneity, Higgins I², DerSimonian-Laird τ², Egger/Begg Funnel Tests, Duval-Tweedie Trim & Fill, Hausman Endogeneity & Vuong Model Selection:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$) and excess variance ($\\tau^2$), tests small-stratum funnel asymmetry, estimates missing strata via Trim & Fill, verifies endogeneity via Hausman specification test, and proves whether stratified conditioning dominates crude models via Vuong's likelihood ratio test.")
+        lines.append("2. **VanderWeele E-Values, Cinelli-Hazlett Robustness Values (RV), Critical Confounder Boundary (R²crit) & Cohen's f²:** Establishes mathematical bounds, minimal partial $R^2$ strength, critical confounder boundaries, and unique variance effect sizes ($f^2$) needed to nullify empirical associations.")
+        lines.append("3. **Frank's (2000) Confounding Impact Threshold (ITCV) & Burnham-Anderson AIC Information Weights:** Quantifies the exact correlation product threshold an unmeasured confounder must exceed to overturn statistical significance, and computes Akaike model selection weights ($w_1$) arbitrating covariate necessity.")
+        lines.append("4. **Ramsey RESET Specification Test & Oster (2019) Selection Bound (δ*):** Evaluates functional form misspecification/omitted non-linearities and calculates proportional selection on unobservables needed to nullify effect estimates.")
+        lines.append("5. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
+        lines.append("6. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
+        lines.append("7. **Theil-Sen Robust Non-Parametric Median Regression & Efron-Tibshirani BCa Bootstrap:** Compares OLS against breakdown-point 29.3% Theil-Sen median slopes and evaluates second-order accurate bias-corrected and accelerated (BCa) bootstrap confidence intervals.")
+        lines.append("8. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS, DFBETAS, Breusch-Pagan, Jarque-Bera, Durbin-Watson & MacKinnon-White HC3:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), parameter-specific influence (DFBETAS), overall leverage (Cook's D, DFFITS), error homoscedasticity, residual Gaussian normality, residual autocorrelation (Durbin-Watson), and heteroscedasticity-consistent robust inference ($HC_3$).")
+        lines.append("9. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

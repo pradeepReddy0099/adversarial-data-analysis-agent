@@ -209,10 +209,21 @@ with col_right:
                         if simpsons.get("hausman_p") is not None:
                             h_flag = " ⚠️ Inconsistent / Endogenous" if simpsons.get("is_hausman_inconsistent") else " (Consistent)"
                             st.markdown(f"**Hausman Endogeneity Test:** H = `{simpsons.get('hausman_stat', 0.0):.2f}` (p = `{simpsons['hausman_p']:.3e}`){h_flag}")
+                        if simpsons.get("breslow_day_p") is not None:
+                            bd_flag = " ⚠️ Heterogeneous" if simpsons["breslow_day_p"] < 0.05 else " (Homogeneous)"
+                            st.markdown(f"**Breslow-Day Homogeneity Test:** χ² = `{simpsons.get('breslow_day_chi2', 0.0):.2f}` (p = `{simpsons['breslow_day_p']:.3e}`){bd_flag}")
+                        if simpsons.get("vuong_p") is not None:
+                            v_flag = " ⚠️ Stratification Significantly Favored" if simpsons.get("is_stratification_favored") else " (Equivalent)"
+                            st.markdown(f"**Vuong Model Selection Test:** z = `{simpsons.get('vuong_z', 0.0):.2f}` (p = `{simpsons['vuong_p']:.3e}`){v_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
                             st.markdown(f"**VanderWeele E-Value:** `{conf_aud['e_value']:.2f}`")
+                        if conf_aud.get("frank_itcv") is not None:
+                            itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
+                            st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
+                        if conf_aud.get("akaike_model_weight") is not None:
+                            st.markdown(f"**Akaike Model Selection:** w_AIC = `{conf_aud['akaike_model_weight']:.3f}` (ΔAIC = `{conf_aud.get('akaike_delta_aic', 0.0):+.2f}`, ER = `{conf_aud.get('akaike_evidence_ratio', 0.0):.2f}`)")
                         if conf_aud.get("top_confounder_vif") is not None:
                             vif_flag = " ⚠️ High Collinearity" if conf_aud.get("is_collinear") else ""
                             st.markdown(f"**Confounder VIF Collinearity:** `{conf_aud['top_confounder_vif']:.2f}`{vif_flag}")
@@ -261,6 +272,12 @@ with col_right:
                             st.markdown(f"**Quantile Discrepancy Index:** QDI = `{stab_aud['quantile_discrepancy_index']:.2f}`{qdi_flag_str}")
                         if stab_aud.get("rank_discrepancy") is not None:
                             st.markdown(f"**Spearman Rank Discrepancy:** `Δr = {stab_aud['rank_discrepancy']:.3f}` (ρ = `{stab_aud.get('spearman_rho', 0.0):.3f}`)")
+                        if stab_aud.get("theil_sen_discrepancy") is not None:
+                            ts_flag = " ⚠️ High Discrepancy" if stab_aud["theil_sen_discrepancy"] > 0.20 else " (Concordant)"
+                            st.markdown(f"**Theil-Sen Robust Slope:** β_TS = `{stab_aud.get('theil_sen_slope', 0.0):.4f}` (Δ_TS = `{stab_aud['theil_sen_discrepancy']:.1%}`){ts_flag}")
+                        if stab_aud.get("bca_ci_low") is not None:
+                            bca_flag = " ⚠️ Crosses Zero" if stab_aud.get("bca_zero_crossing") else " (Stable Non-Zero)"
+                            st.markdown(f"**BCa Bootstrap 95% CI:** [`{stab_aud['bca_ci_low']:.4f}`, `{stab_aud.get('bca_ci_high', 0.0):.4f}`]{bca_flag}")
                         if stab_aud.get("max_leverage") is not None and stab_aud.get("max_leverage", 0) > 0:
                             st.markdown(f"**Outlier Leverage:** Max `h_ii = {stab_aud['max_leverage']:.4f}` ({stab_aud.get('high_leverage_points', 0)} high-leverage points)")
 
@@ -409,10 +426,16 @@ with col_right:
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
+                    "Breslow_Day_p": f"{simp.get('breslow_day_p', 0.0):.3e}" if simp.get("breslow_day_p") is not None else "N/A",
+                    "Vuong_z": f"{simp.get('vuong_z', 0.0):.2f}" if simp.get("vuong_z") is not None else "N/A",
+                    "Vuong_p": f"{simp.get('vuong_p', 0.0):.3e}" if simp.get("vuong_p") is not None else "N/A",
                     "Begg_Funnel_p": f"{simp.get('begg_funnel_p', 0.0):.3e}" if simp.get("begg_funnel_p") is not None else "N/A",
                     "Egger_Funnel_p": f"{simp.get('egger_test_p', 0.0):.3e}" if simp.get("egger_test_p") is not None else "N/A",
                     "Cinelli_Hazlett_RV": f"{conf.get('robustness_value', 0.0):.2f}" if conf.get("robustness_value") is not None else "N/A",
                     "Cinelli_Hazlett_Rcrit": f"{conf.get('cinelli_hazlett_rcrit', 0.0):.2f}" if conf.get("cinelli_hazlett_rcrit") is not None else "N/A",
+                    "Frank_ITCV": f"{conf.get('frank_itcv', 0.0):.3f}" if conf.get("frank_itcv") is not None else "N/A",
+                    "Frank_Observed_Impact": f"{conf.get('frank_observed_impact', 0.0):.3f}" if conf.get("frank_observed_impact") is not None else "N/A",
+                    "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
                     "Sobel_p_value": f"{conf.get('sobel_p', 0.0):.3e}" if conf.get("sobel_p") is not None else "N/A",
                     "Bayes_Factor_BF10": f"{conf.get('bayes_factor_bf10', 0.0):.2f}" if conf.get("bayes_factor_bf10") is not None else "N/A",
@@ -428,6 +451,9 @@ with col_right:
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",
                     "Quantile_Discrepancy_QDI": f"{stab.get('quantile_discrepancy_index', 0.0):.2f}" if stab.get("quantile_discrepancy_index") is not None else "N/A",
+                    "Theil_Sen_Discrepancy": f"{stab.get('theil_sen_discrepancy', 0.0):.1%}" if stab.get("theil_sen_discrepancy") is not None else "N/A",
+                    "BCa_CI_Low": f"{stab.get('bca_ci_low', 0.0):.4f}" if stab.get("bca_ci_low") is not None else "N/A",
+                    "BCa_CI_High": f"{stab.get('bca_ci_high', 0.0):.4f}" if stab.get("bca_ci_high") is not None else "N/A",
                     "Confounder_VIF": f"{conf.get('top_confounder_vif', 1.0):.2f}" if conf.get("top_confounder_vif") is not None else "N/A",
                     "Synthesis": f.get("synthesis_summary", ""),
                     "Takeaway": f.get("actionable_takeaway", ""),

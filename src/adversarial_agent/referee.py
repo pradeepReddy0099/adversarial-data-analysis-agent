@@ -93,6 +93,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Duval-Tweedie Trim & Fill: k0 = {simpsons.trim_and_fill_k0} missing strata (adjusted stat = {simpsons.trim_and_fill_adjusted_stat:.4f})")
             if simpsons.hausman_p is not None:
                 rationale["key_evidence"].append(f"Hausman Endogeneity Test: H = {simpsons.hausman_stat:.2f} (p = {simpsons.hausman_p:.3e}) {'[INCONSISTENT / ENDOGENOUS]' if simpsons.is_hausman_inconsistent else '[CONSISTENT]'}")
+            if simpsons.breslow_day_p is not None:
+                rationale["key_evidence"].append(f"Breslow-Day Homogeneity Test: χ² = {simpsons.breslow_day_chi2:.2f} (p = {simpsons.breslow_day_p:.3e})")
+            if simpsons.vuong_p is not None:
+                rationale["key_evidence"].append(f"Vuong Model Selection Test: z = {simpsons.vuong_z:.2f} (p = {simpsons.vuong_p:.3e}) {'[STRATIFICATION SIGNIFICANTLY FAVORED]' if simpsons.is_stratification_favored else '[EQUIVALENT]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -138,6 +142,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Cohen's f² effect size: f² = {confounder.cohens_f2:.3f} ({'negligible unique variance' if confounder.cohens_f2 < 0.02 else 'substantial variance'})")
             if confounder.cinelli_hazlett_rcrit is not None:
                 rationale["key_evidence"].append(f"Cinelli-Hazlett Critical Boundary: R²crit = {confounder.cinelli_hazlett_rcrit:.2f}")
+            if confounder.frank_itcv is not None:
+                rationale["key_evidence"].append(f"Frank's ITCV Threshold: ITCV = {confounder.frank_itcv:.3f} (Observed Impact = {confounder.frank_observed_impact:.3f}) {'[ITCV EXCEEDED - CONFOUNDED]' if confounder.is_itcv_exceeded else '[BELOW ITCV]'}")
+            if confounder.akaike_model_weight is not None:
+                rationale["key_evidence"].append(f"Akaike Model Selection: w_AIC = {confounder.akaike_model_weight:.3f} (ΔAIC = {confounder.akaike_delta_aic:+.2f}, ER = {confounder.akaike_evidence_ratio:.2f})")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -187,6 +195,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Durbin-Watson Test: DW = {stability.durbin_watson_stat:.2f} {'[SERIAL CLUSTERING / CORRELATION]' if stability.has_serial_correlation else '[INDEPENDENT RESIDUALS]'}")
             if stability.hc3_robust_p is not None:
                 rationale["key_evidence"].append(f"MacKinnon-White HC3 Robust Standard Error: SE_HC3 = {stability.hc3_robust_se:.4f} (p_HC3 = {stability.hc3_robust_p:.3e}) {'[SIGNIFICANCE LOST UNDER HC3]' if stability.hc3_significance_lost else '[ROBUST TO HETEROSCEDASTICITY]'}")
+            if stability.theil_sen_discrepancy is not None:
+                rationale["key_evidence"].append(f"Theil-Sen Robust Slope: β_TS = {stability.theil_sen_slope:.4f} (Discrepancy Δ_TS = {stability.theil_sen_discrepancy:.1%})")
+            if stability.bca_ci_low is not None:
+                rationale["key_evidence"].append(f"BCa Bootstrap 95% CI: [{stability.bca_ci_low:.4f}, {stability.bca_ci_high:.4f}] {'[CROSSES ZERO]' if stability.bca_zero_crossing else '[NON-ZERO]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -270,6 +282,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Benjamini-Hochberg FDR: q = {claim.fdr_q_value:.4e}")
             if claim.bonferroni_p_value is not None:
                 rationale["key_evidence"].append(f"Bonferroni FWER: p_adj = {claim.bonferroni_p_value:.4e}")
+            if stability.theil_sen_discrepancy is not None:
+                rationale["key_evidence"].append(f"Theil-Sen Robust Slope: β_TS = {stability.theil_sen_slope:.4f} (Δ_TS = {stability.theil_sen_discrepancy:.1%})")
+            if stability.bca_ci_low is not None:
+                rationale["key_evidence"].append(f"BCa Bootstrap 95% CI: [{stability.bca_ci_low:.4f}, {stability.bca_ci_high:.4f}]")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -56,6 +56,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.trim_and_fill_k0 is not None
     assert audit.simpsons_audit.trim_and_fill_adjusted_stat is not None
     assert audit.simpsons_audit.hausman_p is not None
+    # Verify Breslow-Day homogeneity test and Vuong non-nested model selection test
+    assert audit.simpsons_audit.breslow_day_p is not None
+    assert audit.simpsons_audit.breslow_day_chi2 is not None
+    assert audit.simpsons_audit.vuong_z is not None
+    assert audit.simpsons_audit.vuong_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -123,6 +128,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.cohens_f2 is not None
         assert audit_coffee.confounder_audit.cinelli_hazlett_rcrit is not None
         assert audit_coffee.confounder_audit.cinelli_hazlett_rcrit >= 0.0
+        # Check Frank's ITCV and Burnham-Anderson Akaike weights
+        assert audit_coffee.confounder_audit.frank_itcv is not None
+        assert audit_coffee.confounder_audit.frank_observed_impact is not None
+        assert audit_coffee.confounder_audit.akaike_delta_aic is not None
+        assert audit_coffee.confounder_audit.akaike_model_weight is not None
+        assert 0.0 <= audit_coffee.confounder_audit.akaike_model_weight <= 1.0
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -170,6 +181,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.durbin_watson_stat is not None
     assert audit.stability_audit.hc3_robust_se is not None
     assert audit.stability_audit.hc3_robust_p is not None
+    # Check Theil-Sen robust slope and Efron BCa bootstrap CI
+    assert audit.stability_audit.theil_sen_slope is not None
+    assert audit.stability_audit.theil_sen_discrepancy is not None
+    assert audit.stability_audit.bca_ci_low is not None
+    assert audit.stability_audit.bca_ci_high is not None
+    assert audit.stability_audit.bca_ci_low <= audit.stability_audit.bca_ci_high
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -275,6 +292,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_hc3 = narrator.answer_query("What does the MacKinnon-White HC3 test show?", findings)
     assert "HC3" in ans_hc3 or "MacKinnon" in ans_hc3 or "Robust" in ans_hc3
+
+    ans_vuong = narrator.answer_query("Explain Vuong model selection test", findings)
+    assert "Vuong" in ans_vuong or "Model Selection" in ans_vuong or "Kullback" in ans_vuong
+
+    ans_bd = narrator.answer_query("What is the Breslow-Day test?", findings)
+    assert "Breslow-Day" in ans_bd or "Homogeneity" in ans_bd or "Odds Ratio" in ans_bd
+
+    ans_itcv = narrator.answer_query("Explain Frank's ITCV impact threshold", findings)
+    assert "ITCV" in ans_itcv or "Frank" in ans_itcv or "Impact" in ans_itcv
+
+    ans_aic = narrator.answer_query("Explain Akaike model weights and evidence ratio", findings)
+    assert "Akaike" in ans_aic or "AIC" in ans_aic or "Weight" in ans_aic
+
+    ans_ts = narrator.answer_query("What is the Theil-Sen robust slope?", findings)
+    assert "Theil-Sen" in ans_ts or "Median" in ans_ts or "Slope" in ans_ts
+
+    ans_bca = narrator.answer_query("Explain BCa bootstrap confidence interval", findings)
+    assert "BCa" in ans_bca or "Bootstrap" in ans_bca or "Accelerated" in ans_bca
 
 
 def test_end_to_end_pipeline(tmp_path):

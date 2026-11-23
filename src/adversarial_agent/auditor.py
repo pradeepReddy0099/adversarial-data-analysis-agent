@@ -55,6 +55,11 @@ class SimpsonsParadoxAudit:
     hausman_stat: Optional[float] = None
     hausman_p: Optional[float] = None
     is_hausman_inconsistent: bool = False
+    breslow_day_chi2: Optional[float] = None
+    breslow_day_p: Optional[float] = None
+    vuong_z: Optional[float] = None
+    vuong_p: Optional[float] = None
+    is_stratification_favored: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -91,6 +96,12 @@ class ConfounderAudit:
     oster_delta: Optional[float] = None
     cohens_f2: Optional[float] = None
     cinelli_hazlett_rcrit: Optional[float] = None
+    frank_itcv: Optional[float] = None
+    frank_observed_impact: Optional[float] = None
+    is_itcv_exceeded: bool = False
+    akaike_delta_aic: Optional[float] = None
+    akaike_evidence_ratio: Optional[float] = None
+    akaike_model_weight: Optional[float] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -134,6 +145,11 @@ class StabilityAudit:
     hc3_robust_se: Optional[float] = None
     hc3_robust_p: Optional[float] = None
     hc3_significance_lost: bool = False
+    theil_sen_slope: Optional[float] = None
+    theil_sen_discrepancy: Optional[float] = None
+    bca_ci_low: Optional[float] = None
+    bca_ci_high: Optional[float] = None
+    bca_zero_crossing: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -184,15 +200,18 @@ def calculate_e_value(rr: float) -> tuple[float, str]:
     return e_val, interp
 
 
-def tarone_homogeneity_test(tables_2x2: List[tuple[float, float, float, float]], common_or: float) -> tuple[Optional[float], Optional[float]]:
-    """Calculates Tarone's modification of the Breslow-Day test for odds ratio homogeneity.
+def breslow_day_homogeneity_test(
+    tables_2x2: List[tuple[float, float, float, float]], common_or: float
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """Calculates both classic Breslow-Day (1980) and Tarone's (1985) test for odds ratio homogeneity.
     
     H0: The odds ratio is homogeneous across all K strata.
     Rejection (p < 0.05) indicates effect modification (interaction) across strata.
+    Returns (bd_stat, bd_p, tarone_stat, tarone_p).
     """
     K = len(tables_2x2)
     if K < 2 or common_or <= 0 or np.isnan(common_or):
-        return None, None
+        return None, None, None, None
     
     bd_stat = 0.0
     sum_diff = 0.0
@@ -239,11 +258,19 @@ def tarone_homogeneity_test(tables_2x2: List[tuple[float, float, float, float]],
             valid_k += 1
 
     if valid_k < 2 or sum_var <= 1e-9:
-        return None, None
+        return None, None, None, None
     
+    bd_stat_val = float(max(0.0, bd_stat))
+    bd_p = float(stats.chi2.sf(bd_stat_val, df=valid_k - 1))
     tarone_stat = float(max(0.0, bd_stat - (sum_diff ** 2) / sum_var))
-    p_val = float(stats.chi2.sf(tarone_stat, df=valid_k - 1))
-    return tarone_stat, p_val
+    tarone_p = float(stats.chi2.sf(tarone_stat, df=valid_k - 1))
+    return bd_stat_val, bd_p, tarone_stat, tarone_p
+
+
+def tarone_homogeneity_test(tables_2x2: List[tuple[float, float, float, float]], common_or: float) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Tarone's modification of the Breslow-Day test for odds ratio homogeneity."""
+    _, _, tarone_stat, tarone_p = breslow_day_homogeneity_test(tables_2x2, common_or)
+    return tarone_stat, tarone_p
 
 
 def calculate_cinelli_hazlett_rv(partial_r: float, n: int, alpha: float = 0.05) -> tuple[float, float]:
@@ -849,6 +876,235 @@ def mackinnon_white_hc3_test(
     return se_hc3, p_hc3, significance_lost
 
 
+def vuong_model_selection_test(
+    df: pd.DataFrame,
+    source_col: str,
+    target_col: str,
+    confounder_col: str,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Vuong's (1989) likelihood ratio test for non-nested model selection.
+    
+    Compares the pooled bivariate OLS model (M0: Y ~ X) against the stratified subgroup model
+    (M1: Y ~ X within strata of confounder_col).
+    H0: Both models are equally close to the true data-generating process in Kullback-Leibler divergence.
+    Rejection (z > 1.96, p < 0.05) demonstrates that the stratified specification strictly dominates
+    the crude pooled claim, providing formal information-theoretic proof of Simpson's Paradox / subgroup heterogeneity.
+    """
+    sub = df[[source_col, target_col, confounder_col]].dropna()
+    if len(sub) < 20 or sub[confounder_col].nunique() < 2:
+        return None, None, False
+
+    if pd.api.types.is_numeric_dtype(sub[source_col]):
+        x = pd.to_numeric(sub[source_col], errors='coerce')
+    else:
+        x = pd.Series(pd.Categorical(sub[source_col]).codes, index=sub.index, dtype=float)
+
+    if pd.api.types.is_numeric_dtype(sub[target_col]):
+        y = pd.to_numeric(sub[target_col], errors='coerce')
+    else:
+        y = pd.Series(pd.Categorical(sub[target_col]).codes, index=sub.index, dtype=float)
+
+    valid_m = ~(x.isna() | y.isna())
+    if valid_m.sum() < 20:
+        return None, None, False
+
+    x_arr = x[valid_m].to_numpy(dtype=float)
+    y_arr = y[valid_m].to_numpy(dtype=float)
+    groups = sub[confounder_col][valid_m].to_numpy()
+    n = len(x_arr)
+
+    var_x = np.var(x_arr)
+    if var_x < 1e-9:
+        return None, None, False
+
+    # M0: Pooled model
+    b1_pool = float(np.cov(x_arr, y_arr)[0, 1] / var_x)
+    b0_pool = float(np.mean(y_arr) - b1_pool * np.mean(x_arr))
+    y_hat0 = b0_pool + b1_pool * x_arr
+    e0 = y_arr - y_hat0
+    s2_0 = max(1e-12, float(np.mean(e0 ** 2)))
+    l0 = -0.5 * np.log(2.0 * np.pi * s2_0) - (e0 ** 2) / (2.0 * s2_0)
+
+    # M1: Stratified model
+    y_hat1 = np.empty_like(y_arr)
+    for grp in np.unique(groups):
+        m = (groups == grp)
+        if np.sum(m) >= 2 and np.var(x_arr[m]) > 1e-9:
+            b1_g = float(np.cov(x_arr[m], y_arr[m])[0, 1] / np.var(x_arr[m]))
+            b0_g = float(np.mean(y_arr[m]) - b1_g * np.mean(x_arr[m]))
+            y_hat1[m] = b0_g + b1_g * x_arr[m]
+        else:
+            y_hat1[m] = np.mean(y_arr[m])
+
+    e1 = y_arr - y_hat1
+    s2_1 = max(1e-12, float(np.mean(e1 ** 2)))
+    l1 = -0.5 * np.log(2.0 * np.pi * s2_1) - (e1 ** 2) / (2.0 * s2_1)
+
+    m_diff = l1 - l0
+    omega = float(np.std(m_diff, ddof=1))
+    if omega < 1e-9:
+        return 0.0, 1.0, False
+
+    z_vuong = float(np.sqrt(n) * np.mean(m_diff) / omega)
+    p_vuong = float(2.0 * stats.norm.sf(abs(z_vuong)))
+    is_strat_favored = bool(z_vuong > 1.96 and p_vuong < 0.05)
+
+    return z_vuong, p_vuong, is_strat_favored
+
+
+def calculate_frank_itcv(
+    r_xy: float,
+    r_xz: float,
+    r_yz: float,
+    n: int,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Kenneth Frank's (2000) Impact Threshold for a Confounding Variable (ITCV).
+    
+    ITCV = (|r_xy| - r_crit) / (1 - r_crit)
+    where r_crit = t_crit / sqrt(t_crit^2 + n - 2) is the critical correlation threshold for significance.
+    Observed impact of Z = |r_xz * r_yz|.
+    If observed impact >= ITCV, the confounder invalidates the empirical inference.
+    """
+    if n < 10 or np.isnan(r_xy) or np.isnan(r_xz) or np.isnan(r_yz):
+        return None, None, False
+    try:
+        t_crit = float(stats.t.ppf(1.0 - alpha / 2.0, df=max(1, n - 2)))
+        r_crit = float(t_crit / np.sqrt(t_crit ** 2 + max(1, n - 2)))
+        r_abs = min(0.9999, abs(r_xy))
+        if r_abs <= r_crit:
+            itcv = 0.0
+        else:
+            itcv = float((r_abs - r_crit) / max(1e-6, 1.0 - r_crit))
+        
+        impact_obs = float(abs(r_xz * r_yz))
+        is_exceeded = bool(impact_obs >= itcv)
+        return itcv, impact_obs, is_exceeded
+    except Exception:
+        return None, None, False
+
+
+def calculate_akaike_weights(
+    r_xy: float,
+    r_xz: float,
+    r_yz: float,
+    n: int,
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Calculates small-sample AICc Delta, Evidence Ratio, and Akaike Model Weight (Burnham & Anderson 2002).
+    
+    M0 (uncontrolled): Y ~ X (k=2)
+    M1 (controlled): Y ~ X + Z (k=3)
+    Returns (delta_aic, evidence_ratio, model_weight_adjusted).
+    """
+    if n < 12 or abs(r_xz) >= 0.999 or np.isnan(r_xy) or np.isnan(r_xz) or np.isnan(r_yz):
+        return None, None, None
+    try:
+        denom = max(1e-9, 1.0 - r_xz ** 2)
+        r2_full = min(0.9999, max(0.0, (r_xy ** 2 + r_yz ** 2 - 2.0 * r_xy * r_yz * r_xz) / denom))
+        r2_null = min(0.9999, r_xy ** 2)
+
+        rss0 = max(1e-9, 1.0 - r2_null)
+        rss1 = max(1e-9, 1.0 - r2_full)
+
+        # AICc with Hurvich & Tsai correction
+        aic0 = n * np.log(rss0) + 2.0 * 2 + (2.0 * 2 * 3) / max(1, n - 3)
+        aic1 = n * np.log(rss1) + 2.0 * 3 + (2.0 * 3 * 4) / max(1, n - 4)
+
+        delta_aic = float(aic0 - aic1)
+        clipped_exp = min(50.0, max(-50.0, 0.5 * delta_aic))
+        evidence_ratio = float(np.exp(clipped_exp))
+        model_weight = float(evidence_ratio / (1.0 + evidence_ratio))
+
+        return delta_aic, evidence_ratio, model_weight
+    except Exception:
+        return None, None, None
+
+
+def calculate_theil_sen_discrepancy(x: np.ndarray, y: np.ndarray) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Theil-Sen (1950) robust median slope and discrepancy relative to OLS slope.
+    
+    Theil-Sen has a 29.3% breakdown point, resisting catastrophic outlier distortion.
+    Discrepancy = |beta_OLS - beta_TS| / max(1e-4, |beta_TS|).
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9:
+        return None, None
+    try:
+        b1_ols = float(np.cov(x, y)[0, 1] / max(1e-9, np.var(x)))
+        ts_res = stats.theilslopes(y, x)
+        b1_ts = float(ts_res.slope)
+        disc = float(abs(b1_ols - b1_ts) / max(1e-4, abs(b1_ts)))
+        return b1_ts, disc
+    except Exception:
+        return None, None
+
+
+def calculate_bca_bootstrap_ci(
+    r_boots: np.ndarray,
+    r_obs: float,
+    x: np.ndarray,
+    y: np.ndarray,
+    alpha: float = 0.05,
+) -> tuple[float, float, bool]:
+    """Calculates Efron & Tibshirani (1993) Bias-Corrected and Accelerated (BCa) Bootstrap 95% Confidence Interval.
+    
+    Uses vectorized jackknife leave-one-out calculations to estimate acceleration parameter a,
+    and quantile proportion to estimate bias correction z0.
+    """
+    n = len(x)
+    valid_boots = r_boots[~np.isnan(r_boots)]
+    if len(valid_boots) < 10 or n < 10:
+        return float(np.percentile(valid_boots, 2.5)), float(np.percentile(valid_boots, 97.5)), False
+
+    try:
+        # 1. Bias correction parameter z0
+        prop_less = np.clip(np.mean(valid_boots < r_obs), 1e-4, 1.0 - 1e-4)
+        z0 = float(stats.norm.ppf(prop_less))
+
+        # 2. Acceleration parameter a via vectorized leave-one-out jackknife
+        x_sum, y_sum = float(np.sum(x)), float(np.sum(y))
+        x2_sum, y2_sum = float(np.sum(x ** 2)), float(np.sum(y ** 2))
+        xy_sum = float(np.sum(x * y))
+
+        x_loo_sum = x_sum - x
+        y_loo_sum = y_sum - y
+        xy_loo = xy_sum - (x * y)
+        x2_loo = x2_sum - (x ** 2)
+        y2_loo = y2_sum - (y ** 2)
+        n_loo = n - 1
+
+        cov_loo = xy_loo - (x_loo_sum * y_loo_sum) / n_loo
+        var_x_loo = np.maximum(1e-12, x2_loo - (x_loo_sum ** 2) / n_loo)
+        var_y_loo = np.maximum(1e-12, y2_loo - (y_loo_sum ** 2) / n_loo)
+        r_jack = cov_loo / np.sqrt(var_x_loo * var_y_loo)
+
+        r_bar = float(np.mean(r_jack))
+        diff = r_bar - r_jack
+        a_num = float(np.sum(diff ** 3))
+        a_denom = float(6.0 * (np.sum(diff ** 2) ** 1.5))
+        a = float(a_num / max(1e-12, a_denom)) if a_denom > 1e-12 else 0.0
+
+        # 3. Adjusted quantiles
+        z_a1 = float(stats.norm.ppf(alpha / 2.0))
+        z_a2 = float(stats.norm.ppf(1.0 - alpha / 2.0))
+
+        denom1 = max(1e-4, 1.0 - a * (z0 + z_a1))
+        denom2 = max(1e-4, 1.0 - a * (z0 + z_a2))
+
+        pct1 = float(stats.norm.cdf(z0 + (z0 + z_a1) / denom1))
+        pct2 = float(stats.norm.cdf(z0 + (z0 + z_a2) / denom2))
+
+        bca_low = float(np.percentile(valid_boots, 100.0 * np.clip(pct1, 0.005, 0.995)))
+        bca_high = float(np.percentile(valid_boots, 100.0 * np.clip(pct2, 0.005, 0.995)))
+        zero_cross = bool(bca_low <= 0.0 <= bca_high)
+
+        return bca_low, bca_high, zero_cross
+    except Exception:
+        ci_l = float(np.percentile(valid_boots, 2.5))
+        ci_h = float(np.percentile(valid_boots, 97.5))
+        return ci_l, ci_h, bool(ci_l <= 0.0 <= ci_h)
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -1127,10 +1383,12 @@ class DevilsAdvocateAgent:
                 if cmh_or < 1.0:
                     or_reversal = True
                 
-                # Tarone's Homogeneity Test
-                tarone_stat, tarone_p = tarone_homogeneity_test(tables_2x2, cmh_or)
+                # Breslow-Day & Tarone's Homogeneity Test
+                bd_stat, bd_p, tarone_stat, tarone_p = breslow_day_homogeneity_test(tables_2x2, cmh_or)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
+        else:
+            bd_stat, bd_p = None, None
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -1174,7 +1432,14 @@ class DevilsAdvocateAgent:
             df, source, target, conf_col
         )
 
+        # Advanced Metric 9: Vuong (1989) Likelihood Ratio Non-Nested Model Selection Test
+        vuong_z_val, vuong_p_val, is_strat_fav = vuong_model_selection_test(
+            df, source, target, conf_col
+        )
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
+        if bd_p is not None:
+            cmh_note += f" [Breslow-Day: p={bd_p:.3e}]"
         if tarone_p is not None:
             cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
         if simpson_e_val is not None:
@@ -1191,6 +1456,8 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Trim & Fill: k0={tf_k0}, adj={tf_stat:.4f}]"
         if haus_p is not None:
             cmh_note += f" [Hausman Test: H={haus_stat:.2f}, p={haus_p:.3e}]"
+        if vuong_p_val is not None:
+            cmh_note += f" [Vuong Test: z={vuong_z_val:.2f}, p={vuong_p_val:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -1231,6 +1498,11 @@ class DevilsAdvocateAgent:
             hausman_stat=haus_stat,
             hausman_p=haus_p,
             is_hausman_inconsistent=is_haus_incon,
+            breslow_day_chi2=bd_stat,
+            breslow_day_p=bd_p,
+            vuong_z=vuong_z_val,
+            vuong_p=vuong_p_val,
+            is_stratification_favored=is_strat_fav,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -1325,6 +1597,8 @@ class DevilsAdvocateAgent:
         reset_f, reset_p, is_reset_bad = None, None, False
         oster_delta_val = None
         f2_val = None
+        itcv_val, impact_val, is_itcv_bad = None, None, False
+        delta_aic_val, er_aic_val, w_aic_val = None, None, None
         if top_conf is not None:
             sub_res = df[[source, target, top_conf]].dropna()
             if len(sub_res) >= 20:
@@ -1339,6 +1613,8 @@ class DevilsAdvocateAgent:
                     denom_f2 = max(1e-9, 1.0 - r_xz_o ** 2)
                     r2_full_f2 = min(0.9999, max(0.0, (r_xy ** 2 + r_yz_o ** 2 - 2.0 * r_xy * r_yz_o * r_xz_o) / denom_f2))
                     f2_val = calculate_cohens_f2(r2_full_f2, r_yz_o ** 2)
+                    itcv_val, impact_val, is_itcv_bad = calculate_frank_itcv(r_xy, r_xz_o, r_yz_o, n=len(sub_res))
+                    delta_aic_val, er_aic_val, w_aic_val = calculate_akaike_weights(r_xy, r_xz_o, r_yz_o, n=len(sub_res))
                 except Exception:
                     pass
 
@@ -1354,11 +1630,13 @@ class DevilsAdvocateAgent:
         reset_str = f", RESET p={reset_p:.3e}" if reset_p is not None else ""
         oster_str = f", Oster δ*={oster_delta_val:.2f}" if oster_delta_val is not None else ""
         f2_str = f", Cohen's f²={f2_val:.3f}" if f2_val is not None else ""
+        itcv_str = f", ITCV={itcv_val:.3f}" if itcv_val is not None else ""
+        aic_str = f", w_AIC={w_aic_val:.3f}" if w_aic_val is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}{f2_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}{reset_str}{oster_str}{f2_str}{itcv_str}{aic_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -1389,6 +1667,12 @@ class DevilsAdvocateAgent:
             oster_delta=oster_delta_val,
             cohens_f2=f2_val,
             cinelli_hazlett_rcrit=rcrit_val,
+            frank_itcv=itcv_val,
+            frank_observed_impact=impact_val,
+            is_itcv_exceeded=is_itcv_bad,
+            akaike_delta_aic=delta_aic_val,
+            akaike_evidence_ratio=er_aic_val,
+            akaike_model_weight=w_aic_val,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -1580,7 +1864,13 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: MacKinnon-White (1985) HC3 Heteroscedasticity-Consistent Robust Test
         hc3_se, hc3_p, hc3_sig_lost = mackinnon_white_hc3_test(x_vals, y_vals, residuals, h_ii)
 
-        is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
+        # Advanced Diagnostic: Theil-Sen (1950) Robust Non-Parametric Median Slope
+        ts_slope, ts_disc = calculate_theil_sen_discrepancy(x_vals, y_vals)
+
+        # Advanced Diagnostic: Efron & Tibshirani (1993) BCa Bootstrap 95% Confidence Interval
+        bca_low, bca_high, bca_zero = calculate_bca_bootstrap_ci(valid_r, claim.statistic_value, x_vals, y_vals)
+
+        is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
         cooks_str = f", Cook's D_max={max_cooks:.3f} ({cooks_count} influential)" if max_cooks > 0 else ""
@@ -1591,7 +1881,9 @@ class DevilsAdvocateAgent:
         qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
         dw_str = f", DW={dw_stat:.2f}" if dw_stat is not None else ""
         hc3_str = f", HC3_p={hc3_p:.3e}" if hc3_p is not None else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}{dw_str}{hc3_str}). Trimmed r = {trim_r:.4f}."
+        ts_str = f", Δ_TS={ts_disc:.1%}" if ts_disc is not None else ""
+        bca_str = f", BCa=[{bca_low:.4f}, {bca_high:.4f}]"
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}]{bca_str} (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{dfb_str}{bp_str}{jb_str}{qdi_str}{dw_str}{hc3_str}{ts_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -1630,6 +1922,11 @@ class DevilsAdvocateAgent:
             hc3_robust_se=hc3_se,
             hc3_robust_p=hc3_p,
             hc3_significance_lost=hc3_sig_lost,
+            theil_sen_slope=ts_slope,
+            theil_sen_discrepancy=ts_disc,
+            bca_ci_low=bca_low,
+            bca_ci_high=bca_high,
+            bca_zero_crossing=bca_zero,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
