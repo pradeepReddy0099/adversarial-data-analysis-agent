@@ -113,6 +113,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Peto Odds Ratio & Heterogeneity: OR_Peto = {simpsons.peto_odds_ratio:.3f} (Z = {simpsons.peto_z_stat:.2f}, p = {simpsons.peto_p_value:.3e}; Q_Peto = {simpsons.peto_heterogeneity_q:.2f}, p_het = {simpsons.peto_heterogeneity_p:.3e}) {'[PETO STRATA HETEROGENEITY]' if simpsons.is_peto_heterogeneous else '[HOMOGENEOUS STRATA]'}")
             if simpsons.fligner_killeen_p is not None:
                 rationale["key_evidence"].append(f"Fligner-Killeen Variance Homogeneity: χ² = {simpsons.fligner_killeen_stat:.2f} (p = {simpsons.fligner_killeen_p:.3e}) {'[NON-PARAMETRIC VARIANCE SHIFT]' if simpsons.is_fligner_heterogeneous else '[HOMOSCEDASTIC STRATA]'}")
+            if simpsons.harbord_p_value is not None:
+                rationale["key_evidence"].append(f"Harbord Modified Score Asymmetry: t = {simpsons.harbord_t_stat:.2f} (p = {simpsons.harbord_p_value:.3e}) {'[SPARSE-STRATUM ASYMMETRY / SMALL-STUDY BIAS]' if simpsons.is_harbord_asymmetric else '[SYMMETRIC STRATA]'}")
+            if simpsons.brown_forsythe_p is not None:
+                rationale["key_evidence"].append(f"Brown-Forsythe Robust Scale Homogeneity: W = {simpsons.brown_forsythe_stat:.2f} (p = {simpsons.brown_forsythe_p:.3e}) {'[CONDITIONAL SCALE HETEROGENEITY]' if simpsons.is_brown_forsythe_heterogeneous else '[HOMOSCEDASTIC STRATA SPREAD]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -178,6 +182,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Durbin-Wu-Hausman Endogeneity Test: F = {confounder.durbin_wu_hausman_f:.2f} (p = {confounder.durbin_wu_hausman_p:.3e}) {'[SIGNIFICANT REGRESSOR ENDOGENEITY]' if confounder.is_dwh_endogenous else '[EXOGENOUS SPECIFICATION]'}")
             if confounder.stock_yogo_f_stat is not None:
                 rationale["key_evidence"].append(f"Stock-Yogo First-Stage Relevance: F = {confounder.stock_yogo_f_stat:.2f} {'[STRONG CONVOLUTION - F >= 10]' if not confounder.is_weak_confounder else '[WEAK COUPLING - F < 10]'}")
+            if confounder.bkw_condition_index is not None:
+                rationale["key_evidence"].append(f"Belsley-Kuh-Welsch Condition Index: κ = {confounder.bkw_condition_index:.2f} (Max Var Prop = {confounder.bkw_max_variance_prop:.1%}) {'[SEVERE MULTICOLLINEARITY - κ >= 15]' if confounder.is_bkw_collinear else '[STABLE CONDITIONING]'}")
+            if confounder.sargan_p_value is not None:
+                rationale["key_evidence"].append(f"Sargan-Hansen Overidentification Test: J = {confounder.sargan_j_stat:.2f} (p = {confounder.sargan_p_value:.3e}) {'[EXCLUSION RESTRICTION VIOLATED - INVALID INSTRUMENT]' if confounder.is_sargan_rejected else '[VALID OVERIDENTIFYING RESTRICTIONS]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -244,6 +252,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Brown-Durbin-Evans CUSUM Parameter Drift: S = {stability.cusum_stat:.3f} (p ≈ {stability.cusum_p_approx:.3e}) {'[RECURSIVE STRUCTURAL INSTABILITY - S > 0.948]' if stability.has_cusum_instability else '[STABLE RECURSIVE TRAJECTORY]'}")
             if stability.koenker_p_value is not None:
                 rationale["key_evidence"].append(f"Koenker Studentized Heteroscedasticity: LM = {stability.koenker_lm_stat:.2f} (p = {stability.koenker_p_value:.3e}) {'[ROBUST NON-NORMAL HETEROSCEDASTICITY]' if stability.is_koenker_heteroscedastic else '[HOMOSCEDASTIC]'}")
+            if stability.harvey_collier_p is not None:
+                rationale["key_evidence"].append(f"Harvey-Collier Linearity Test: t = {stability.harvey_collier_t:.2f} (p = {stability.harvey_collier_p:.3e}) {'[FUNCTIONAL NON-LINEARITY / CURVATURE DETECTED]' if stability.has_harvey_collier_nonlinearity else '[LINEAR SPECIFICATION ADEQUATE]'}")
+            if stability.huber_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Huber Robust M-Estimator Discrepancy: Δ_Huber = {stability.huber_slope_discrepancy:.1%} (β_Huber = {stability.huber_m_slope:.4f}) {'[HEAVY OUTLIER CONTAMINATION]' if stability.is_huber_outlier_distorted else '[ROBUST TO OUTLIERS]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -359,6 +371,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Brown-Durbin-Evans CUSUM Stability: S = {stability.cusum_stat:.3f} (p ≈ {stability.cusum_p_approx:.3e})")
             if stability.koenker_p_value is not None:
                 rationale["key_evidence"].append(f"Koenker Studentized Homoscedasticity: LM = {stability.koenker_lm_stat:.2f} (p = {stability.koenker_p_value:.3e})")
+            if confounder.bkw_condition_index is not None:
+                rationale["key_evidence"].append(f"Belsley-Kuh-Welsch Condition Index: κ = {confounder.bkw_condition_index:.2f}")
+            if confounder.sargan_p_value is not None:
+                rationale["key_evidence"].append(f"Sargan-Hansen Overidentification: J = {confounder.sargan_j_stat:.2f} (p = {confounder.sargan_p_value:.3e})")
+            if stability.harvey_collier_p is not None:
+                rationale["key_evidence"].append(f"Harvey-Collier Linearity: t = {stability.harvey_collier_t:.2f} (p = {stability.harvey_collier_p:.3e})")
+            if stability.huber_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Huber Robust M-Slope: β = {stability.huber_m_slope:.4f} (Δ = {stability.huber_slope_discrepancy:.1%})")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

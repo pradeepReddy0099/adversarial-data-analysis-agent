@@ -234,6 +234,12 @@ with col_right:
                         if simpsons.get("fligner_killeen_p") is not None:
                             flig_flag = " ⚠️ Heterogeneous Variances" if simpsons.get("is_fligner_heterogeneous") else " (Homoscedastic Strata)"
                             st.markdown(f"**Fligner-Killeen Variance Homogeneity:** χ² = `{simpsons.get('fligner_killeen_stat', 0.0):.2f}` (p = `{simpsons.get('fligner_killeen_p', 0.0):.3e}`){flig_flag}")
+                        if simpsons.get("harbord_p_value") is not None:
+                            harb_flag = " ⚠️ Funnel Asymmetry (p < 0.05)" if simpsons.get("is_harbord_asymmetric") else " (Symmetric Strata)"
+                            st.markdown(f"**Harbord Modified Score Asymmetry:** t = `{simpsons.get('harbord_t_stat', 0.0):.2f}` (p = `{simpsons.get('harbord_p_value', 0.0):.3e}`){harb_flag}")
+                        if simpsons.get("brown_forsythe_p") is not None:
+                            bf_flag = " ⚠️ Heterogeneous Variances" if simpsons.get("is_brown_forsythe_heterogeneous") else " (Homoscedastic Strata)"
+                            st.markdown(f"**Brown-Forsythe Scale Homogeneity:** W = `{simpsons.get('brown_forsythe_stat', 0.0):.2f}` (p = `{simpsons.get('brown_forsythe_p', 0.0):.3e}`){bf_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -256,6 +262,12 @@ with col_right:
                         if conf_aud.get("stock_yogo_f_stat") is not None:
                             sy_flag = " ⚠️ Weak Confounder (F < 10)" if conf_aud.get("is_weak_confounder") else " (Strong First-Stage Coupling, F ≥ 10)"
                             st.markdown(f"**Stock-Yogo First-Stage Relevance:** F = `{conf_aud.get('stock_yogo_f_stat', 0.0):.2f}`{sy_flag}")
+                        if conf_aud.get("bkw_condition_index") is not None:
+                            bkw_flag = " ⚠️ Severe Collinearity (κ ≥ 15)" if conf_aud.get("is_bkw_collinear") else " (Stable Conditioning)"
+                            st.markdown(f"**Belsley-Kuh-Welsch Condition Index:** κ = `{conf_aud.get('bkw_condition_index', 0.0):.2f}` (Max Var Prop = `{conf_aud.get('bkw_max_variance_prop', 0.0):.1%}`){bkw_flag}")
+                        if conf_aud.get("sargan_p_value") is not None:
+                            sarg_flag = " ⚠️ Restrictions Violated (p < 0.05)" if conf_aud.get("is_sargan_rejected") else " (Valid Overidentifying Restrictions)"
+                            st.markdown(f"**Sargan-Hansen Overidentification:** J = `{conf_aud.get('sargan_j_stat', 0.0):.2f}` (p = `{conf_aud.get('sargan_p_value', 0.0):.3e}`){sarg_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -332,6 +344,12 @@ with col_right:
                         if stab_aud.get("koenker_p_value") is not None:
                             koen_flag = " ⚠️ Heteroscedastic" if stab_aud.get("is_koenker_heteroscedastic") else " (Homoscedastic)"
                             st.markdown(f"**Koenker Studentized Breusch-Pagan Test:** LM = `{stab_aud.get('koenker_lm_stat', 0.0):.2f}` (p = `{stab_aud['koenker_p_value']:.3e}`){koen_flag}")
+                        if stab_aud.get("harvey_collier_p") is not None:
+                            hc_flag = " ⚠️ Functional Curvature (p < 0.05)" if stab_aud.get("has_harvey_collier_nonlinearity") else " (Linear Specification Sound)"
+                            st.markdown(f"**Harvey-Collier Linearity Test:** t = `{stab_aud.get('harvey_collier_t', 0.0):.2f}` (p = `{stab_aud.get('harvey_collier_p', 0.0):.3e}`){hc_flag}")
+                        if stab_aud.get("huber_slope_discrepancy") is not None:
+                            hub_flag = " ⚠️ High Outlier Contamination" if stab_aud.get("is_huber_outlier_distorted") else " (Robust to Outliers)"
+                            st.markdown(f"**Huber Robust M-Slope Discrepancy:** β_Huber = `{stab_aud.get('huber_m_slope', 0.0):.4f}` (Δ = `{stab_aud.get('huber_slope_discrepancy', 0.0):.1%}`){hub_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -492,6 +510,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Brown-Durbin-Evans CUSUM test for recursive parameter stability"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Brown-Durbin-Evans CUSUM test for recursive parameter stability", findings, dataset_name=dataset_name)
 
+            sug_col13, sug_col14, sug_col15 = st.columns(3)
+            with sug_col13:
+                if st.button("📐 Harbord Score Asymmetry", key="sug_harbord"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Harbord modified score test for funnel plot asymmetry"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Harbord modified score test for funnel plot asymmetry", findings, dataset_name=dataset_name)
+            with sug_col14:
+                if st.button("🔍 BKW Condition Index", key="sug_bkw"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Belsley-Kuh-Welsch (BKW) collinearity condition index"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Belsley-Kuh-Welsch (BKW) collinearity condition index", findings, dataset_name=dataset_name)
+            with sug_col15:
+                if st.button("📈 Huber Robust M-Slope", key="sug_huber"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Huber M-estimator robust regression discrepancy"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Huber M-estimator robust regression discrepancy", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -552,6 +587,9 @@ with col_right:
                     "Peto_Odds_Ratio": f"{simp.get('peto_odds_ratio', 0.0):.3f}" if simp.get("peto_odds_ratio") is not None else "N/A",
                     "Peto_Heterogeneity_p": f"{simp.get('peto_heterogeneity_p', 0.0):.3e}" if simp.get("peto_heterogeneity_p") is not None else "N/A",
                     "Fligner_Killeen_p": f"{simp.get('fligner_killeen_p', 0.0):.3e}" if simp.get("fligner_killeen_p") is not None else "N/A",
+                    "Harbord_Score_t": f"{simp.get('harbord_t_stat', 0.0):.2f}" if simp.get("harbord_t_stat") is not None else "N/A",
+                    "Harbord_p_value": f"{simp.get('harbord_p_value', 0.0):.3e}" if simp.get("harbord_p_value") is not None else "N/A",
+                    "Brown_Forsythe_p": f"{simp.get('brown_forsythe_p', 0.0):.3e}" if simp.get("brown_forsythe_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -576,6 +614,9 @@ with col_right:
                     "DWH_Endogeneity_F": f"{conf.get('durbin_wu_hausman_f', 0.0):.2f}" if conf.get("durbin_wu_hausman_f") is not None else "N/A",
                     "DWH_Endogeneity_p": f"{conf.get('durbin_wu_hausman_p', 0.0):.3e}" if conf.get("durbin_wu_hausman_p") is not None else "N/A",
                     "Stock_Yogo_First_Stage_F": f"{conf.get('stock_yogo_f_stat', 0.0):.2f}" if conf.get("stock_yogo_f_stat") is not None else "N/A",
+                    "BKW_Condition_Index": f"{conf.get('bkw_condition_index', 0.0):.2f}" if conf.get("bkw_condition_index") is not None else "N/A",
+                    "Sargan_J_Stat": f"{conf.get('sargan_j_stat', 0.0):.2f}" if conf.get("sargan_j_stat") is not None else "N/A",
+                    "Sargan_p_value": f"{conf.get('sargan_p_value', 0.0):.3e}" if conf.get("sargan_p_value") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -599,6 +640,10 @@ with col_right:
                     "CUSUM_Drift_Flag": str(stab.get("has_cusum_instability", False)),
                     "Koenker_Studentized_LM": f"{stab.get('koenker_lm_stat', 0.0):.2f}" if stab.get("koenker_lm_stat") is not None else "N/A",
                     "Koenker_p_value": f"{stab.get('koenker_p_value', 0.0):.3e}" if stab.get("koenker_p_value") is not None else "N/A",
+                    "Harvey_Collier_t": f"{stab.get('harvey_collier_t', 0.0):.2f}" if stab.get("harvey_collier_t") is not None else "N/A",
+                    "Harvey_Collier_p": f"{stab.get('harvey_collier_p', 0.0):.3e}" if stab.get("harvey_collier_p") is not None else "N/A",
+                    "Huber_M_Slope": f"{stab.get('huber_m_slope', 0.0):.4f}" if stab.get("huber_m_slope") is not None else "N/A",
+                    "Huber_Slope_Discrepancy": f"{stab.get('huber_slope_discrepancy', 0.0):.1%}" if stab.get("huber_slope_discrepancy") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

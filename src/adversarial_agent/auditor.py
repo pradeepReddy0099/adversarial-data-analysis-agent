@@ -81,6 +81,12 @@ class SimpsonsParadoxAudit:
     fligner_killeen_stat: Optional[float] = None
     fligner_killeen_p: Optional[float] = None
     is_fligner_heterogeneous: bool = False
+    harbord_t_stat: Optional[float] = None
+    harbord_p_value: Optional[float] = None
+    is_harbord_asymmetric: bool = False
+    brown_forsythe_stat: Optional[float] = None
+    brown_forsythe_p: Optional[float] = None
+    is_brown_forsythe_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -146,6 +152,12 @@ class ConfounderAudit:
     is_dwh_endogenous: bool = False
     stock_yogo_f_stat: Optional[float] = None
     is_weak_confounder: bool = False
+    bkw_condition_index: Optional[float] = None
+    bkw_max_variance_prop: Optional[float] = None
+    is_bkw_collinear: bool = False
+    sargan_j_stat: Optional[float] = None
+    sargan_p_value: Optional[float] = None
+    is_sargan_rejected: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -214,6 +226,12 @@ class StabilityAudit:
     koenker_lm_stat: Optional[float] = None
     koenker_p_value: Optional[float] = None
     is_koenker_heteroscedastic: bool = False
+    harvey_collier_t: Optional[float] = None
+    harvey_collier_p: Optional[float] = None
+    has_harvey_collier_nonlinearity: bool = False
+    huber_m_slope: Optional[float] = None
+    huber_slope_discrepancy: Optional[float] = None
+    is_huber_outlier_distorted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -2184,6 +2202,312 @@ def koenker_studentized_breusch_pagan_test(
         return None, None, False
 
 
+def harbord_modified_score_test(
+    tables_2x2: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Harbord, Egger, & Sterne (2006) modified score test for funnel plot asymmetry.
+
+    Unlike classical Egger regression on log odds ratios, Harbord's test replaces log-OR and standard errors
+    with the hypergeometric score (a_k - E_k) / sqrt(V_k) and precision proxy sqrt(V_k), eliminating the
+    false-positive rate inflation driven by correlation between effect size and standard error under H_0.
+    Regresses standardized score Z_k = (a_k - E_k) / sqrt(V_k) on precision proxy S_k = sqrt(V_k):
+      Z_k = alpha + beta * S_k + epsilon_k.
+    Test statistic:
+      t_Harbord = alpha_hat / SE(alpha_hat) ~ t(K - 2).
+    A statistically significant intercept (p < 0.05) proves funnel plot asymmetry / small-stratum bias.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        scores = []
+        precisions = []
+        for t in tables_2x2:
+            if isinstance(t, (tuple, list)):
+                a, b, c, d = float(t[0]), float(t[1]), float(t[2]), float(t[3])
+            else:
+                a, b = float(t[0, 0]), float(t[0, 1])
+                c, d = float(t[1, 0]), float(t[1, 1])
+            n1 = a + b
+            n0 = c + d
+            m1 = a + c
+            m0 = b + d
+            N = n1 + n0
+            if N > 2 and n1 > 0 and n0 > 0 and m1 > 0 and m0 > 0:
+                E_k = (n1 * m1) / N
+                V_k = (n1 * n0 * m1 * m0) / (N ** 2 * (N - 1))
+                if V_k > 1e-9:
+                    scores.append((a - E_k) / np.sqrt(V_k))
+                    precisions.append(np.sqrt(V_k))
+
+        k_valid = len(scores)
+        if k_valid < 3:
+            return None, None, False
+
+        X_mat = np.column_stack([np.ones(k_valid), precisions])
+        y_vec = np.array(scores, dtype=float)
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y_vec, rcond=None)
+        res = y_vec - X_mat @ beta
+        df_e = k_valid - 2
+        if df_e <= 0:
+            return None, None, False
+
+        mse = float(np.sum(res ** 2) / df_e)
+        cov = mse * np.linalg.pinv(X_mat.T @ X_mat)
+        se_alpha = float(np.sqrt(max(1e-12, cov[0, 0])))
+        if se_alpha < 1e-12:
+            return None, None, False
+
+        t_stat = float(beta[0] / se_alpha)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < 0.05)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def brown_forsythe_homogeneity_test(
+    subgroup_samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Brown & Forsythe (1974) robust scale homogeneity test across strata.
+
+    Extends Levene's test by taking absolute deviations from subgroup medians rather than means:
+      z_{ki} = |Y_{ki} - median(Y_k)|
+    Performs one-way ANOVA on median deviations z_{ki}.
+    Provides optimal empirical test size and power without assuming normality or homoscedasticity.
+    Rejection (p < 0.05) proves conditional variance heterogeneity across conditioning strata.
+    """
+    valid_samples = [s for s in subgroup_samples if len(s) >= 4 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        stat_val, p_val = stats.levene(*valid_samples, center="median")
+        f_stat = float(stat_val)
+        p_val = float(p_val)
+        is_hetero = bool(p_val < 0.05)
+        return f_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def belsley_kuh_welsch_collinearity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Belsley, Kuh, & Welsch (1980) Collinearity Condition Index (kappa_BKW)
+    and variance decomposition proportions for design matrix [1, X, Z].
+
+    Column-equilibrates design matrix X_* = [1, X, Z] / ||column||_2, computes Singular Value
+    Decomposition X_* = U Sigma V', and evaluates condition indices kappa_j = mu_max / mu_j.
+    Computes parameter variance decomposition proportions pi_{jk}.
+    Flags severe collinearity if kappa >= 30.0 (or moderate >= 15.0) and high variance proportion (> 0.50).
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        norms = np.linalg.norm(X_mat, axis=0)
+        norms[norms < 1e-9] = 1.0
+        X_scaled = X_mat / norms
+
+        _, s, vh = np.linalg.svd(X_scaled, full_matrices=False)
+        s_max = float(np.max(s))
+        s_min = float(np.min(s))
+        if s_min < 1e-12:
+            return 999.0, 1.0, True
+
+        cond_indices = s_max / s
+        max_cond_index = float(np.max(cond_indices))
+
+        v = vh.T
+        phi = (v ** 2) / (s ** 2)[None, :]
+        phi_k = np.sum(phi, axis=1, keepdims=True)
+        phi_k[phi_k < 1e-12] = 1e-12
+        pi_mat = phi / phi_k
+
+        max_idx = int(np.argmax(cond_indices))
+        max_var_prop = float(np.max(pi_mat[:, max_idx]))
+        is_collinear = bool(max_cond_index >= 15.0 and max_var_prop > 0.50)
+
+        return max_cond_index, max_var_prop, is_collinear
+    except Exception:
+        return None, None, False
+
+
+def sargan_overidentifying_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Sargan (1958) & Hansen (1982) Overidentifying Restrictions Test (J_Sargan).
+
+    Evaluates whether candidate instrumental/confounder specifications satisfy orthogonality
+    with structural disturbances. Uses Z and Z^2 as instruments for endogenous regressor X.
+    Procedure:
+      1. First stage: X = gamma_0 + gamma_1 * Z + gamma_2 * Z^2 + v -> fitted X_hat.
+      2. Second stage: Y = beta_0 + beta_1 * X_hat + u_2sls.
+      3. Structural residuals: u_hat = Y - (beta_0 + beta_1 * X).
+      4. Auxiliary regression: u_hat = alpha_0 + alpha_1 * Z + alpha_2 * Z^2 + e -> R^2_{u_hat}.
+    Test statistic:
+      J_Sargan = n * R^2_{u_hat} ~ chi^2(L - K), where L=2 instruments, K=1 regressor -> df=1.
+    Rejection (p < 0.05) proves instruments are invalid / exclusion restrictions are violated.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        z_std = (z - np.mean(z)) / max(1e-6, np.std(z))
+        Z_mat = np.column_stack([np.ones(n), z_std, z_std ** 2])
+        if np.linalg.matrix_rank(Z_mat) < 3:
+            return None, None, False
+
+        # First stage: X ~ Z_mat
+        gamma, _, _, _ = np.linalg.lstsq(Z_mat, x, rcond=None)
+        x_hat = Z_mat @ gamma
+        if np.std(x_hat) < 1e-9:
+            return None, None, False
+
+        # Second stage: Y ~ 1 + X_hat
+        X_2sls = np.column_stack([np.ones(n), x_hat])
+        beta_2sls, _, _, _ = np.linalg.lstsq(X_2sls, y, rcond=None)
+
+        # Structural residuals
+        u_hat = y - (beta_2sls[0] + beta_2sls[1] * x)
+        tss_u = float(np.sum((u_hat - np.mean(u_hat)) ** 2))
+        if tss_u < 1e-12:
+            return None, None, False
+
+        # Auxiliary regression: u_hat ~ Z_mat
+        aux_gamma, _, _, _ = np.linalg.lstsq(Z_mat, u_hat, rcond=None)
+        u_pred = Z_mat @ aux_gamma
+        ess_u = float(np.sum((u_pred - np.mean(u_hat)) ** 2))
+        r2_u = min(0.999999, max(0.0, ess_u / tss_u))
+
+        j_stat = float(n * r2_u)
+        p_val = float(stats.chi2.sf(j_stat, df=1))
+        is_rejected = bool(p_val < 0.05)
+        return j_stat, p_val, is_rejected
+    except Exception:
+        return None, None, False
+
+
+def harvey_collier_linearity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates the Harvey & Collier (1977) recursive residual test for functional linearity.
+
+    Sorts observations along regressor X and computes standardized recursive residuals w_t.
+    Under H_0 (correct linear specification), w_t ~ iid N(0, sigma^2). Under non-linear curvature
+    (concavity, convexity, or unmodeled polynomials), w_t exhibits a non-zero mean.
+    Test statistic:
+      t_HC = (mean(w) / (s_w / sqrt(m))) ~ t(m - 1).
+    Rejection (p < 0.05) detects significant structural non-linearity / functional form misspecification.
+    """
+    n = len(x)
+    if n < 25 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        idx = np.argsort(x)
+        x_s = x[idx]
+        y_s = y[idx]
+
+        k = 2
+        x_mat = np.column_stack([np.ones(n), x_s])
+        init_m = max(k + 2, 5)
+        while init_m < n // 2 and np.linalg.matrix_rank(x_mat[:init_m]) < k:
+            init_m += 1
+
+        if np.linalg.matrix_rank(x_mat[:init_m]) < k:
+            return None, None, False
+
+        x_init = x_mat[:init_m]
+        y_init = y_s[:init_m]
+        a_inv = np.linalg.pinv(x_init.T @ x_init)
+        xty = x_init.T @ y_init
+        beta = a_inv @ xty
+
+        w_list = []
+        for r in range(init_m, n):
+            xr = x_mat[r]
+            yr = y_s[r]
+            f_r = float(1.0 + xr @ a_inv @ xr)
+            if f_r < 1e-12:
+                f_r = 1e-12
+            res_r = float(yr - xr @ beta)
+            w_r = res_r / np.sqrt(f_r)
+            w_list.append(w_r)
+
+            a_xr = a_inv @ xr
+            a_inv = a_inv - np.outer(a_xr, a_xr) / f_r
+            xty = xty + yr * xr
+            beta = a_inv @ xty
+
+        w_arr = np.array(w_list, dtype=float)
+        m = len(w_arr)
+        if m < 5:
+            return None, None, False
+
+        w_mean = float(np.mean(w_arr))
+        w_std = float(np.std(w_arr, ddof=1))
+        if w_std < 1e-12:
+            return None, None, False
+
+        se_w = w_std / np.sqrt(m)
+        t_stat = float(w_mean / se_w)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=m - 1))
+        has_nonlinearity = bool(p_val < 0.05)
+
+        return t_stat, p_val, has_nonlinearity
+    except Exception:
+        return None, None, False
+
+
+def huber_m_estimator_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    max_iter: int = 30,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Huber's (1964) robust M-estimator regression slope and discrepancy vs OLS.
+
+    Applies Iteratively Reweighted Least Squares (IRLS) using Huber's psi function with tuning
+    constant c = 1.345 * sigma_MAD (95% Gaussian asymptotic efficiency).
+    Discrepancy: Delta_Huber = |beta_OLS - beta_Huber| / max(1e-6, |beta_OLS|).
+    Flags outlier contamination if discrepancy > 0.20 (20% slope shift).
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta_ols, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        ols_slope = float(beta_ols[1])
+
+        beta = beta_ols.copy()
+        for _ in range(max_iter):
+            residuals = y - X_mat @ beta
+            mad = float(stats.median_abs_deviation(residuals, scale="normal"))
+            if mad < 1e-7:
+                break
+            c = 1.345 * mad
+            weights = np.clip(c / np.maximum(np.abs(residuals), 1e-9), 0.0, 1.0)
+            W_sqrt = np.sqrt(weights)[:, None]
+            beta_new, _, _, _ = np.linalg.lstsq(X_mat * W_sqrt, y * W_sqrt.squeeze(), rcond=None)
+            if np.max(np.abs(beta_new - beta)) < 1e-6:
+                beta = beta_new
+                break
+            beta = beta_new
+
+        huber_slope = float(beta[1])
+        denom = max(1e-6, abs(ols_slope))
+        discrepancy = float(abs(ols_slope - huber_slope) / denom)
+        is_distorted = bool(discrepancy > 0.20)
+
+        return huber_slope, discrepancy, is_distorted
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -2433,6 +2757,12 @@ class DevilsAdvocateAgent:
         fligner_stat: Optional[float] = None
         fligner_p: Optional[float] = None
         is_fligner_hetero: bool = False
+        harbord_t: Optional[float] = None
+        harbord_p: Optional[float] = None
+        is_harbord_asym: bool = False
+        bf_stat: Optional[float] = None
+        bf_p: Optional[float] = None
+        is_bf_hetero: bool = False
 
         is_binary_target = df[target].dropna().nunique() == 2
         if is_binary_target and len(breakdowns) >= 2 and claim.claim_type in ("proportion_difference", "group_difference"):
@@ -2485,6 +2815,8 @@ class DevilsAdvocateAgent:
                 ft_chi2, ft_p, is_ft_hetero = freeman_tukey_double_arcsine_test(tables_2x2)
                 # Peto et al. (1977) Stratified Odds Ratio & Heterogeneity Test
                 peto_or, peto_z, peto_p, peto_q, peto_qp, is_peto_hetero = peto_stratified_odds_ratio_test(tables_2x2)
+                # Harbord, Egger, & Sterne (2006) Modified Score Test for Funnel Plot Asymmetry
+                harbord_t, harbord_p, is_harbord_asym = harbord_modified_score_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -2554,6 +2886,7 @@ class DevilsAdvocateAgent:
                     kw_samples.append(s)
             kw_h, kw_p, is_kw_hetero = kruskal_wallis_strata_test(kw_samples)
             fligner_stat, fligner_p, is_fligner_hetero = fligner_killeen_homogeneity_test(kw_samples)
+            bf_stat, bf_p, is_bf_hetero = brown_forsythe_homogeneity_test(kw_samples)
         except Exception:
             pass
 
@@ -2654,6 +2987,12 @@ class DevilsAdvocateAgent:
             fligner_killeen_stat=fligner_stat,
             fligner_killeen_p=fligner_p,
             is_fligner_heterogeneous=is_fligner_hetero,
+            harbord_t_stat=harbord_t,
+            harbord_p_value=harbord_p,
+            is_harbord_asymmetric=is_harbord_asym,
+            brown_forsythe_stat=bf_stat,
+            brown_forsythe_p=bf_p,
+            is_brown_forsythe_heterogeneous=is_bf_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -2795,6 +3134,8 @@ class DevilsAdvocateAgent:
         j_stat, j_p, is_j_bad = None, None, False
         dwh_f, dwh_p, is_dwh = None, None, False
         sy_f, is_weak_conf = None, False
+        bkw_cond, bkw_max_prop, is_bkw = None, None, False
+        sargan_j, sargan_p, is_sargan_rej = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -2813,6 +3154,8 @@ class DevilsAdvocateAgent:
                     j_stat, j_p, is_j_bad = davidson_mackinnon_j_test(x_mal, z_mal, y_mal)
                     dwh_f, dwh_p, is_dwh = durbin_wu_hausman_test(x_mal, z_mal, y_mal)
                     sy_f, is_weak_conf = stock_yogo_first_stage_test(x_mal, z_mal)
+                    bkw_cond, bkw_max_prop, is_bkw = belsley_kuh_welsch_collinearity_test(x_mal, z_mal)
+                    sargan_j, sargan_p, is_sargan_rej = sargan_overidentifying_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -2897,6 +3240,12 @@ class DevilsAdvocateAgent:
             is_dwh_endogenous=is_dwh,
             stock_yogo_f_stat=sy_f,
             is_weak_confounder=is_weak_conf,
+            bkw_condition_index=bkw_cond,
+            bkw_max_variance_prop=bkw_max_prop,
+            is_bkw_collinear=is_bkw,
+            sargan_j_stat=sargan_j,
+            sargan_p_value=sargan_p,
+            is_sargan_rejected=is_sargan_rej,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -3115,6 +3464,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Koenker (1981) Studentized Breusch-Pagan Test
         koenker_lm, koenker_p, is_koenker_hetero = koenker_studentized_breusch_pagan_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Harvey & Collier (1977) Recursive Residual Linearity Test
+        hc_t, hc_p, has_hc_nonlin = harvey_collier_linearity_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: Huber (1964) Robust M-Estimator Regression Slope
+        huber_slope, huber_disc, is_huber_distorted = huber_m_estimator_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -3198,6 +3553,12 @@ class DevilsAdvocateAgent:
             koenker_lm_stat=koenker_lm,
             koenker_p_value=koenker_p,
             is_koenker_heteroscedastic=is_koenker_hetero,
+            harvey_collier_t=hc_t,
+            harvey_collier_p=hc_p,
+            has_harvey_collier_nonlinearity=has_hc_nonlin,
+            huber_m_slope=huber_slope,
+            huber_slope_discrepancy=huber_disc,
+            is_huber_outlier_distorted=is_huber_distorted,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

@@ -81,6 +81,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.peto_heterogeneity_p is not None
     assert audit.simpsons_audit.fligner_killeen_stat is not None
     assert audit.simpsons_audit.fligner_killeen_p is not None
+    # Verify Harbord modified score asymmetry test and Brown-Forsythe scale test
+    assert audit.simpsons_audit.harbord_t_stat is not None
+    assert audit.simpsons_audit.harbord_p_value is not None
+    assert audit.simpsons_audit.brown_forsythe_stat is not None
+    assert audit.simpsons_audit.brown_forsythe_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -177,7 +182,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.durbin_wu_hausman_p is not None
         assert audit_coffee.confounder_audit.stock_yogo_f_stat is not None
         assert audit_coffee.confounder_audit.stock_yogo_f_stat >= 10.0
-
+        # Check Belsley-Kuh-Welsch condition index and Sargan-Hansen overidentifying test
+        assert audit_coffee.confounder_audit.bkw_condition_index is not None
+        assert audit_coffee.confounder_audit.bkw_condition_index >= 1.0
+        assert audit_coffee.confounder_audit.sargan_j_stat is not None
+        assert audit_coffee.confounder_audit.sargan_p_value is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -251,6 +260,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.cusum_p_approx is not None
     assert audit.stability_audit.koenker_lm_stat is not None
     assert audit.stability_audit.koenker_p_value is not None
+    # Check Harvey-Collier recursive linearity and Huber robust M-estimator
+    assert audit.stability_audit.harvey_collier_t is not None
+    assert audit.stability_audit.harvey_collier_p is not None
+    assert audit.stability_audit.huber_m_slope is not None
+    assert audit.stability_audit.huber_slope_discrepancy is not None
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -434,6 +448,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_koenker = narrator.answer_query("Explain Koenker studentized Breusch-Pagan test", findings)
     assert "Koenker" in ans_koenker or "Studentized" in ans_koenker or "Heteroscedasticity" in ans_koenker
+
+    ans_harbord = narrator.answer_query("Explain Harbord modified score test for funnel plot asymmetry", findings)
+    assert "Harbord" in ans_harbord or "Score" in ans_harbord or "Asymmetry" in ans_harbord
+
+    ans_bf = narrator.answer_query("Explain Brown-Forsythe scale homogeneity test", findings)
+    assert "Brown" in ans_bf or "Forsythe" in ans_bf or "Scale" in ans_bf
+
+    ans_bkw = narrator.answer_query("Explain Belsley-Kuh-Welsch condition index", findings)
+    assert "Belsley" in ans_bkw or "BKW" in ans_bkw or "Condition" in ans_bkw
+
+    ans_sargan = narrator.answer_query("Explain Sargan-Hansen overidentifying restrictions test", findings)
+    assert "Sargan" in ans_sargan or "Overidentifying" in ans_sargan or "Restrictions" in ans_sargan
+
+    ans_hc = narrator.answer_query("Explain Harvey-Collier recursive residual linearity test", findings)
+    assert "Harvey" in ans_hc or "Collier" in ans_hc or "Linearity" in ans_hc
+
+    ans_huber = narrator.answer_query("Explain Huber M-estimator robust regression discrepancy", findings)
+    assert "Huber" in ans_huber or "Discrepancy" in ans_huber or "Robust" in ans_huber
 
 
 def test_end_to_end_pipeline(tmp_path):
