@@ -44,6 +44,9 @@ def test_berkeley_admissions_falsification():
     # Verify Higgins I^2 and Cochran's Q are computed
     assert audit.simpsons_audit.i_squared is not None
     assert audit.simpsons_audit.cochrans_q is not None
+    # Verify Begg's funnel plot asymmetry test is computed
+    assert audit.simpsons_audit.begg_funnel_p is not None
+    assert audit.simpsons_audit.begg_funnel_tau is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -99,6 +102,10 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.robustness_value is not None
         assert audit_coffee.confounder_audit.robustness_value_alpha is not None
         assert audit_coffee.confounder_audit.sobel_p is not None
+        # Check Kass-Raftery Bayes Factor and Delta BIC
+        assert audit_coffee.confounder_audit.bayes_factor_bf10 is not None
+        assert audit_coffee.confounder_audit.bayes_factor_bf10 > 0.0
+        assert audit_coffee.confounder_audit.bic_delta is not None
 
 
 def test_vectorized_bootstrap_speed_and_stability():
@@ -132,6 +139,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.permutation_p_value < 0.05
     assert exp_claim.bonferroni_p_value is not None
     assert exp_claim.bonferroni_p_value <= 1.0
+    # Check Breusch-Pagan test and Quantile Discrepancy Index
+    assert audit.stability_audit.breusch_pagan_lm is not None
+    assert audit.stability_audit.breusch_pagan_p is not None
+    assert audit.stability_audit.quantile_discrepancy_index is not None
+    assert audit.stability_audit.quantile_discrepancy_index >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -192,6 +204,18 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_bonf = narrator.answer_query("Explain Bonferroni correction", findings)
     assert "Bonferroni" in ans_bonf
+
+    ans_bf = narrator.answer_query("Explain Kass-Raftery Bayes factor and BIC", findings)
+    assert "Bayes" in ans_bf or "BIC" in ans_bf
+
+    ans_begg = narrator.answer_query("What does the Begg funnel test show?", findings)
+    assert "Begg" in ans_begg or "Funnel" in ans_begg
+
+    ans_bp = narrator.answer_query("Explain Breusch-Pagan heteroscedasticity", findings)
+    assert "Breusch-Pagan" in ans_bp or "Heteroscedastic" in ans_bp
+
+    ans_qdi = narrator.answer_query("What is the Quantile Discrepancy Index?", findings)
+    assert "Quantile Discrepancy" in ans_qdi or "QDI" in ans_qdi
 
 
 def test_end_to_end_pipeline(tmp_path):

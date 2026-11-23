@@ -345,6 +345,80 @@ class LLMNarrator:
                 )
             return "Bonferroni correction strictly controls family-wise error rate across multiple hypotheses."
 
+        if any(w in q_lower for w in ["bayes factor", "bic", "kass", "raftery"]):
+            bf_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                bf = conf.get("bayes_factor_bf10")
+                dbic = conf.get("bic_delta")
+                interp = conf.get("bayes_factor_interpretation", "")
+                if bf is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    c_name = conf.get("top_confounder")
+                    bf_items.append(f"• **{v_name}** vs **{c_name}**: BF_10 = {bf:.2f} (ΔBIC = {dbic:+.2f}) — {interp}")
+            if bf_items:
+                return (
+                    "**Kass & Raftery (1995) Bayes Factor & BIC Model Selection:**\n"
+                    "Quantifies the posterior odds ratio favoring the confounder-conditioned model M1 over bivariate claim M0:\n"
+                    + "\n".join(bf_items)
+                )
+            return "Bayes Factors (BF_10) provide Bayesian evidence arbitration between bivariate and confounder-adjusted models."
+
+        if any(w in q_lower for w in ["begg", "funnel"]):
+            begg_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                tau = simp.get("begg_funnel_tau")
+                p_val = simp.get("begg_funnel_p")
+                if p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    conf = simp.get("confounder_column")
+                    begg_items.append(f"• **{v_name}** across **{conf}**: Begg's τ = {tau:.2f} (p = {p_val:.3e})")
+            if begg_items:
+                return (
+                    "**Begg & Mazumdar Funnel Plot Asymmetry Test across Strata:**\n"
+                    "Tests rank correlation between stratum effect sizes and sampling precision to detect small-subgroup distortion:\n"
+                    + "\n".join(begg_items)
+                )
+            return "Begg's funnel test detects whether effect sizes systematically diverge in small strata."
+
+        if any(w in q_lower for w in ["heteroscedastic", "breusch", "pagan"]):
+            bp_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                lm = stab.get("breusch_pagan_lm")
+                p_val = stab.get("breusch_pagan_p")
+                is_h = stab.get("is_heteroscedastic", False)
+                if p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ Heteroscedastic" if is_h else " (Homoscedastic)"
+                    bp_items.append(f"• **{v_name}**: LM = {lm:.2f}, p = {p_val:.3e}{flag}")
+            if bp_items:
+                return (
+                    "**Breusch-Pagan Lagrange Multiplier Heteroscedasticity Test:**\n"
+                    "Tests null hypothesis of constant error variance across exposure levels:\n"
+                    + "\n".join(bp_items)
+                )
+            return "Breusch-Pagan diagnostic tests whether residual variance is non-constant across exposure levels."
+
+        if any(w in q_lower for w in ["quantile", "qdi", "distributional"]):
+            qdi_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                qdi = stab.get("quantile_discrepancy_index")
+                q_flag = stab.get("qdi_flag", False)
+                if qdi is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = " ⚠️ High Quantile Discrepancy" if q_flag else " (Uniform Distribution)"
+                    qdi_items.append(f"• **{v_name}**: QDI = {qdi:.2f}{flag}")
+            if qdi_items:
+                return (
+                    "**Quantile Discrepancy Index (QDI) across 25th, 50th, 75th Percentiles:**\n"
+                    "Quantifies divergence between interquartile regression slopes to detect asymmetric conditional responses:\n"
+                    + "\n".join(qdi_items)
+                )
+            return "Quantile Discrepancy Index measures whether conditional slopes vary dramatically across outcome quantiles."
+
         context_str = json.dumps([{
             "pair": f"{f.get('claim', {}).get('source_variable')} -> {f.get('claim', {}).get('target_variable')}",
             "verdict": f.get("verdict"),
@@ -556,12 +630,13 @@ class LLMNarrator:
 
         lines.append("\n---")
         lines.append("### 🛡️ Dialectical Robustness & Falsification Matrix")
-        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 4 continuous and categorical stress tests:")
-        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity & Higgins I²:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, and quantifies true heterogeneity percentage ($I^2$).")
+        lines.append("Our neuro-symbolic multi-agent architecture verifies statistical hypotheses across 6 continuous and categorical stress tests:")
+        lines.append("1. **Cochran-Mantel-Haenszel, Tarone Homogeneity, Higgins I² & Begg's Funnel Asymmetry:** Verifies whether stratified odds ratios reverse, tests cross-stratum invariance, quantifies true heterogeneity percentage ($I^2$), and tests small-stratum funnel asymmetry.")
         lines.append("2. **VanderWeele E-Values & Cinelli-Hazlett Robustness Values (RV):** Establishes mathematical bounds and partial $R^2$ strength an unmeasured confounder must achieve to nullify empirical associations.")
-        lines.append("3. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
-        lines.append("4. **Non-Parametric Vectorized Bootstrap, Cook's Distance & DFFITS:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), DFFITS influence, and leverage.")
-        lines.append("5. **Exact Permutation Shuffle & FDR/FWER Correction:** Assesses null hypothesis rejection against 150 random shuffles and controls false discovery rate via Benjamini-Hochberg FDR.")
+        lines.append("3. **Kass-Raftery Bayes Factors & BIC Model Selection:** Computes exact posterior evidence odds ($BF_{10} = \\exp(\\Delta \\text{BIC} / 2)$) arbitrating between bivariate claims and confounder-adjusted multivariate models.")
+        lines.append("4. **Baron-Kenny Sobel Mediation Diagnostics:** Disentangles true exogenous confounding from valid intermediate mechanistic transmission ($X \\to Z \\to Y$).")
+        lines.append("5. **Non-Parametric Vectorized Bootstrap, Cook's Distance, DFFITS & Breusch-Pagan:** Evaluates empirical confidence intervals, sign invariance probability ($P \\ge 90\\%$), regression influence diagnostics, and tests error homoscedasticity.")
+        lines.append("6. **Quantile Discrepancy Index, Exact Permutation Shuffle & FDR/FWER Correction:** Assesses conditional slope invariance across 25th/50th/75th percentiles, validates empirical null distributions, and controls false discovery rates via Benjamini-Hochberg FDR and Bonferroni FWER.")
 
         lines.append("\n---")
         lines.append("### 🎯 Immediate Leadership Recommendations")

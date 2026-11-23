@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy import optimize, stats
 
 from adversarial_agent.explorer import Claim
 from adversarial_agent.profiling import benjamini_hochberg_fdr
@@ -45,6 +45,8 @@ class SimpsonsParadoxAudit:
     e_value_interpretation: Optional[str] = None
     i_squared: Optional[float] = None
     cochrans_q: Optional[float] = None
+    begg_funnel_tau: Optional[float] = None
+    begg_funnel_p: Optional[float] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -72,6 +74,9 @@ class ConfounderAudit:
     sobel_z: Optional[float] = None
     sobel_p: Optional[float] = None
     proportion_mediated: Optional[float] = None
+    bayes_factor_bf10: Optional[float] = None
+    bic_delta: Optional[float] = None
+    bayes_factor_interpretation: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -100,6 +105,11 @@ class StabilityAudit:
     max_dffits: Optional[float] = None
     dffits_outlier_count: int = 0
     permutation_p_value: Optional[float] = None
+    breusch_pagan_lm: Optional[float] = None
+    breusch_pagan_p: Optional[float] = None
+    is_heteroscedastic: bool = False
+    quantile_discrepancy_index: Optional[float] = None
+    qdi_flag: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -302,6 +312,126 @@ def higgins_i_squared_heterogeneity(subgroup_stats: List[float], subgroup_weight
         
     i_sq = max(0.0, float((q_stat - df) / max(1e-9, q_stat) * 100.0))
     return q_stat, i_sq
+
+
+def begg_funnel_asymmetry_test(subgroup_stats: List[float], subgroup_weights: List[int]) -> tuple[Optional[float], Optional[float]]:
+    """Calculates Begg & Mazumdar (1994) rank correlation test for funnel plot asymmetry across strata.
+    
+    Evaluates whether subgroup effect sizes systematically correlate with subgroup sample sizes or standard errors.
+    Tau != 0 with p < 0.05 indicates small-subgroup effect distortion or selective reporting.
+    """
+    K = len(subgroup_stats)
+    if K < 3:
+        return None, None
+    se_arr = 1.0 / np.sqrt(np.maximum(1.0, np.array(subgroup_weights, dtype=float) - 3.0))
+    tau, p_val = stats.kendalltau(subgroup_stats, se_arr)
+    if np.isnan(tau) or np.isnan(p_val):
+        return None, None
+    return float(tau), float(p_val)
+
+
+def calculate_bayes_factor_bic(r_xy: float, r_xz: float, r_yz: float, n: int) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Calculates Kass & Raftery (1995) Bayes Factor BF_10 and Delta BIC between unconditioned and confounder models.
+    
+    M0 (bivariate claim): Y ~ X (2 params: intercept, slope)
+    M1 (confounded model): Y ~ X + Z (3 params: intercept, slope X, slope Z)
+    Delta BIC = BIC_0 - BIC_1.
+    BF_10 = exp(Delta BIC / 2).
+    """
+    if n < 10 or abs(r_xz) >= 0.999 or np.isnan(r_xy) or np.isnan(r_xz) or np.isnan(r_yz):
+        return None, None, None
+        
+    denom = max(1e-9, 1.0 - r_xz ** 2)
+    r2_full = min(0.9999, max(0.0, (r_xy ** 2 + r_yz ** 2 - 2.0 * r_xy * r_yz * r_xz) / denom))
+    r2_null = min(0.9999, max(0.0, r_xy ** 2))
+    
+    rss_null = max(1e-9, 1.0 - r2_null)
+    rss_full = max(1e-9, 1.0 - r2_full)
+    
+    bic_0 = n * np.log(rss_null) + 2.0 * np.log(n)
+    bic_1 = n * np.log(rss_full) + 3.0 * np.log(n)
+    
+    delta_bic = float(bic_0 - bic_1)
+    clipped_half_db = min(50.0, max(-50.0, delta_bic / 2.0))
+    bf10 = float(np.exp(clipped_half_db))
+    
+    if bf10 < 1.0:
+        interp = f"Negative evidence for confounding (BF10 = {bf10:.2f} < 1.0, favors bivariate claim)"
+    elif bf10 < 3.2:
+        interp = f"Weak evidence for confounding (BF10 = {bf10:.2f})"
+    elif bf10 < 10.0:
+        interp = f"Positive evidence for confounding (BF10 = {bf10:.2f})"
+    elif bf10 < 100.0:
+        interp = f"Strong evidence for confounding (BF10 = {bf10:.2f})"
+    else:
+        interp = f"Decisive evidence for confounding (BF10 = {bf10:.2f} >= 100.0, confounder dominates)"
+        
+    return bf10, delta_bic, interp
+
+
+def breusch_pagan_test(x: np.ndarray, residuals: np.ndarray) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Breusch-Pagan Lagrange Multiplier test for heteroscedasticity.
+    
+    H0: Homoscedastic error variance across predictor levels.
+    Rejection (p < 0.05) indicates heteroscedasticity, invalidating standard OLS standard errors.
+    """
+    n = len(x)
+    if n < 15 or np.std(x) < 1e-9:
+        return None, None, False
+        
+    e2 = residuals ** 2
+    e2_mean = np.mean(e2)
+    if e2_mean < 1e-12:
+        return 0.0, 1.0, False
+        
+    x_c = x - np.mean(x)
+    x_var = np.sum(x_c ** 2)
+    if x_var < 1e-9:
+        return None, None, False
+        
+    slope_e2 = np.sum(x_c * (e2 - e2_mean)) / x_var
+    fit_e2 = e2_mean + slope_e2 * x_c
+    ss_reg = np.sum((fit_e2 - e2_mean) ** 2)
+    ss_tot = np.sum((e2 - e2_mean) ** 2)
+    
+    r2_e2 = ss_reg / max(1e-12, ss_tot)
+    lm_stat = float(n * r2_e2)
+    p_val = float(stats.chi2.sf(lm_stat, df=1))
+    is_hetero = bool(p_val < 0.05)
+    return lm_stat, p_val, is_hetero
+
+
+def calculate_quantile_discrepancy(x: np.ndarray, y: np.ndarray) -> tuple[Optional[float], bool]:
+    """Computes the Quantile Discrepancy Index (QDI) across the 25th, 50th, and 75th percentiles.
+    
+    QDI = |beta_0.75 - beta_0.25| / max(1e-4, |beta_0.50|).
+    Detects asymmetric distributional response or heavy-tailed skew across quantiles.
+    """
+    n = len(x)
+    if n < 20 or np.std(x) < 1e-9:
+        return None, False
+        
+    b1_ols = float(np.cov(x, y)[0, 1] / max(1e-9, np.var(x)))
+    b0_ols = float(np.mean(y) - b1_ols * np.mean(x))
+    
+    def q_loss(params, q):
+        u = y - (params[0] + params[1] * x)
+        return np.sum(np.where(u >= 0, q * u, (q - 1.0) * u))
+        
+    try:
+        r25 = optimize.minimize(q_loss, [b0_ols, b1_ols], args=(0.25,), method='Nelder-Mead', options={'maxiter': 80})
+        r50 = optimize.minimize(q_loss, [b0_ols, b1_ols], args=(0.50,), method='Nelder-Mead', options={'maxiter': 80})
+        r75 = optimize.minimize(q_loss, [b0_ols, b1_ols], args=(0.75,), method='Nelder-Mead', options={'maxiter': 80})
+        
+        b25 = r25.x[1]
+        b50 = r50.x[1]
+        b75 = r75.x[1]
+        
+        qdi = float(abs(b75 - b25) / max(1e-4, abs(b50)))
+        flag = bool(qdi > 0.50)
+        return qdi, flag
+    except Exception:
+        return None, False
 
 
 class DevilsAdvocateAgent:
@@ -606,6 +736,9 @@ class DevilsAdvocateAgent:
             subgroup_stats, subgroup_weights, is_correlation=(claim.claim_type == "correlation")
         )
 
+        # Advanced Metric 4: Begg & Mazumdar Funnel Plot Asymmetry Test across Strata
+        begg_tau, begg_p = begg_funnel_asymmetry_test(subgroup_stats, subgroup_weights)
+
         cmh_note = f" [CMH Common OR: {cmh_or:.3f}, p={cmh_p:.3e}]" if cmh_or is not None and cmh_p is not None else ""
         if tarone_p is not None:
             cmh_note += f" [Tarone Homogeneity: p={tarone_p:.3e}]"
@@ -613,6 +746,8 @@ class DevilsAdvocateAgent:
             cmh_note += f" [E-value: {simpson_e_val:.2f}]"
         if i_sq is not None:
             cmh_note += f" [I² Heterogeneity: {i_sq:.1f}%]"
+        if begg_p is not None:
+            cmh_note += f" [Begg Funnel: τ={begg_tau:.2f}, p={begg_p:.3e}]"
 
         verdict = (
             f"SIMPSON'S PARADOX CONFIRMED: Stratifying by '{conf_col}' reverses the relationship in "
@@ -643,6 +778,8 @@ class DevilsAdvocateAgent:
             e_value_interpretation=simpson_e_desc,
             i_squared=i_sq,
             cochrans_q=cochrans_q,
+            begg_funnel_tau=begg_tau,
+            begg_funnel_p=begg_p,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -721,16 +858,29 @@ class DevilsAdvocateAgent:
                 except Exception:
                     pass
 
+        # Advanced Bayesian Model Comparison: Kass & Raftery (1995) Bayes Factor BF_10 & Delta BIC
+        bf10, delta_bic, bf_interp = None, None, None
+        if top_conf is not None:
+            sub_bf = df[[source, target, top_conf]].dropna()
+            if len(sub_bf) >= 10:
+                try:
+                    r_xz_b, _ = stats.pearsonr(sub_bf[source], sub_bf[top_conf])
+                    r_yz_b, _ = stats.pearsonr(sub_bf[target], sub_bf[top_conf])
+                    bf10, delta_bic, bf_interp = calculate_bayes_factor_bic(r_xy, r_xz_b, r_yz_b, n=len(sub_bf))
+                except Exception:
+                    pass
+
         is_conf = max_att >= self.confounder_attenuation_threshold and top_conf is not None
         is_collinear = top_vif is not None and top_vif >= 5.0
         vif_str = f", VIF={top_vif:.2f}" if top_vif is not None else ""
         rv_str = f", RV={rv_point:.2f}"
         sob_str = f", Sobel p={sobel_p:.3e}" if sobel_p is not None else ""
+        bf_str = f", BF10={bf10:.2f}" if bf10 is not None else ""
         desc = (
             f"Correlation between '{source}' and '{target}' collapses from r = {r_xy:.4f} (R²={raw_r2:.3f}) to partial r = {best_partial:.4f} (partial R²={partial_r2:.3f}) "
-            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
+            f"({max_att:.1f}% attenuation, {variance_loss:.1f}% variance loss{vif_str}{rv_str}{sob_str}{bf_str}) when controlling for '{top_conf}'. [E-value: {e_val:.2f}]"
             if is_conf
-            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}). [E-value: {e_val:.2f}]"
+            else f"Relationship is robust to linear confounding across tested covariates (max attenuation: {max_att:.1f}%{vif_str}{rv_str}{bf_str}). [E-value: {e_val:.2f}]"
         )
 
         return ConfounderAudit(
@@ -752,6 +902,9 @@ class DevilsAdvocateAgent:
             sobel_z=sobel_z,
             sobel_p=sobel_p,
             proportion_mediated=prop_med,
+            bayes_factor_bf10=bf10,
+            bic_delta=delta_bic,
+            bayes_factor_interpretation=bf_interp,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -919,12 +1072,20 @@ class DevilsAdvocateAgent:
         r_perms = cov_perm / denom_perm
         perm_p = float(np.mean(np.abs(r_perms) >= abs(claim.statistic_value)))
 
+        # Advanced Diagnostic: Breusch-Pagan Lagrange Multiplier Test for Heteroscedasticity
+        bp_lm, bp_p, is_hetero = breusch_pagan_test(x_vals, residuals)
+
+        # Advanced Diagnostic: Quantile Discrepancy Index (QDI) across 25th, 50th, 75th percentiles
+        qdi_val, qdi_flag = calculate_quantile_discrepancy(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
         cooks_str = f", Cook's D_max={max_cooks:.3f} ({cooks_count} influential)" if max_cooks > 0 else ""
         dffits_str = f", DFFITS_max={max_dffits_val:.3f}" if max_dffits_val > 0 else ""
-        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}). Trimmed r = {trim_r:.4f}."
+        bp_str = f", BP_p={bp_p:.3e}" if bp_p is not None else ""
+        qdi_str = f", QDI={qdi_val:.2f}" if qdi_val is not None else ""
+        desc = f"Vectorized Bootstrap 95% CI: [{ci_low:.4f}, {ci_high:.4f}] (SE={std_err:.4f}, P(sign)={sign_inv_prob:.1%}, p_perm={perm_p:.3e}, {exec_ms:.1f}ms{disc_str}{cooks_str}{dffits_str}{bp_str}{qdi_str}). Trimmed r = {trim_r:.4f}."
 
         return StabilityAudit(
             is_stable=is_stable,
@@ -948,6 +1109,11 @@ class DevilsAdvocateAgent:
             max_dffits=max_dffits_val,
             dffits_outlier_count=dffits_count,
             permutation_p_value=perm_p,
+            breusch_pagan_lm=bp_lm,
+            breusch_pagan_p=bp_p,
+            is_heteroscedastic=is_hetero,
+            quantile_discrepancy_index=qdi_val,
+            qdi_flag=qdi_flag,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

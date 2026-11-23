@@ -83,6 +83,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Causal E-value: {simpsons.e_value:.2f}")
             if simpsons.i_squared is not None:
                 rationale["key_evidence"].append(f"Higgins & Thompson I² Inconsistency: {simpsons.i_squared:.1f}% (Cochran's Q = {simpsons.cochrans_q:.2f})")
+            if simpsons.begg_funnel_p is not None:
+                rationale["key_evidence"].append(f"Begg & Mazumdar Funnel Test: τ = {simpsons.begg_funnel_tau:.2f} (p = {simpsons.begg_funnel_p:.3e})")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -118,6 +120,8 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Cinelli-Hazlett Robustness Value: RV_q=1 = {confounder.robustness_value:.2f} (RV_α = {confounder.robustness_value_alpha:.2f})")
             if confounder.sobel_p is not None:
                 rationale["key_evidence"].append(f"Baron-Kenny Sobel Mediation: p = {confounder.sobel_p:.3e} ({confounder.proportion_mediated:.1f}% mediated by '{confounder.top_confounder}')")
+            if confounder.bayes_factor_bf10 is not None:
+                rationale["key_evidence"].append(f"Kass-Raftery Bayes Factor: BF_10 = {confounder.bayes_factor_bf10:.2f} (ΔBIC = {confounder.bic_delta:+.2f}) [{confounder.bayes_factor_interpretation}]")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -155,6 +159,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"DFFITS Influence: Max |DFFITS| = {stability.max_dffits:.3f} ({stability.dffits_outlier_count} influential observations)")
             if stability.permutation_p_value is not None:
                 rationale["key_evidence"].append(f"Permutation Shuffle Test: p_perm = {stability.permutation_p_value:.3e}")
+            if stability.breusch_pagan_p is not None:
+                rationale["key_evidence"].append(f"Breusch-Pagan Heteroscedasticity: LM = {stability.breusch_pagan_lm:.2f} (p = {stability.breusch_pagan_p:.3e}) {'[HETEROSCEDASTIC]' if stability.is_heteroscedastic else '[HOMOSCEDASTIC]'}")
+            if stability.quantile_discrepancy_index is not None:
+                rationale["key_evidence"].append(f"Quantile Discrepancy Index: QDI = {stability.quantile_discrepancy_index:.2f} {'[HIGH QUANTILE DISCREPANCY]' if stability.qdi_flag else '[UNIFORM]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -211,6 +219,8 @@ class RefereeAgent:
             }
             if confounder.e_value is not None:
                 rationale["key_evidence"].append(f"Causal sensitivity E-value: {confounder.e_value:.2f} ({confounder.e_value_interpretation})")
+            if confounder.bayes_factor_bf10 is not None:
+                rationale["key_evidence"].append(f"Kass-Raftery Bayes Factor: BF_10 = {confounder.bayes_factor_bf10:.2f} (ΔBIC = {confounder.bic_delta:+.2f})")
             if stability.spearman_rho is not None:
                 rationale["key_evidence"].append(f"Monotonic Rank: Spearman ρ = {stability.spearman_rho:.3f} (Δr = {stability.rank_discrepancy:.3f})")
             rationale["key_evidence"].append(f"Sign invariance probability: P(sign) = {stability.sign_invariance_prob:.1%}")
@@ -220,6 +230,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"DFFITS Influence: Max |DFFITS| = {stability.max_dffits:.3f}")
             if stability.permutation_p_value is not None:
                 rationale["key_evidence"].append(f"Permutation Shuffle Test: p_perm = {stability.permutation_p_value:.3e}")
+            if stability.breusch_pagan_p is not None:
+                rationale["key_evidence"].append(f"Breusch-Pagan Homoscedasticity: LM = {stability.breusch_pagan_lm:.2f} (p = {stability.breusch_pagan_p:.3e})")
+            if stability.quantile_discrepancy_index is not None:
+                rationale["key_evidence"].append(f"Quantile Discrepancy Index: QDI = {stability.quantile_discrepancy_index:.2f}")
             if claim.fdr_q_value is not None:
                 rationale["key_evidence"].append(f"Benjamini-Hochberg FDR: q = {claim.fdr_q_value:.4e}")
             if claim.bonferroni_p_value is not None:
