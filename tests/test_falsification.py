@@ -189,6 +189,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.demets_simon_p_value is not None
     assert audit.simpsons_audit.box_andersen_stat_m is not None
     assert audit.simpsons_audit.box_andersen_p_value is not None
+    # Verify Pocock-Hughes-Lee qualitative interaction and Overall-Woodward modified variance test
+    assert audit.simpsons_audit.pocock_hughes_lee_stat_q is not None
+    assert audit.simpsons_audit.pocock_hughes_lee_p_value is not None
+    assert audit.simpsons_audit.overall_woodward_stat_f is not None
+    assert audit.simpsons_audit.overall_woodward_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -396,6 +401,13 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_disparity is not None
         assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_disparity >= 0.0
         assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_max_q_divergence is not None
+        # Check Rosenbaum dual-control sensitivity and Hainmueller entropy balancing
+        assert audit_coffee.confounder_audit.rosenbaum_dual_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_dual_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.hainmueller_eb_disparity is not None
+        assert audit_coffee.confounder_audit.hainmueller_eb_disparity >= 0.0
+        assert audit_coffee.confounder_audit.hainmueller_eff_sample_pct is not None
+        assert audit_coffee.confounder_audit.hainmueller_entropy_loss is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -581,6 +593,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.lin_mudholkar_p_value is not None
     assert audit.stability_audit.hoaglin_welsch_max_leverage_ratio is not None
     assert audit.stability_audit.hoaglin_welsch_max_leverage_ratio >= 0.0
+    # Check Bontemps-Meddahi Hermite moment normality and Yohai MM-estimator robust discrepancy
+    assert audit.stability_audit.bontemps_meddahi_stat_m is not None
+    assert audit.stability_audit.bontemps_meddahi_p_value is not None
+    assert audit.stability_audit.yohai_mm_discrepancy is not None
+    assert audit.stability_audit.yohai_mm_discrepancy >= 0.0
+    assert audit.stability_audit.yohai_mm_outlier_count >= 0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1142,6 +1160,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_hw = narrator.answer_query("Explain David Hoaglin and Roy Welsch hat-matrix leverage ratio diagnostic", findings)
     assert "Hoaglin" in ans_hw or "Welsch" in ans_hw or "Leverage" in ans_hw or "Hat" in ans_hw or "Ratio" in ans_hw
+
+    ans_phl = narrator.answer_query("Explain Stuart Pocock and Michael Hughes qualitative interaction contrast test", findings)
+    assert "Pocock" in ans_phl or "Hughes" in ans_phl or "Qualitative" in ans_phl or "Interaction" in ans_phl or "Contrast" in ans_phl
+
+    ans_ow = narrator.answer_query("Explain Overall Woodward modified variance homogeneity test", findings)
+    assert "Overall" in ans_ow or "Woodward" in ans_ow or "Variance" in ans_ow or "Homogeneity" in ans_ow or "Scale" in ans_ow
+
+    ans_dual = narrator.answer_query("Explain Paul Rosenbaum dual control observational sensitivity bound", findings)
+    assert "Rosenbaum" in ans_dual or "Dual" in ans_dual or "Control" in ans_dual or "Sensitivity" in ans_dual or "Bound" in ans_dual
+
+    ans_eb = narrator.answer_query("Explain Jens Hainmueller entropy balancing treatment discrepancy", findings)
+    assert "Hainmueller" in ans_eb or "Entropy" in ans_eb or "Balancing" in ans_eb or "Discrepancy" in ans_eb
+
+    ans_bm = narrator.answer_query("Explain Christian Bontemps and Nour Meddahi Hermite polynomial moment normality test", findings)
+    assert "Bontemps" in ans_bm or "Meddahi" in ans_bm or "Hermite" in ans_bm or "Normality" in ans_bm or "Moment" in ans_bm
+
+    ans_yohai = narrator.answer_query("Explain Victor Yohai high-breakdown MM-estimator robust slope discrepancy", findings)
+    assert "Yohai" in ans_yohai or "MM" in ans_yohai or "Estimator" in ans_yohai or "Robust" in ans_yohai or "Discrepancy" in ans_yohai
 
 
 def test_end_to_end_pipeline(tmp_path):

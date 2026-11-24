@@ -211,6 +211,12 @@ class SimpsonsParadoxAudit:
     box_andersen_stat_m: Optional[float] = None
     box_andersen_p_value: Optional[float] = None
     is_box_andersen_heterogeneous: bool = False
+    pocock_hughes_lee_stat_q: Optional[float] = None
+    pocock_hughes_lee_p_value: Optional[float] = None
+    is_pocock_reversal: bool = False
+    overall_woodward_stat_f: Optional[float] = None
+    overall_woodward_p_value: Optional[float] = None
+    is_overall_woodward_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -399,6 +405,13 @@ class ConfounderAudit:
     bitler_gelbach_hoynes_disparity: Optional[float] = None
     bitler_gelbach_hoynes_max_q_divergence: Optional[float] = None
     is_bgh_heterogeneous: bool = False
+    rosenbaum_dual_gamma_crit: Optional[float] = None
+    rosenbaum_dual_p_upper: Optional[float] = None
+    is_rosenbaum_dual_fragile: bool = False
+    hainmueller_eb_disparity: Optional[float] = None
+    hainmueller_eff_sample_pct: Optional[float] = None
+    hainmueller_entropy_loss: Optional[float] = None
+    is_entropy_balanced_fragile: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -595,6 +608,13 @@ class StabilityAudit:
     hoaglin_welsch_max_leverage_ratio: Optional[float] = None
     hoaglin_welsch_outlier_count: int = 0
     is_hoaglin_welsch_influential: bool = False
+    bontemps_meddahi_stat_m: Optional[float] = None
+    bontemps_meddahi_p_value: Optional[float] = None
+    is_bontemps_meddahi_non_normal: bool = False
+    yohai_mm_slope: Optional[float] = None
+    yohai_mm_discrepancy: Optional[float] = None
+    yohai_mm_outlier_count: int = 0
+    is_yohai_mm_distorted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -8881,6 +8901,399 @@ def hoaglin_welsch_leverage_ratio_test(
         return None, 0, False
 
 
+def pocock_hughes_lee_qualitative_interaction_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Stuart J. Pocock, Michael D. Hughes, & Robert J. Lee's (1987 JACC / Geller & Pocock 1987 JASA) Qualitative Interaction Contrast Test (Q_PHL).
+
+    Evaluates whether subgroup effect estimates demonstrate statistically significant qualitative
+    crossing / opposing sign discordance across strata:
+      H0: all d_k >= 0 or all d_k <= 0 (directional concordancy)
+      H1: at least one stratum d_k > 0 and another d_k < 0.
+    For each stratum k with estimate d_k and variance v_k = SE(d_k)^2, weight w_k = 1 / v_k.
+    Partitions into positive strata S+ = {k: d_k > 0} and negative strata S- = {k: d_k < 0}.
+    Directional contrast: Delta = d_bar(+) - d_bar(-).
+    Contrast variance: Var(Delta) = 1 / W(+) + 1 / W(-).
+    Standardized contrast: Z_PHL = Delta / sqrt(Var(Delta)).
+    Chi-squared statistic: Q_PHL = Z_PHL^2 ~ Chi2(1).
+    Conditional p-value: p_PHL = Pr(Chi2(1) >= Q_PHL) = 2 * (1 - Phi(|Z_PHL|)).
+    Rejection (p_PHL < 0.05 with Q_PHL > 3.841) certifies qualitative Simpson's reversal across strata.
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        pos_w, pos_wd = 0.0, 0.0
+        neg_w, neg_wd = 0.0, 0.0
+
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            se_k = math.sqrt(max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0)))
+            w_k = 1.0 / max(1e-6, se_k ** 2)
+
+            if d_k > 0:
+                pos_w += w_k
+                pos_wd += w_k * d_k
+            elif d_k < 0:
+                neg_w += w_k
+                neg_wd += w_k * d_k
+
+        if pos_w <= 1e-12 or neg_w <= 1e-12:
+            return 0.0, 1.0, False
+
+        d_bar_pos = pos_wd / pos_w
+        d_bar_neg = neg_wd / neg_w
+        delta = d_bar_pos - d_bar_neg
+
+        var_contrast = (1.0 / pos_w) + (1.0 / neg_w)
+        if var_contrast < 1e-12:
+            return 0.0, 1.0, False
+
+        z_phl = float(delta / math.sqrt(var_contrast))
+        q_phl = float(z_phl ** 2)
+        p_val = float(2.0 * stats.norm.sf(abs(z_phl)))
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+        is_reversal = bool(p_val < 0.05 and q_phl > 3.841)
+        return q_phl, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def overall_woodward_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates John E. Overall & J. Arthur Woodward's (1974 Psychological Bulletin) Modified Variance Homogeneity Test (F_OW).
+
+    Tests equality of variances across K groups in unbalanced designs, incorporating kurtosis adjustment on log-variances:
+      z_k = ln(s_k^2), where s_k^2 is sample variance with nu_k = n_k - 1.
+      Pooled excess kurtosis gamma_2 = (1/K) * sum [ m_{4,k} / s_{0,k}^4 - 3.0 ].
+      Theoretical variance of log-variance: V_k = 2 / nu_k + max(-1.5, gamma_2) / n_k.
+      Weights w_k = 1 / V_k, weighted mean z_bar_w = sum(w_k * z_k) / sum(w_k).
+      Statistic: (K - 1) * F_OW = sum_{k=1}^K w_k * (z_k - z_bar_w)^2 ~ Chi2(K - 1).
+    Rejection (p < 0.05) detects significant scale dispersion heterogeneity robust to non-normal kurtosis.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        n_k = [len(s) for s in valid_samples]
+        s_sq_k = [float(np.var(s, ddof=1)) for s in valid_samples]
+        if any(v < 1e-12 for v in s_sq_k):
+            return None, None, False
+
+        kurt_list = []
+        for s in valid_samples:
+            m4 = float(np.mean((s - np.mean(s)) ** 4))
+            v0 = float(np.var(s, ddof=0))
+            if v0 > 1e-12:
+                kurt_list.append(m4 / (v0 ** 2) - 3.0)
+
+        gamma_2 = float(np.mean(kurt_list)) if kurt_list else 0.0
+
+        z_k = [math.log(v) for v in s_sq_k]
+        v_weights = []
+        for n in n_k:
+            nu = float(n - 1)
+            vk = (2.0 / nu) + (max(-1.5, gamma_2) / float(n))
+            v_weights.append(1.0 / max(1e-6, vk))
+
+        sum_w = sum(v_weights)
+        if sum_w < 1e-12:
+            return None, None, False
+
+        z_bar_w = sum(w * z for w, z in zip(v_weights, z_k)) / sum_w
+        ss_ow = sum(w * ((z - z_bar_w) ** 2) for w, z in zip(v_weights, z_k))
+        df_k = k - 1
+        f_ow = float(ss_ow / max(1, df_k))
+        p_val = float(stats.chi2.sf(ss_ow, df=df_k))
+        is_hetero = bool(p_val < 0.05)
+        return f_ow, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_dual_control_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (1989 JASA / 2002 Observational Studies) Dual-Control Observational Sensitivity Bound (Gamma_Dual).
+
+    Evaluates sensitivity to hidden bias by assessing whether primary treatment difference exceeds
+    unobserved bias between two distinct comparison control groups:
+      Primary treated group T: X > median(X).
+      Control units C: X <= median(X) split by Z into C1 (high Z control) and C2 (low Z control).
+      Primary contrast: D_T1 = mean(Y_T) - mean(Y_C1).
+      Dual-control baseline disparity: D_12 = mean(Y_C1) - mean(Y_C2).
+      Adjusted contrast: D_Dual = D_T1 - sign(D_T1) * |D_12|.
+      Standardized score: Z_Dual(Gamma) = (D_Dual / SE_Dual) - ((Gamma - 1) / (Gamma + 1)) * sqrt(n).
+    Finds critical Gamma_Dual where upper-tail P_upper(Gamma) = 0.05.
+    Findings with Gamma_Dual < 1.30 fail to overcome dual-control unobserved selection disparity and are declared fragile.
+    """
+    n = len(x)
+    if n < 12 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        t_mask = x > med_x
+        c_mask = ~t_mask
+
+        if np.sum(t_mask) < 3 or np.sum(c_mask) < 4:
+            return 1.0, 1.0, True
+
+        z_ctrl = z[c_mask]
+        med_z_ctrl = float(np.median(z_ctrl))
+
+        c1_mask = c_mask & (z > med_z_ctrl)
+        c2_mask = c_mask & (z <= med_z_ctrl)
+
+        if np.sum(c1_mask) < 2 or np.sum(c2_mask) < 2:
+            return 1.0, 1.0, True
+
+        y_t = y[t_mask]
+        y_c1 = y[c1_mask]
+        y_c2 = y[c2_mask]
+
+        d_t1 = float(np.mean(y_t) - np.mean(y_c1))
+        d_12 = float(np.mean(y_c1) - np.mean(y_c2))
+
+        sign_t1 = 1.0 if d_t1 >= 0 else -1.0
+        d_dual = d_t1 - sign_t1 * abs(d_12)
+
+        var_t1 = float(np.var(y_t, ddof=1) / len(y_t) + np.var(y_c1, ddof=1) / len(y_c1))
+        var_12 = float(np.var(y_c1, ddof=1) / len(y_c1) + np.var(y_c2, ddof=1) / len(y_c2))
+        se_dual = math.sqrt(max(1e-8, var_t1 + var_12))
+
+        z_0 = abs(d_dual) / se_dual
+
+        def p_dual_upper(gamma: float) -> float:
+            bias_adj = ((gamma - 1.0) / (gamma + 1.0)) * math.sqrt(n)
+            z_stat = z_0 - bias_adj
+            return float(stats.norm.sf(z_stat))
+
+        p_at_1 = float(np.clip(p_dual_upper(1.0), 1e-12, 1.0))
+
+        low_g, high_g = 1.0, 15.0
+        gamma_dual = 1.0
+        for _ in range(30):
+            mid_g = (low_g + high_g) / 2.0
+            p_mid = p_dual_upper(mid_g)
+            if p_mid < 0.05:
+                low_g = mid_g
+                gamma_dual = mid_g
+            else:
+                high_g = mid_g
+
+        gamma_dual = float(np.clip(gamma_dual, 1.0, 20.0))
+        is_fragile = bool(gamma_dual < 1.30 or (gamma_crit is not None and gamma_dual < gamma_crit))
+        return gamma_dual, p_at_1, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def hainmueller_entropy_balancing_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Jens Hainmueller's (2012 Political Analysis) Entropy Balancing Treatment Discrepancy (Delta_EB).
+
+    Reweights control units to achieve exact moment calibration matching treated sample moments with minimal relative entropy:
+      Treated units T: X > median(X); Control units C: X <= median(X).
+      Target mean of confounder in treated group: mu_T = mean(Z_T).
+      Solves for optimal Lagrange multiplier lambda via Newton-Raphson:
+        w_i(lambda) = exp(-lambda * (Z_C,i - mu_T)) / sum_j exp(-lambda * (Z_C,j - mu_T)).
+      Entropy-balanced control mean: Y_bar_{C, EB} = sum_i w_i * Y_{C,i}.
+      Naive ATE: tau_naive = mean(Y_T) - mean(Y_C).
+      Entropy-balanced ATE: tau_EB = mean(Y_T) - Y_bar_{C, EB}.
+      Relative discrepancy: Delta_EB = |tau_naive - tau_EB| / max(1e-6, |tau_naive|).
+      Effective sample size: n_eff = 1 / sum_i w_i^2, n_eff_pct = n_eff / n_C * 100%.
+      Weight entropy loss: H_EB = -sum_i w_i * ln(w_i).
+    When Delta_EB > 0.35 or n_eff_pct < 25.0%, the effect is certified as distorted by covariate imbalance.
+    """
+    n = len(x)
+    if n < 12 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = x > med_x
+        control = ~treated
+        n_t = int(np.sum(treated))
+        n_c = int(np.sum(control))
+
+        if n_t < 4 or n_c < 4:
+            return None, None, None, False
+
+        y_t = y[treated]
+        y_c = y[control]
+        z_t = z[treated]
+        z_c = z[control]
+
+        mu_t = float(np.mean(z_t))
+        dev_z = z_c - mu_t
+
+        lam = 0.0
+        for _ in range(25):
+            exp_terms = np.exp(-np.clip(lam * dev_z, -50.0, 50.0))
+            sum_exp = float(np.sum(exp_terms))
+            if sum_exp < 1e-12:
+                break
+            w = exp_terms / sum_exp
+            f_val = float(np.sum(w * dev_z))
+            f_prime = float(np.sum(w * (dev_z ** 2)) - (f_val ** 2))
+            if abs(f_val) < 1e-6:
+                break
+            step = f_val / max(1e-6, f_prime)
+            lam += np.clip(step, -2.0, 2.0)
+
+        exp_terms = np.exp(-np.clip(lam * dev_z, -50.0, 50.0))
+        w_opt = exp_terms / float(np.sum(exp_terms))
+
+        y_bar_t = float(np.mean(y_t))
+        y_bar_c = float(np.mean(y_c))
+        y_bar_c_eb = float(np.sum(w_opt * y_c))
+
+        tau_naive = y_bar_t - y_bar_c
+        tau_eb = y_bar_t - y_bar_c_eb
+
+        delta_eb = float(abs(tau_naive - tau_eb) / max(1e-6, abs(tau_naive)))
+
+        sum_w_sq = float(np.sum(w_opt ** 2))
+        n_eff = 1.0 / max(1e-12, sum_w_sq)
+        n_eff_pct = float((n_eff / float(n_c)) * 100.0)
+
+        entropy_loss = float(-np.sum(w_opt * np.log(np.maximum(1e-12, w_opt))))
+
+        is_fragile = bool(delta_eb > 0.35 or n_eff_pct < 25.0)
+        return delta_eb, n_eff_pct, entropy_loss, is_fragile
+    except Exception:
+        return None, None, None, False
+
+
+def bontemps_meddahi_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Christian Bontemps & Nour Meddahi's (2005 Econometric Theory) Hermite Polynomial Moment Normality Test (M_BM).
+
+    Tests Gaussianity of regression residuals using normalized Hermite polynomial moment conditions:
+      e_i* = (e_i - mean(e)) / s_e.
+      Normalized skewness Hermite polynomial: h_3(u) = (u^3 - 3*u) / sqrt(6).
+      Normalized kurtosis Hermite polynomial: h_4(u) = (u^4 - 6*u^2 + 3) / sqrt(24).
+      Sample moment conditions: m_3 = (1/sqrt(n)) * sum h_3(e_i*), m_4 = (1/sqrt(n)) * sum h_4(e_i*).
+      Omnibus test statistic: M_BM = m_3^2 + m_4^2 ~ Chi2(2).
+      Asymptotic p-value: p_BM = 1 - F_{Chi2(2)}(M_BM).
+    Rejection (p < 0.05) diagnoses significant non-Gaussian residual distortion invariant to nuisance parameters.
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        e = np.asarray(residuals, dtype=float)
+        mean_e = float(np.mean(e))
+        s_e = float(np.std(e, ddof=1))
+        if s_e < 1e-12:
+            return 0.0, 1.0, False
+
+        u = (e - mean_e) / s_e
+
+        h3 = (u ** 3 - 3.0 * u) / math.sqrt(6.0)
+        h4 = (u ** 4 - 6.0 * (u ** 2) + 3.0) / math.sqrt(24.0)
+
+        m3 = float(np.sum(h3) / math.sqrt(n))
+        m4 = float(np.sum(h4) / math.sqrt(n))
+
+        m_bm = float(m3 ** 2 + m4 ** 2)
+        p_val = float(stats.chi2.sf(m_bm, df=2))
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+        is_non_normal = bool(p_val < 0.05)
+        return m_bm, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def yohai_mm_estimator_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], int, bool]:
+    """Calculates Victor J. Yohai's (1987 Annals of Statistics) High-Breakdown MM-Estimator Robust Slope Discrepancy (Delta_MM).
+
+    Combines 50% breakdown point with 95% Gaussian efficiency via Tukey's biweight loss:
+      OLS slope: beta_OLS = cov(X, Y) / var(X).
+      Initial robust scale sigma_0 = 1.4826 * MAD(residuals_median).
+      Tukey biweight with c = 4.685:
+        u_i = r_i / (sigma * c).
+        w_i = (1 - u_i^2)^2 for |u_i| <= 1, 0 otherwise.
+      Iteratively reweighted least squares (IRLS) converges to robust slope beta_MM.
+      Discrepancy: Delta_MM = |beta_OLS - beta_MM| / max(1e-6, |beta_OLS|).
+      Downweighted outlier count: n_out = sum(w_i < 0.50).
+    When Delta_MM > 0.30 or (n_out >= 3 and Delta_MM > 0.15), the finding is declared distorted by high-leverage outliers.
+    """
+    n = len(x)
+    if n < 8 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, 0, False
+    try:
+        x_flt = np.asarray(x, dtype=float)
+        y_flt = np.asarray(y, dtype=float)
+
+        mean_x = float(np.mean(x_flt))
+        mean_y = float(np.mean(y_flt))
+        ss_x = float(np.sum((x_flt - mean_x) ** 2))
+        if ss_x < 1e-12:
+            return None, None, 0, False
+
+        beta_ols = float(np.sum((x_flt - mean_x) * (y_flt - mean_y)) / ss_x)
+
+        dx = x_flt[:, None] - x_flt[None, :]
+        dy = y_flt[:, None] - y_flt[None, :]
+        valid_pairs = np.abs(dx) > 1e-9
+        if np.any(valid_pairs):
+            beta_med = float(np.median(dy[valid_pairs] / dx[valid_pairs]))
+        else:
+            beta_med = beta_ols
+
+        r_med = y_flt - beta_med * x_flt
+        mad_r = float(np.median(np.abs(r_med - np.median(r_med))))
+        sigma_0 = max(1e-6, 1.4826 * mad_r)
+
+        c = 4.685
+        beta_curr = beta_med
+        weights = np.ones(n, dtype=float)
+
+        for _ in range(12):
+            r = y_flt - (mean_y - beta_curr * mean_x) - beta_curr * x_flt
+            u = np.abs(r) / (sigma_0 * c)
+            weights = np.where(u <= 1.0, (1.0 - u ** 2) ** 2, 0.0)
+
+            sum_w = float(np.sum(weights))
+            if sum_w < 1e-6:
+                break
+
+            xw = float(np.sum(weights * x_flt) / sum_w)
+            yw = float(np.sum(weights * y_flt) / sum_w)
+            denom = float(np.sum(weights * ((x_flt - xw) ** 2)))
+            if denom < 1e-12:
+                break
+
+            beta_next = float(np.sum(weights * (x_flt - xw) * (y_flt - yw)) / denom)
+            if abs(beta_next - beta_curr) < 1e-5:
+                beta_curr = beta_next
+                break
+            beta_curr = beta_next
+
+        beta_mm = float(beta_curr)
+        delta_mm = float(abs(beta_ols - beta_mm) / max(1e-6, abs(beta_ols)))
+        outlier_count = int(np.sum(weights < 0.50))
+
+        is_distorted = bool(delta_mm > 0.30 or (outlier_count >= 3 and delta_mm > 0.15))
+        return beta_mm, delta_mm, outlier_count, is_distorted
+    except Exception:
+        return None, None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -9344,6 +9757,8 @@ class DevilsAdvocateAgent:
         shoemaker_stat, shoemaker_p, is_shoemaker_hetero = None, None, False
         demets_q, demets_p, is_demets_reversal = None, None, False
         box_m, box_p, is_box_hetero = None, None, False
+        pocock_q, pocock_p, is_pocock_reversal = None, None, False
+        ow_f, ow_p, is_ow_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -9404,6 +9819,10 @@ class DevilsAdvocateAgent:
             demets_q, demets_p, is_demets_reversal = demets_simon_qualitative_interaction_test(breakdowns)
             # George E. P. Box & S. L. Andersen (1955 JRSS-B) Permutation/Kurtosis-Corrected Variance Test
             box_m, box_p, is_box_hetero = box_andersen_kurtosis_variance_test(kw_samples)
+            # Stuart J. Pocock, Michael D. Hughes, & Robert J. Lee (1987) Qualitative Interaction Contrast Test
+            pocock_q, pocock_p, is_pocock_reversal = pocock_hughes_lee_qualitative_interaction_test(breakdowns)
+            # John E. Overall & J. Arthur Woodward (1974) Modified Variance Homogeneity Test
+            ow_f, ow_p, is_ow_hetero = overall_woodward_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -9513,6 +9932,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [DeMets-Simon Reversal: Q={demets_q:.2f}, p={demets_p:.3e}]"
         if box_p is not None:
             cmh_note += f" [Box-Andersen Kurtosis Scale: M={box_m:.2f}, p={box_p:.3e}]"
+        if pocock_p is not None and is_pocock_reversal:
+            cmh_note += f" [Pocock-Hughes-Lee Reversal: Q={pocock_q:.2f}, p={pocock_p:.3e}]"
+        if ow_p is not None:
+            cmh_note += f" [Overall-Woodward Scale: F={ow_f:.2f}, p={ow_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -9720,6 +10143,12 @@ class DevilsAdvocateAgent:
             box_andersen_stat_m=box_m,
             box_andersen_p_value=box_p,
             is_box_andersen_heterogeneous=is_box_hetero,
+            pocock_hughes_lee_stat_q=pocock_q,
+            pocock_hughes_lee_p_value=pocock_p,
+            is_pocock_reversal=is_pocock_reversal,
+            overall_woodward_stat_f=ow_f,
+            overall_woodward_p_value=ow_p,
+            is_overall_woodward_heterogeneous=is_ow_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -9903,6 +10332,8 @@ class DevilsAdvocateAgent:
         ho_imai_hull, ho_imai_trim, is_ho_imai_def = None, None, False
         rosen_diff_gamma, rosen_diff_p, is_rosen_diff_frag = None, None, False
         bgh_disp, bgh_div, is_bgh_hetero = None, None, False
+        rosen_dual_gamma, rosen_dual_p, is_rosen_dual_frag = None, None, False
+        eb_disp, eb_eff, eb_loss, is_eb_frag = None, None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -9997,6 +10428,10 @@ class DevilsAdvocateAgent:
                     rosen_diff_gamma, rosen_diff_p, is_rosen_diff_frag = rosenbaum_differential_comparison_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # Marianne Bitler, Jonah Gelbach, & Hilary Hoynes (2006 AER) Quantile Treatment Disparity Bound
                     bgh_disp, bgh_div, is_bgh_hetero = bitler_gelbach_hoynes_quantile_sensitivity_test(x_mal, y_mal)
+                    # Paul R. Rosenbaum (1989 JASA / 2002) Dual-Control Observational Sensitivity Bound
+                    rosen_dual_gamma, rosen_dual_p, is_rosen_dual_frag = rosenbaum_dual_control_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Jens Hainmueller (2012 Political Analysis) Entropy Balancing Treatment Discrepancy
+                    eb_disp, eb_eff, eb_loss, is_eb_frag = hainmueller_entropy_balancing_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -10222,6 +10657,13 @@ class DevilsAdvocateAgent:
             bitler_gelbach_hoynes_disparity=bgh_disp,
             bitler_gelbach_hoynes_max_q_divergence=bgh_div,
             is_bgh_heterogeneous=is_bgh_hetero,
+            rosenbaum_dual_gamma_crit=rosen_dual_gamma,
+            rosenbaum_dual_p_upper=rosen_dual_p,
+            is_rosenbaum_dual_fragile=is_rosen_dual_frag,
+            hainmueller_eb_disparity=eb_disp,
+            hainmueller_eff_sample_pct=eb_eff,
+            hainmueller_entropy_loss=eb_loss,
+            is_entropy_balanced_fragile=is_eb_frag,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -10566,6 +11008,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: David C. Hoaglin & Roy E. Welsch (1978 American Statistician) Hat-Matrix Leverage Ratio
         hw_max, hw_cnt, is_hw_infl = hoaglin_welsch_leverage_ratio_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Christian Bontemps & Nour Meddahi (2005 Econometric Theory) Hermite Polynomial Moment Normality Test
+        bm_stat, bm_p, is_bm_non_norm = bontemps_meddahi_normality_test(residuals)
+
+        # Advanced Diagnostic: Victor J. Yohai (1987 Annals of Statistics) High-Breakdown MM-Estimator Robust Slope Discrepancy
+        mm_slope, mm_disc, mm_cnt, is_mm_dist = yohai_mm_estimator_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -10787,6 +11235,13 @@ class DevilsAdvocateAgent:
             hoaglin_welsch_max_leverage_ratio=hw_max,
             hoaglin_welsch_outlier_count=hw_cnt,
             is_hoaglin_welsch_influential=is_hw_infl,
+            bontemps_meddahi_stat_m=bm_stat,
+            bontemps_meddahi_p_value=bm_p,
+            is_bontemps_meddahi_non_normal=is_bm_non_norm,
+            yohai_mm_slope=mm_slope,
+            yohai_mm_discrepancy=mm_disc,
+            yohai_mm_outlier_count=mm_cnt,
+            is_yohai_mm_distorted=is_mm_dist,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

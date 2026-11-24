@@ -197,6 +197,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"DeMets-Simon Qualitative Interaction Test: Q_DS = {simpsons.demets_simon_stat_q:.2f} (p = {simpsons.demets_simon_p_value:.3e}) {'[QUALITATIVE CROSS-OVER REVERSAL PROVEN]' if simpsons.is_demets_simon_reversal else '[CONCORDANT DIRECTION]'}")
             if simpsons.box_andersen_p_value is not None:
                 rationale["key_evidence"].append(f"Box-Andersen Kurtosis-Corrected Variance: M_BA = {simpsons.box_andersen_stat_m:.2f} (p = {simpsons.box_andersen_p_value:.3e}) {'[KURTOSIS-ROBUST SCALE HETEROGENEITY]' if simpsons.is_box_andersen_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
+            if simpsons.pocock_hughes_lee_p_value is not None:
+                rationale["key_evidence"].append(f"Pocock-Hughes-Lee Qualitative Interaction: Q_PHL = {simpsons.pocock_hughes_lee_stat_q:.2f} (p = {simpsons.pocock_hughes_lee_p_value:.3e}) {'[QUALITATIVE CROSS-OVER REVERSAL PROVEN]' if simpsons.is_pocock_reversal else '[CONCORDANT DIRECTION]'}")
+            if simpsons.overall_woodward_p_value is not None:
+                rationale["key_evidence"].append(f"Overall-Woodward Modified Variance: F_OW = {simpsons.overall_woodward_stat_f:.2f} (p = {simpsons.overall_woodward_p_value:.3e}) {'[KURTOSIS-ROBUST SCALE HETEROGENEITY]' if simpsons.is_overall_woodward_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -346,6 +350,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Differential Comparison Sensitivity: Gamma_Diff = {confounder.rosenbaum_diff_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_diff_p_upper:.3e}) {'[FRAGILE DIFFERENTIAL COMPARISON BIAS]' if confounder.is_rosenbaum_diff_fragile else '[ROBUST DIFFERENTIAL COMPARISON]'}")
             if confounder.bitler_gelbach_hoynes_disparity is not None:
                 rationale["key_evidence"].append(f"Bitler-Gelbach-Hoynes Quantile Treatment Disparity: Delta_BGH = {confounder.bitler_gelbach_hoynes_disparity:.3f} (Max Divergence Ratio = {confounder.bitler_gelbach_hoynes_max_q_divergence:.1%}) {'[SEVERE QUANTILE HETEROGENEITY / RANK DISRUPTION]' if confounder.is_bgh_heterogeneous else '[HOMOGENEOUS QUANTILE TREATMENT IMPACT]'}")
+            if confounder.rosenbaum_dual_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Dual-Control Sensitivity: Gamma_Dual = {confounder.rosenbaum_dual_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_dual_p_upper:.3e}) {'[FRAGILE DUAL-CONTROL BIAS]' if confounder.is_rosenbaum_dual_fragile else '[ROBUST DUAL-CONTROL COMPARISON]'}")
+            if confounder.hainmueller_eb_disparity is not None:
+                rationale["key_evidence"].append(f"Hainmueller Entropy Balancing Disparity: Delta_EB = {confounder.hainmueller_eb_disparity:.1%} (Effective N = {confounder.hainmueller_eff_sample_pct:.1f}%) {'[MOMENT IMBALANCE DISTORTION]' if confounder.is_entropy_balanced_fragile else '[ROBUST ENTROPY BALANCE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -496,6 +504,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Lin-Mudholkar Mean-Variance Normality: Z_LM = {stability.lin_mudholkar_stat_z:.3f} (p = {stability.lin_mudholkar_p_value:.3e}) {'[MEAN-VARIANCE STATISTICAL DEPENDENCE / NON-NORMAL]' if stability.is_lin_mudholkar_non_normal else '[GAUSSIAN INDEPENDENCE CONFIRMED]'}")
             if stability.hoaglin_welsch_max_leverage_ratio is not None:
                 rationale["key_evidence"].append(f"Hoaglin-Welsch Hat-Matrix Leverage: HR_max = {stability.hoaglin_welsch_max_leverage_ratio:.2f} ({stability.hoaglin_welsch_outlier_count} leverage points) {'[EXCESSIVE HAT-MATRIX DESIGN LEVERAGE]' if stability.is_hoaglin_welsch_influential else '[BOUNDED DESIGN LEVERAGE]'}")
+            if stability.bontemps_meddahi_p_value is not None:
+                rationale["key_evidence"].append(f"Bontemps-Meddahi Hermite Normality: M_BM = {stability.bontemps_meddahi_stat_m:.2f} (p = {stability.bontemps_meddahi_p_value:.3e}) {'[HERMITE MOMENT NON-NORMALITY CERTIFIED]' if stability.is_bontemps_meddahi_non_normal else '[GAUSSIAN HERMITE MOMENTS CONFIRMED]'}")
+            if stability.yohai_mm_discrepancy is not None:
+                rationale["key_evidence"].append(f"Yohai High-Breakdown MM-Estimator: Delta_MM = {stability.yohai_mm_discrepancy:.1%} ({stability.yohai_mm_outlier_count} downweighted outliers) {'[HIGH-BREAKDOWN OUTLIER DISTORTION]' if stability.is_yohai_mm_distorted else '[ROBUST MM-OLS CONCORDANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -859,6 +871,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Lin-Mudholkar Normality: Z_LM = {stability.lin_mudholkar_stat_z:.3f} (p = {stability.lin_mudholkar_p_value:.3e})")
             if stability.hoaglin_welsch_max_leverage_ratio is not None:
                 rationale["key_evidence"].append(f"Hoaglin-Welsch Leverage Ratio: HR_max = {stability.hoaglin_welsch_max_leverage_ratio:.2f}")
+            if simpsons.pocock_hughes_lee_p_value is not None:
+                rationale["key_evidence"].append(f"Pocock-Hughes-Lee Score: Q_PHL = {simpsons.pocock_hughes_lee_stat_q:.2f} (p = {simpsons.pocock_hughes_lee_p_value:.3e})")
+            if simpsons.overall_woodward_p_value is not None:
+                rationale["key_evidence"].append(f"Overall-Woodward Variance: F_OW = {simpsons.overall_woodward_stat_f:.2f} (p = {simpsons.overall_woodward_p_value:.3e})")
+            if confounder.rosenbaum_dual_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Dual-Control Sensitivity: Gamma_Dual = {confounder.rosenbaum_dual_gamma_crit:.2f}")
+            if confounder.hainmueller_eb_disparity is not None:
+                rationale["key_evidence"].append(f"Hainmueller Entropy Balancing: Delta_EB = {confounder.hainmueller_eb_disparity:.1%}")
+            if stability.bontemps_meddahi_p_value is not None:
+                rationale["key_evidence"].append(f"Bontemps-Meddahi Normality: M_BM = {stability.bontemps_meddahi_stat_m:.2f} (p = {stability.bontemps_meddahi_p_value:.3e})")
+            if stability.yohai_mm_discrepancy is not None:
+                rationale["key_evidence"].append(f"Yohai MM-Estimator Discrepancy: Delta_MM = {stability.yohai_mm_discrepancy:.1%}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
