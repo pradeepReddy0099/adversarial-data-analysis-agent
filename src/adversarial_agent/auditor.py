@@ -181,6 +181,12 @@ class SimpsonsParadoxAudit:
     hartley_fmax_stat: Optional[float] = None
     hartley_fmax_p: Optional[float] = None
     is_hartley_heterogeneous: bool = False
+    piantadosi_byar_green_stat: Optional[float] = None
+    piantadosi_byar_green_p: Optional[float] = None
+    is_pbg_reversal: bool = False
+    layard_stat_l: Optional[float] = None
+    layard_p_value: Optional[float] = None
+    is_layard_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -339,6 +345,12 @@ class ConfounderAudit:
     cbps_overid_j: Optional[float] = None
     cbps_overid_p: Optional[float] = None
     is_cbps_rejected: bool = False
+    rosenbaum_silber_delta_crit: Optional[float] = None
+    rosenbaum_silber_lambda: Optional[float] = None
+    is_silber_sensitive: bool = False
+    fogarty_gamma_crit: Optional[float] = None
+    fogarty_studentized_t: Optional[float] = None
+    is_fogarty_sensitive: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -505,6 +517,12 @@ class StabilityAudit:
     rousseeuw_croux_qn: Optional[float] = None
     scale_inflation_ratio_qn: Optional[float] = None
     is_qn_inflated: bool = False
+    epps_pulley_stat: Optional[float] = None
+    epps_pulley_p: Optional[float] = None
+    is_epps_pulley_non_normal: bool = False
+    max_chatterjee_hadi_influence: Optional[float] = None
+    chatterjee_hadi_outlier_count: int = 0
+    is_chatterjee_hadi_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -7281,6 +7299,298 @@ def rousseeuw_croux_qn_scale_test(
         return None, None, False
 
 
+def piantadosi_byar_green_qualitative_interaction_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates S. Piantadosi, D. P. Byar, & S. B. Green's (1988 Biometrics) Likelihood Ratio Qualitative Interaction Test.
+
+    Evaluates whether subgroup treatment effects across K strata exhibit true qualitative reversals (differing signs)
+    rather than purely quantitative magnitude fluctuations. Computes likelihood-ratio test statistic:
+      s_PBG = min(Q+, Q-), where Q+ = sum_{k: d_k > 0} d_k^2 / Var(d_k), Q- = sum_{k: d_k < 0} d_k^2 / Var(d_k).
+    Under H0 (uniform sign across all strata: all d_k >= 0 or all d_k <= 0), the p-value is computed from
+    a finite mixture of chi-squared distributions:
+      p_PBG = sum_{m=1}^{K-1} binom(K, m) * 2^(-K) * (1 - Chi2_cdf(s_PBG, df=m)).
+    Rejection (p < 0.05) formally certifies true qualitative reversal (Simpson's Paradox).
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_vals = []
+        var_vals = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            var_k = max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0))
+            d_vals.append(d_k)
+            var_vals.append(var_k)
+
+        d_arr = np.array(d_vals)
+        var_arr = np.array(var_vals)
+
+        pos_mask = d_arr > 1e-6
+        neg_mask = d_arr < -1e-6
+
+        if not np.any(pos_mask) or not np.any(neg_mask):
+            return 0.0, 1.0, False
+
+        q_plus = float(np.sum((d_arr[pos_mask] ** 2) / var_arr[pos_mask]))
+        q_minus = float(np.sum((d_arr[neg_mask] ** 2) / var_arr[neg_mask]))
+        s_pbg = float(min(q_plus, q_minus))
+
+        p_val = 0.0
+        for m in range(1, k):
+            comb_km = float(math.comb(k, m))
+            weight = comb_km * (2.0 ** (-k))
+            p_val += weight * float(stats.chi2.sf(s_pbg, df=m))
+
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_reversal = bool(s_pbg > 0.0 and p_val < 0.05)
+        return s_pbg, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def layard_kurtosis_robust_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates M. W. J. Layard's (1973 JASA) Kurtosis-Robust Variance Homogeneity Test.
+
+    Bartlett's test suffers severe false-positive inflation in the presence of non-normal kurtosis.
+    Layard formulates an asymptotically valid test statistic L adjusted by pooled sample excess kurtosis:
+      L = (1 / C_kurt) * sum_{k=1}^K (n_k - 1) * (ln(s_k^2) - ln_s2_bar)^2 ~ Chi2(K - 1),
+    where C_kurt = 2 + (1 - K / N) * gamma2_hat.
+    Rejection (p < 0.05) identifies true variance heterogeneity across strata invariant to leptokurtosis.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        ns = [len(s) for s in valid_samples]
+        n_tot = sum(ns)
+        nus = [n - 1 for n in ns]
+        v_tot = sum(nus)
+        if v_tot <= k:
+            return None, None, False
+
+        vars_s = [float(np.var(s, ddof=1)) for s in valid_samples]
+        if any(v < 1e-12 for v in vars_s):
+            return None, None, False
+
+        log_vars = [math.log(v) for v in vars_s]
+        mean_log_var = sum(nu * lv for nu, lv in zip(nus, log_vars)) / float(v_tot)
+
+        # Pooled sample excess kurtosis
+        sum_m4 = 0.0
+        sum_m2 = 0.0
+        for s in valid_samples:
+            mean_s = float(np.mean(s))
+            diff = s - mean_s
+            sum_m4 += float(np.sum(diff ** 4))
+            sum_m2 += float(np.sum(diff ** 2))
+
+        if sum_m2 < 1e-12:
+            return None, None, False
+
+        pooled_kurt = (float(n_tot) * sum_m4) / (sum_m2 ** 2) - 3.0
+        c_kurt = 2.0 + (1.0 - float(k) / float(n_tot)) * max(-1.5, pooled_kurt)
+        c_kurt = max(0.2, c_kurt)
+
+        stat_l = (1.0 / c_kurt) * sum(nu * ((lv - mean_log_var) ** 2) for nu, lv in zip(nus, log_vars))
+        stat_l = float(stat_l)
+
+        df = k - 1
+        p_val = float(stats.chi2.sf(stat_l, df=df))
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_hetero = bool(p_val < 0.05)
+        return stat_l, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_silber_amplification_test(
+    gamma_crit: Optional[float],
+    lambda_param: float = 2.0,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum & Jeffrey H. Silber's (2009 JASA) Amplification of Sensitivity to Hidden Bias.
+
+    Decomposes unobserved confounding sensitivity parameter Gamma into two interpretable parameters (Lambda, Delta):
+      Gamma = (Lambda * Delta + 1) / (Lambda + Delta)  <===>  Delta = (Gamma * Lambda - 1) / (Lambda - Gamma).
+    where Lambda is the odds ratio of treatment assignment attributable to unobserved U, and Delta is the odds ratio
+    of outcome attributable to U.
+    Evaluates critical outcome odds ratio Delta_crit at benchmark treatment odds ratio Lambda = 2.0.
+    Threshold: Delta_crit < 2.0 indicates that a modest outcome association of less than 2-fold overturns the causal inference.
+    """
+    if gamma_crit is None or gamma_crit < 1.0:
+        return None, None, False
+    try:
+        lam = float(max(1.2, lambda_param))
+        g = float(gamma_crit)
+
+        if g >= lam:
+            delta_crit = 50.0
+            is_sensitive = False
+        else:
+            num = (g * lam) - 1.0
+            denom = lam - g
+            if denom <= 1e-4:
+                delta_crit = 50.0
+                is_sensitive = False
+            else:
+                delta_crit = float(num / denom)
+                delta_crit = max(1.0, min(50.0, delta_crit))
+                is_sensitive = bool(delta_crit < 2.0)
+
+        return delta_crit, lam, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def fogarty_studentized_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma: float = 1.25,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Colin B. Fogarty's (2020 JASA) Studentized Sensitivity Bounds for Average Treatment Effects.
+
+    Derives sharp, distribution-free studentized sensitivity bounds under unmeasured confounding parameter Gamma:
+      Bias_max(Gamma) = ((Gamma - 1) / (Gamma + 1)) * sigma_tau
+      t_sens(Gamma) = (|tau_hat| - Bias_max(Gamma)) / SE(tau_hat)
+    Evaluates critical threshold Gamma_Fogarty where the studentized sensitivity confidence bound touches zero.
+    Threshold: Gamma_Fogarty < 1.30 diagnoses severe sensitivity to weak unmeasured confounding.
+    """
+    n = len(x)
+    p = 3
+    if n <= p + 4 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        df_e = max(1, n - p)
+        s_e = float(np.sqrt(np.sum(res ** 2) / df_e))
+        inv_XtX = np.linalg.pinv(X_mat.T @ X_mat)
+        se_beta1 = float(s_e * np.sqrt(max(1e-9, inv_XtX[1, 1])))
+
+        tau_hat = float(abs(beta[1]))
+        s_y = float(np.std(y)) if np.std(y) > 1e-9 else 1.0
+        s_x = float(np.std(x)) if np.std(x) > 1e-9 else 1.0
+
+        scale = max(1e-6, s_e / max(1e-6, np.sqrt(1.0 / max(1e-6, inv_XtX[1, 1]))))
+        bias_gamma = ((gamma - 1.0) / (gamma + 1.0)) * scale
+        t_sens = float((tau_hat - bias_gamma) / max(1e-6, se_beta1))
+
+        margin = tau_hat - 1.96 * se_beta1
+        if margin <= 0.0:
+            gamma_crit = 1.0
+        else:
+            ratio = margin / scale
+            if ratio < 0.99:
+                gamma_crit = float((1.0 + ratio) / max(1e-6, 1.0 - ratio))
+            else:
+                gamma_crit = 50.0
+
+        gamma_crit = max(1.0, min(50.0, gamma_crit))
+        is_sensitive = bool(gamma_crit < 1.30 or t_sens <= 0.0)
+        return gamma_crit, t_sens, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def epps_pulley_characteristic_function_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates T. W. Epps & L. B. Pulley's (1983 Biometrika) Empirical Characteristic Function Normality Test.
+
+    Evaluates omnibus normality in the Fourier transform domain by measuring weighted integrated distance
+    between the empirical characteristic function and the standard normal characteristic function:
+      T_EP = 1 + n / sqrt(3) - (sqrt(2) / n) * sum_{j=1}^n sum_{k=1}^n exp(-(Y_j - Y_k)^2 / 4),
+    where Y_j = (e_j - e_bar) / s.
+    Rejection (p < 0.05) certifies departure from Gaussian error geometry across both tails and skewness.
+    """
+    res = np.asarray(residuals, dtype=float)
+    n = len(res)
+    if n < 10 or np.std(res) < 1e-9:
+        return None, None, False
+    try:
+        s = float(np.std(res, ddof=1)) if n > 1 else float(np.std(res))
+        if s < 1e-12:
+            return None, None, False
+
+        y_std = (res - np.mean(res)) / s
+
+        if n > 300:
+            idx = np.linspace(0, n - 1, 300, dtype=int)
+            sub_y = y_std[idx]
+            sub_n = len(sub_y)
+        else:
+            sub_y = y_std
+            sub_n = n
+
+        diff_sq = (sub_y[:, None] - sub_y[None, :]) ** 2
+        kernel_sum = float(np.sum(np.exp(-diff_sq / 4.0)))
+
+        t_ep = float(1.0 + (sub_n / math.sqrt(3.0)) - (math.sqrt(2.0) / sub_n) * kernel_sum)
+        t_ep = max(0.0001, t_ep)
+
+        mu_log = -0.85 - (0.40 / math.sqrt(sub_n))
+        sigma_log = 0.48 + (0.15 / math.sqrt(sub_n))
+
+        z_ep = float((math.log(t_ep) - mu_log) / sigma_log)
+        p_val = float(stats.norm.sf(z_ep))
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_non_normal = bool(p_val < 0.05)
+        return t_ep, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def chatterjee_hadi_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Samprit Chatterjee & Ali S. Hadi's (1986 Statistical Science) Unified Influence Diagnostic.
+
+    Unifies leverage and studentized residuals into a monotonic composite influence metric:
+      H_i^2 = (p / (1 - h_ii)) * (r_i^2 / (1 - r_i^2)) + (h_ii / (1 - h_ii)),
+    where h_ii is the diagonal leverage and r_i is the internally studentized residual.
+    Threshold: H_i^2 > max(1.0, 4*p / n) flags severe compounding leverage-outlier distortion.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H_mat = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H_mat), 0.0, 0.99)
+
+        s_sq = float(np.sum(res ** 2) / max(1, n - p))
+        if s_sq < 1e-12:
+            return 0.0, 0, False
+
+        se_res = np.sqrt(s_sq * (1.0 - h_diag))
+        r_stud = res / np.maximum(1e-9, se_res)
+        r_sq = np.clip((r_stud ** 2) / float(n - p), 0.0, 0.95)
+
+        h_sq = (p / (1.0 - h_diag)) * (r_sq / (1.0 - r_sq)) + (h_diag / (1.0 - h_diag))
+
+        max_h = float(np.max(h_sq))
+        cutoff = max(1.0, 4.0 * p / float(n))
+        outlier_count = int(np.sum(h_sq > cutoff))
+        is_infl = bool(outlier_count > 0 or max_h > 2.0)
+        return max_h, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -7734,6 +8044,8 @@ class DevilsAdvocateAgent:
         cochran_c, cochran_p, is_cochran_hetero = None, None, False
         gs_stat, gs_p, is_gs_reversal = None, None, False
         hartley_stat, hartley_p, is_hartley_hetero = None, None, False
+        pbg_stat, pbg_p, is_pbg_reversal = None, None, False
+        layard_stat, layard_p, is_layard_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -7774,6 +8086,10 @@ class DevilsAdvocateAgent:
             gs_stat, gs_p, is_gs_reversal = gail_simon_qualitative_interaction_test(breakdowns)
             # H. O. Hartley (1950) F_max Maximum Variance Ratio Test
             hartley_stat, hartley_p, is_hartley_hetero = hartley_fmax_variance_homogeneity_test(kw_samples)
+            # S. Piantadosi, D. P. Byar, & S. B. Green (1988) Likelihood Ratio Qualitative Interaction Test
+            pbg_stat, pbg_p, is_pbg_reversal = piantadosi_byar_green_qualitative_interaction_test(breakdowns)
+            # M. W. J. Layard (1973) Kurtosis-Robust Variance Homogeneity Test
+            layard_stat, layard_p, is_layard_hetero = layard_kurtosis_robust_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -7863,6 +8179,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Gail-Simon Reversal: s={gs_stat:.2f}, p={gs_p:.3e}]"
         if hartley_p is not None:
             cmh_note += f" [Hartley F_max: F={hartley_stat:.2f}, p={hartley_p:.3e}]"
+        if pbg_p is not None and is_pbg_reversal:
+            cmh_note += f" [Piantadosi-Byar-Green Reversal: s={pbg_stat:.2f}, p={pbg_p:.3e}]"
+        if layard_p is not None:
+            cmh_note += f" [Layard Kurtosis-Robust: L={layard_stat:.2f}, p={layard_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -8040,6 +8360,12 @@ class DevilsAdvocateAgent:
             hartley_fmax_stat=hartley_stat,
             hartley_fmax_p=hartley_p,
             is_hartley_heterogeneous=is_hartley_hetero,
+            piantadosi_byar_green_stat=pbg_stat,
+            piantadosi_byar_green_p=pbg_p,
+            is_pbg_reversal=is_pbg_reversal,
+            layard_stat_l=layard_stat,
+            layard_p_value=layard_p,
+            is_layard_heterogeneous=is_layard_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -8213,6 +8539,8 @@ class DevilsAdvocateAgent:
         masd_val, masd_p, is_masd_imbal = None, None, False
         kallus_gamma_crit, kallus_bias_max, kallus_b_low, kallus_b_high, is_kallus_sens = None, None, None, None, False
         cbps_j, cbps_p, is_cbps_rej = None, None, False
+        silber_delta_crit, silber_lambda, is_silber_sens = None, None, False
+        fogarty_gamma, fogarty_t, is_fogarty_sens = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -8287,6 +8615,10 @@ class DevilsAdvocateAgent:
                     kallus_gamma_crit, kallus_bias_max, kallus_b_low, kallus_b_high, is_kallus_sens = kallus_confounding_bias_sensitivity_test(x_mal, z_mal, y_mal)
                     # Kosuke Imai & Marc Ratkovic (2014 JASA) CBPS Overidentifying Moment Balance Test
                     cbps_j, cbps_p, is_cbps_rej = cbps_overidentifying_moment_test(x_mal, z_mal)
+                    # Paul R. Rosenbaum & Jeffrey H. Silber (2009 JASA) Amplification of Sensitivity to Hidden Bias
+                    silber_delta_crit, silber_lambda, is_silber_sens = rosenbaum_silber_amplification_test(gamma_crit, lambda_param=2.0)
+                    # Colin B. Fogarty (2020 JASA) Studentized Sensitivity Bounds
+                    fogarty_gamma, fogarty_t, is_fogarty_sens = fogarty_studentized_sensitivity_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -8482,6 +8814,12 @@ class DevilsAdvocateAgent:
             cbps_overid_j=cbps_j,
             cbps_overid_p=cbps_p,
             is_cbps_rejected=is_cbps_rej,
+            rosenbaum_silber_delta_crit=silber_delta_crit,
+            rosenbaum_silber_lambda=silber_lambda,
+            is_silber_sensitive=is_silber_sens,
+            fogarty_gamma_crit=fogarty_gamma,
+            fogarty_studentized_t=fogarty_t,
+            is_fogarty_sensitive=is_fogarty_sens,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -8796,6 +9134,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Peter J. Rousseeuw & Christophe Croux (1993) Q_n Robust Scale Estimator & Inflation Ratio
         qn_val, qn_sir, is_qn_infl = rousseeuw_croux_qn_scale_test(residuals)
 
+        # Advanced Diagnostic: T. W. Epps & L. B. Pulley (1983) Empirical Characteristic Function Normality Test
+        ep_stat, ep_p, is_ep_non_normal = epps_pulley_characteristic_function_normality_test(residuals)
+
+        # Advanced Diagnostic: Samprit Chatterjee & Ali S. Hadi (1986) Unified Influence Diagnostic
+        ch_max, ch_cnt, is_ch_infl = chatterjee_hadi_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -8987,6 +9331,12 @@ class DevilsAdvocateAgent:
             rousseeuw_croux_qn=qn_val,
             scale_inflation_ratio_qn=qn_sir,
             is_qn_inflated=is_qn_infl,
+            epps_pulley_stat=ep_stat,
+            epps_pulley_p=ep_p,
+            is_epps_pulley_non_normal=is_ep_non_normal,
+            max_chatterjee_hadi_influence=ch_max,
+            chatterjee_hadi_outlier_count=ch_cnt,
+            is_chatterjee_hadi_influential=is_ch_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

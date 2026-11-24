@@ -330,6 +330,12 @@ with col_right:
                         if simpsons.get("hartley_fmax_p") is not None:
                             hartley_flag = " ⚠️ Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_hartley_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**Hartley F_max Variance Ratio:** F_max = `{simpsons.get('hartley_fmax_stat', 0.0):.2f}` (p = `{simpsons.get('hartley_fmax_p', 0.0):.3e}`){hartley_flag}")
+                        if simpsons.get("piantadosi_byar_green_p") is not None:
+                            pbg_flag = " ⚠️ Qualitative Reversal Proven (p < 0.05)" if simpsons.get("is_pbg_reversal") else " (Uniform Direction / Monotone)"
+                            st.markdown(f"**Piantadosi-Byar-Green Likelihood-Ratio Interaction:** s_PBG = `{simpsons.get('piantadosi_byar_green_stat', 0.0):.2f}` (p = `{simpsons.get('piantadosi_byar_green_p', 0.0):.3e}`){pbg_flag}")
+                        if simpsons.get("layard_p_value") is not None:
+                            layard_flag = " ⚠️ Kurtosis-Robust Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_layard_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Layard Kurtosis-Robust Variance Test:** L = `{simpsons.get('layard_stat_l', 0.0):.2f}` (p = `{simpsons.get('layard_p_value', 0.0):.3e}`){layard_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -448,6 +454,12 @@ with col_right:
                         if conf_aud.get("cbps_overid_p") is not None:
                             cbps_flag = " ⚠️ Moment Balance Rejected (p < 0.05)" if conf_aud.get("is_cbps_rejected") else " (Exact Moment Balance Verified)"
                             st.markdown(f"**Imai-Ratkovic CBPS Balance Test:** J = `{conf_aud.get('cbps_overid_j', 0.0):.2f}` (p = `{conf_aud.get('cbps_overid_p', 0.0):.3e}`){cbps_flag}")
+                        if conf_aud.get("rosenbaum_silber_delta_crit") is not None:
+                            silber_flag = " ⚠️ Fragile to Hidden Bias Amplification (Δ_crit < 2.0)" if conf_aud.get("is_silber_sensitive") else " (Robust to Bias Amplification, Δ_crit ≥ 2.0)"
+                            st.markdown(f"**Rosenbaum-Silber Hidden Bias Amplification:** Δ_crit = `{conf_aud.get('rosenbaum_silber_delta_crit', 0.0):.2f}` (at Λ = `{conf_aud.get('rosenbaum_silber_lambda', 2.0):.1f}`){silber_flag}")
+                        if conf_aud.get("fogarty_gamma_crit") is not None:
+                            fogarty_flag = " ⚠️ Sensitive to Studentized Confounding (Γ_crit < 1.30)" if conf_aud.get("is_fogarty_sensitive") else " (Studentized Robust, Γ_crit ≥ 1.30)"
+                            st.markdown(f"**Fogarty Studentized Sensitivity Bounds:** Γ_crit = `{conf_aud.get('fogarty_gamma_crit', 0.0):.2f}` (t_sens = `{conf_aud.get('fogarty_studentized_t', 0.0):.2f}`){fogarty_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -620,6 +632,12 @@ with col_right:
                         if stab_aud.get("scale_inflation_ratio_qn") is not None:
                             qn_flag = f" ⚠️ Scale Inflation by Outliers (SIR = {stab_aud['scale_inflation_ratio_qn']:.2f}x > 1.30)" if stab_aud.get("is_qn_inflated") else " (Stable Robust Scale)"
                             st.markdown(f"**Rousseeuw-Croux Q_n Scale Estimator:** Q_n = `{stab_aud.get('rousseeuw_croux_qn', 0.0):.4f}` (SIR = `{stab_aud.get('scale_inflation_ratio_qn', 0.0):.2f}x`){qn_flag}")
+                        if stab_aud.get("epps_pulley_p") is not None:
+                            ep_flag = f" ⚠️ Significant Fourier Non-Normality (p = {stab_aud['epps_pulley_p']:.3e})" if stab_aud.get("is_epps_pulley_non_normal") else " (Gaussian Characteristic Function Validated)"
+                            st.markdown(f"**Epps-Pulley Characteristic Function Test:** T_EP = `{stab_aud.get('epps_pulley_stat', 0.0):.3f}` (p = `{stab_aud['epps_pulley_p']:.3e}`){ep_flag}")
+                        if stab_aud.get("max_chatterjee_hadi_influence") is not None:
+                            ch_flag = f" ⚠️ Compounding Leverage-Residual Outlier ({stab_aud.get('chatterjee_hadi_outlier_count', 0)} influential)" if stab_aud.get("is_chatterjee_hadi_influential") else " (Bounded Joint Influence)"
+                            st.markdown(f"**Chatterjee-Hadi Unified Influence Measure:** Max H^2 = `{stab_aud.get('max_chatterjee_hadi_influence', 0.0):.3f}`{ch_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1052,6 +1070,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator", findings, dataset_name=dataset_name)
 
+            sug_col61, sug_col62, sug_col63 = st.columns(3)
+            with sug_col61:
+                if st.button("🔄 Piantadosi-Byar-Green Interaction", key="sug_pbg"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Piantadosi Byar and Green likelihood ratio qualitative interaction test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Piantadosi Byar and Green likelihood ratio qualitative interaction test", findings, dataset_name=dataset_name)
+            with sug_col62:
+                if st.button("🛡️ Rosenbaum-Silber Amplification", key="sug_silber"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum and Jeffrey Silber amplification of sensitivity to hidden bias"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum and Jeffrey Silber amplification of sensitivity to hidden bias", findings, dataset_name=dataset_name)
+            with sug_col63:
+                if st.button("📈 Epps-Pulley Characteristic Normality", key="sug_ep"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Epps and Pulley empirical characteristic function normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Epps and Pulley empirical characteristic function normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1257,6 +1292,18 @@ with col_right:
                     "Anscombe_Glynn_p": f"{stab.get('anscombe_glynn_p', 0.0):.3e}" if stab.get("anscombe_glynn_p") is not None else "N/A",
                     "Rousseeuw_Croux_Qn": f"{stab.get('rousseeuw_croux_qn', 0.0):.4f}" if stab.get("rousseeuw_croux_qn") is not None else "N/A",
                     "Scale_Inflation_Ratio_Qn": f"{stab.get('scale_inflation_ratio_qn', 0.0):.2f}" if stab.get("scale_inflation_ratio_qn") is not None else "N/A",
+                    "Piantadosi_Byar_Green_Stat": f"{simp.get('piantadosi_byar_green_stat', 0.0):.2f}" if simp.get("piantadosi_byar_green_stat") is not None else "N/A",
+                    "Piantadosi_Byar_Green_p": f"{simp.get('piantadosi_byar_green_p', 0.0):.3e}" if simp.get("piantadosi_byar_green_p") is not None else "N/A",
+                    "Layard_Stat_L": f"{simp.get('layard_stat_l', 0.0):.2f}" if simp.get("layard_stat_l") is not None else "N/A",
+                    "Layard_p_value": f"{simp.get('layard_p_value', 0.0):.3e}" if simp.get("layard_p_value") is not None else "N/A",
+                    "Rosenbaum_Silber_Delta_Crit": f"{conf.get('rosenbaum_silber_delta_crit', 0.0):.2f}" if conf.get("rosenbaum_silber_delta_crit") is not None else "N/A",
+                    "Rosenbaum_Silber_Lambda": f"{conf.get('rosenbaum_silber_lambda', 0.0):.1f}" if conf.get("rosenbaum_silber_lambda") is not None else "N/A",
+                    "Fogarty_Gamma_Crit": f"{conf.get('fogarty_gamma_crit', 0.0):.2f}" if conf.get("fogarty_gamma_crit") is not None else "N/A",
+                    "Fogarty_Studentized_t": f"{conf.get('fogarty_studentized_t', 0.0):.2f}" if conf.get("fogarty_studentized_t") is not None else "N/A",
+                    "Epps_Pulley_Stat": f"{stab.get('epps_pulley_stat', 0.0):.3f}" if stab.get("epps_pulley_stat") is not None else "N/A",
+                    "Epps_Pulley_p": f"{stab.get('epps_pulley_p', 0.0):.3e}" if stab.get("epps_pulley_p") is not None else "N/A",
+                    "Chatterjee_Hadi_Max_H2": f"{stab.get('max_chatterjee_hadi_influence', 0.0):.3f}" if stab.get("max_chatterjee_hadi_influence") is not None else "N/A",
+                    "Chatterjee_Hadi_Outlier_Count": f"{stab.get('chatterjee_hadi_outlier_count', 0)}" if stab.get("chatterjee_hadi_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

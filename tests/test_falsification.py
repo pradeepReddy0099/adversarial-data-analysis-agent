@@ -164,6 +164,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.gail_simon_p is not None
     assert audit.simpsons_audit.hartley_fmax_stat is not None
     assert audit.simpsons_audit.hartley_fmax_p is not None
+    # Verify Piantadosi-Byar-Green qualitative interaction test and Layard kurtosis-robust variance test
+    assert audit.simpsons_audit.piantadosi_byar_green_stat is not None
+    assert audit.simpsons_audit.piantadosi_byar_green_p is not None
+    assert audit.simpsons_audit.layard_stat_l is not None
+    assert audit.simpsons_audit.layard_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -339,6 +344,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.kallus_bias_max is not None
         assert audit_coffee.confounder_audit.cbps_overid_j is not None
         assert audit_coffee.confounder_audit.cbps_overid_p is not None
+        # Check Rosenbaum-Silber hidden bias amplification and Fogarty studentized sensitivity bounds
+        assert audit_coffee.confounder_audit.rosenbaum_silber_delta_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_silber_delta_crit >= 1.0
+        assert audit_coffee.confounder_audit.fogarty_gamma_crit is not None
+        assert audit_coffee.confounder_audit.fogarty_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.fogarty_studentized_t is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -499,6 +510,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.rousseeuw_croux_qn > 0.0
     assert audit.stability_audit.scale_inflation_ratio_qn is not None
     assert audit.stability_audit.scale_inflation_ratio_qn > 0.0
+    # Check Epps-Pulley characteristic function test and Chatterjee-Hadi unified influence diagnostic
+    assert audit.stability_audit.epps_pulley_stat is not None
+    assert audit.stability_audit.epps_pulley_p is not None
+    assert audit.stability_audit.max_chatterjee_hadi_influence is not None
+    assert audit.stability_audit.max_chatterjee_hadi_influence >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -970,6 +986,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_qn = narrator.answer_query("Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator", findings)
     assert "Rousseeuw" in ans_qn or "Croux" in ans_qn or "Qn" in ans_qn or "Scale" in ans_qn
+
+    ans_pbg = narrator.answer_query("Explain Piantadosi Byar and Green likelihood ratio qualitative interaction test", findings)
+    assert "Piantadosi" in ans_pbg or "Byar" in ans_pbg or "Qualitative" in ans_pbg or "Interaction" in ans_pbg
+
+    ans_layard = narrator.answer_query("Explain Layard kurtosis robust variance homogeneity test", findings)
+    assert "Layard" in ans_layard or "Kurtosis" in ans_layard or "Variance" in ans_layard or "Homogeneity" in ans_layard
+
+    ans_silber = narrator.answer_query("Explain Paul Rosenbaum and Jeffrey Silber amplification of sensitivity to hidden bias", findings)
+    assert "Rosenbaum" in ans_silber or "Silber" in ans_silber or "Amplification" in ans_silber or "Bias" in ans_silber
+
+    ans_fogarty = narrator.answer_query("Explain Colin Fogarty studentized sensitivity bounds", findings)
+    assert "Fogarty" in ans_fogarty or "Studentized" in ans_fogarty or "Sensitivity" in ans_fogarty or "Bounds" in ans_fogarty
+
+    ans_ep = narrator.answer_query("Explain Epps and Pulley empirical characteristic function normality test", findings)
+    assert "Epps" in ans_ep or "Pulley" in ans_ep or "Characteristic" in ans_ep or "Fourier" in ans_ep
+
+    ans_ch = narrator.answer_query("Explain Samprit Chatterjee and Ali Hadi unified influence measure", findings)
+    assert "Chatterjee" in ans_ch or "Hadi" in ans_ch or "Influence" in ans_ch or "Measure" in ans_ch
 
 
 def test_end_to_end_pipeline(tmp_path):

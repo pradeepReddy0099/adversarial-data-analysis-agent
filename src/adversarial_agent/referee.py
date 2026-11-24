@@ -177,6 +177,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Gail-Simon Qualitative Interaction Test: s_GS = {simpsons.gail_simon_stat:.2f} (p = {simpsons.gail_simon_p:.3e}) {'[CONFIRMED TRUE QUALITATIVE REVERSAL / SIMPSON PARADOX]' if simpsons.is_gail_simon_reversal else '[QUANTITATIVE INTERACTION / UNIFORM SIGN]'}")
             if simpsons.hartley_fmax_p is not None:
                 rationale["key_evidence"].append(f"Hartley F_max Variance Homogeneity: F_max = {simpsons.hartley_fmax_stat:.2f} (p = {simpsons.hartley_fmax_p:.3e}) {'[STRATUM SCALE HETEROGENEITY]' if simpsons.is_hartley_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
+            if simpsons.piantadosi_byar_green_p is not None:
+                rationale["key_evidence"].append(f"Piantadosi-Byar-Green Qualitative Interaction Test: s_PBG = {simpsons.piantadosi_byar_green_stat:.2f} (p = {simpsons.piantadosi_byar_green_p:.3e}) {'[CONFIRMED LIKELIHOOD-RATIO QUALITATIVE REVERSAL]' if simpsons.is_pbg_reversal else '[UNIFORM MONOTONE SIGN DIRECTION]'}")
+            if simpsons.layard_p_value is not None:
+                rationale["key_evidence"].append(f"Layard Kurtosis-Robust Variance Homogeneity: L = {simpsons.layard_stat_l:.2f} (p = {simpsons.layard_p_value:.3e}) {'[KURTOSIS-INVARIANT STRATUM SCALE HETEROGENEITY]' if simpsons.is_layard_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -306,6 +310,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Kallus Minimax Confounding Sensitivity: Γ_K,crit = {confounder.kallus_gamma_crit:.2f} (Bias_max = {confounder.kallus_bias_max:.3f}, [{confounder.kallus_bound_low:.3f}, {confounder.kallus_bound_high:.3f}]) {'[SENSITIVE TO BOUNDED UNOBSERVED CONVOLUTION]' if confounder.is_kallus_sensitive else '[MINIMAX CONVOLUTION ROBUST]'}")
             if confounder.cbps_overid_p is not None:
                 rationale["key_evidence"].append(f"Imai-Ratkovic CBPS Overidentifying Moment Test: J_CBPS = {confounder.cbps_overid_j:.2f} (p = {confounder.cbps_overid_p:.3e}) {'[COVARIATE BALANCING OVERIDENTIFICATION REJECTED]' if confounder.is_cbps_rejected else '[EXACT BALANCING MOMENTS SATISFIED]'}")
+            if confounder.rosenbaum_silber_delta_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum-Silber Hidden Bias Amplification: Delta_crit = {confounder.rosenbaum_silber_delta_crit:.2f} at Lambda = {confounder.rosenbaum_silber_lambda:.1f} {'[SENSITIVE TO MODEST OUTCOME CONVOLUTION]' if confounder.is_silber_sensitive else '[RESISTANT TO HIDDEN BIAS AMPLIFICATION]'}")
+            if confounder.fogarty_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Fogarty Studentized Sensitivity Bounds: Gamma_crit = {confounder.fogarty_gamma_crit:.2f} (t_sens = {confounder.fogarty_studentized_t:.2f}) {'[SENSITIVE TO STUDENTIZED UNOBSERVED CONVOLUTION]' if confounder.is_fogarty_sensitive else '[STUDENTIZED CONVOLUTION ROBUST]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -436,6 +444,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Anscombe-Glynn Kurtosis Transformation: Z_AG = {stability.anscombe_glynn_z:.2f} (p = {stability.anscombe_glynn_p:.3e}) {'[NON-GAUSSIAN RESIDUAL KURTOSIS]' if stability.is_anscombe_glynn_non_normal else '[GAUSSIAN ERROR KURTOSIS]'}")
             if stability.scale_inflation_ratio_qn is not None:
                 rationale["key_evidence"].append(f"Rousseeuw-Croux Q_n Scale Estimator: Q_n = {stability.rousseeuw_croux_qn:.4f} (Scale Inflation Ratio = {stability.scale_inflation_ratio_qn:.2f}x) {'[SEVERE SCALE INFLATION BY OUTLIERS]' if stability.is_qn_inflated else '[STABLE SCALE VARIANCE]'}")
+            if stability.epps_pulley_p is not None:
+                rationale["key_evidence"].append(f"Epps-Pulley Characteristic Function Test: T_EP = {stability.epps_pulley_stat:.3f} (p = {stability.epps_pulley_p:.3e}) {'[DEPARTURE FROM GAUSSIAN FOURIER GEOMETRY]' if stability.is_epps_pulley_non_normal else '[GAUSSIAN CHARACTERISTIC FUNCTION VALIDATED]'}")
+            if stability.max_chatterjee_hadi_influence is not None:
+                rationale["key_evidence"].append(f"Chatterjee-Hadi Unified Influence Measure: Max H^2 = {stability.max_chatterjee_hadi_influence:.3f} ({stability.chatterjee_hadi_outlier_count} influential) {'[LEVERAGE-RESIDUAL COMPOUNDING OUTLIER]' if stability.is_chatterjee_hadi_influential else '[BOUNDED JOINT INFLUENCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -739,6 +751,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Anscombe-Glynn Kurtosis: Z_AG = {stability.anscombe_glynn_z:.2f} (p = {stability.anscombe_glynn_p:.3e})")
             if stability.scale_inflation_ratio_qn is not None:
                 rationale["key_evidence"].append(f"Rousseeuw-Croux Q_n: Scale Inflation = {stability.scale_inflation_ratio_qn:.2f}x")
+            if simpsons.piantadosi_byar_green_p is not None:
+                rationale["key_evidence"].append(f"Piantadosi-Byar-Green Test: s_PBG = {simpsons.piantadosi_byar_green_stat:.2f} (p = {simpsons.piantadosi_byar_green_p:.3e})")
+            if simpsons.layard_p_value is not None:
+                rationale["key_evidence"].append(f"Layard Variance Test: L = {simpsons.layard_stat_l:.2f} (p = {simpsons.layard_p_value:.3e})")
+            if confounder.rosenbaum_silber_delta_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum-Silber Amplification: Delta_crit = {confounder.rosenbaum_silber_delta_crit:.2f} (Lambda = {confounder.rosenbaum_silber_lambda:.1f})")
+            if confounder.fogarty_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Fogarty Sensitivity: Gamma_crit = {confounder.fogarty_gamma_crit:.2f} (t = {confounder.fogarty_studentized_t:.2f})")
+            if stability.epps_pulley_p is not None:
+                rationale["key_evidence"].append(f"Epps-Pulley Test: T_EP = {stability.epps_pulley_stat:.3f} (p = {stability.epps_pulley_p:.3e})")
+            if stability.max_chatterjee_hadi_influence is not None:
+                rationale["key_evidence"].append(f"Chatterjee-Hadi Influence: Max H^2 = {stability.max_chatterjee_hadi_influence:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
