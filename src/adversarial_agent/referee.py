@@ -189,6 +189,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Silvapulle-Sen Qualitative Inversion Test: S_SS = {simpsons.silvapulle_sen_stat:.2f} (p = {simpsons.silvapulle_sen_p:.3e}) {'[CONFIRMED LIKELIHOOD-RATIO QUALITATIVE REVERSAL]' if simpsons.is_silvapulle_reversal else '[UNIFORM CONCORDANT DIRECTION]'}")
             if simpsons.miller_jackknife_p_value is not None:
                 rationale["key_evidence"].append(f"Miller Jackknife Variance Homogeneity: F_Miller = {simpsons.miller_jackknife_stat_f:.2f} (p = {simpsons.miller_jackknife_p_value:.3e}) {'[DISTRIBUTION-FREE STRATUM SCALE HETEROGENEITY]' if simpsons.is_miller_heterogeneous else '[HOMOGENEOUS STRATUM SCALE]'}")
+            if simpsons.berger_p_value is not None:
+                rationale["key_evidence"].append(f"Berger Intersection-Union Test: Z_Berger = {simpsons.berger_stat_z:.2f} (p = {simpsons.berger_p_value:.3e}) {'[EXACT LEVEL-ALPHA QUALITATIVE REVERSAL CERTIFIED]' if simpsons.is_berger_reversal else '[CONCORDANT SIGN UNIFORMITY]'}")
+            if simpsons.shoemaker_p_value is not None:
+                rationale["key_evidence"].append(f"Shoemaker Kurtosis-Adjusted Scale Homogeneity: Z_Shoe = {simpsons.shoemaker_stat_z:.2f} (p = {simpsons.shoemaker_p_value:.3e}) {'[KURTOSIS-INVARIANT STRATUM SCALE HETEROGENEITY]' if simpsons.is_shoemaker_heterogeneous else '[HOMOGENEOUS STRATUM SCALE]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -330,6 +334,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Design Sensitivity Bounds: Gamma_tilde = {confounder.rosenbaum_design_sensitivity_gamma:.2f} (mu/sigma = {confounder.rosenbaum_standardized_effect_mu_sigma:.2f}) {'[FRAGILE ASYMPTOTIC DESIGN]' if confounder.is_design_fragile else '[ASYMPTOTICALLY ROBUST DESIGN]'}")
             if confounder.hosman_hansen_holland_delta is not None:
                 rationale["key_evidence"].append(f"Hosman-Hansen-Holland Sensitivity Relation: delta_HHH = {confounder.hosman_hansen_holland_delta:.3f} (scale = {confounder.hosman_hansen_holland_scale:.3f}) {'[SENSITIVE TO MODEST PARTIAL CONVOLUTION]' if confounder.is_hosman_sensitive else '[RESISTANT TO PARTIAL UNOBSERVED CONVOLUTION]'}")
+            if confounder.rosenbaum_ef_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Evidence Factors Sensitivity: Gamma_EF = {confounder.rosenbaum_ef_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_ef_p_upper:.3e}) {'[SENSITIVE TO DUAL EVIDENCE CONVOLUTION]' if confounder.is_rosenbaum_ef_fragile else '[ROBUST DUAL EVIDENCE REINFORCEMENT]'}")
+            if confounder.ho_imai_convex_hull_overlap is not None:
+                rationale["key_evidence"].append(f"Ho-Imai-King-Stuart Convex Hull Overlap: OH_Hull = {confounder.ho_imai_convex_hull_overlap:.1%} (Trimming Required = {confounder.ho_imai_trim_fraction:.1%}) {'[EXTRAPOLATION-PRONE SUPPORT DEFICIT]' if confounder.is_ho_imai_deficient else '[ROBUST COMMON COUNTERFACTUAL SUPPORT]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -472,6 +480,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Vasicek Sample Entropy Normality: K_mn = {stability.vasicek_entropy_stat:.3f} (p = {stability.vasicek_entropy_p:.3e}) {'[INFORMATION-THEORETIC SHANNON ENTROPY NON-NORMALITY]' if stability.is_vasicek_non_normal else '[GAUSSIAN ENTROPY CALIBRATED]'}")
             if stability.rousseeuw_zomeren_max_rdz is not None:
                 rationale["key_evidence"].append(f"Rousseeuw-van Zomeren Robust Distance: Max RDZ = {stability.rousseeuw_zomeren_max_rdz:.3f} ({stability.rousseeuw_zomeren_outlier_count} influential) {'[HIGH-LEVERAGE ROBUST MAHALANOBIS OUTLIER]' if stability.is_rousseeuw_zomeren_influential else '[BOUNDED ROBUST DISTANCE]'}")
+            if stability.zhang_zk_p_value is not None:
+                rationale["key_evidence"].append(f"Zhang Empirical Likelihood Normality: Z_K = {stability.zhang_zk_stat:.3f} (p = {stability.zhang_zk_p_value:.3e}) {'[NON-PARAMETRIC EMPIRICAL LIKELIHOOD NON-NORMALITY]' if stability.is_zhang_non_normal else '[GAUSSIAN EMPIRICAL LIKELIHOOD ALIGNED]'}")
+            if stability.bacon_max_distance is not None:
+                rationale["key_evidence"].append(f"BACON Adaptive Outlier Diagnostic: Max Dist = {stability.bacon_max_distance:.3f} ({stability.bacon_outlier_count} unmasked outliers) {'[UNMASKED MULTIVARIATE LEVERAGE OUTLIERS]' if stability.is_bacon_influential else '[BOUNDED ADAPTIVE DISTANCES]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -811,6 +823,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Vasicek Entropy Test: K_mn = {stability.vasicek_entropy_stat:.3f} (p = {stability.vasicek_entropy_p:.3e})")
             if stability.rousseeuw_zomeren_max_rdz is not None:
                 rationale["key_evidence"].append(f"Rousseeuw-van Zomeren Robust Distance: Max RDZ = {stability.rousseeuw_zomeren_max_rdz:.3f}")
+            if simpsons.berger_p_value is not None:
+                rationale["key_evidence"].append(f"Berger IUT: Z_Berger = {simpsons.berger_stat_z:.2f} (p = {simpsons.berger_p_value:.3e})")
+            if simpsons.shoemaker_p_value is not None:
+                rationale["key_evidence"].append(f"Shoemaker Kurtosis Scale: Z_Shoe = {simpsons.shoemaker_stat_z:.2f} (p = {simpsons.shoemaker_p_value:.3e})")
+            if confounder.rosenbaum_ef_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Evidence Factors: Gamma_EF = {confounder.rosenbaum_ef_gamma_crit:.2f}")
+            if confounder.ho_imai_convex_hull_overlap is not None:
+                rationale["key_evidence"].append(f"Ho-Imai Support Overlap: OH_Hull = {confounder.ho_imai_convex_hull_overlap:.1%}")
+            if stability.zhang_zk_p_value is not None:
+                rationale["key_evidence"].append(f"Zhang Empirical Likelihood: Z_K = {stability.zhang_zk_stat:.3f} (p = {stability.zhang_zk_p_value:.3e})")
+            if stability.bacon_max_distance is not None:
+                rationale["key_evidence"].append(f"BACON Adaptive Outlier Metric: Max Dist = {stability.bacon_max_distance:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

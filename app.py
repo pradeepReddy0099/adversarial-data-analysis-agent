@@ -348,6 +348,12 @@ with col_right:
                         if simpsons.get("miller_jackknife_p_value") is not None:
                             miller_flag = " ⚠️ Distribution-Free Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_miller_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**Miller Jackknife Variance Homogeneity:** F_Miller = `{simpsons.get('miller_jackknife_stat_f', 0.0):.2f}` (p = `{simpsons.get('miller_jackknife_p_value', 0.0):.3e}`){miller_flag}")
+                        if simpsons.get("berger_p_value") is not None:
+                            berger_flag = " ⚠️ Qualitative Reversal Proven (p < 0.05)" if simpsons.get("is_berger_reversal") else " (Uniform Direction / Concordant)"
+                            st.markdown(f"**Berger Intersection-Union Test:** Z_Berger = `{simpsons.get('berger_stat_z', 0.0):.2f}` (p = `{simpsons.get('berger_p_value', 0.0):.3e}`){berger_flag}")
+                        if simpsons.get("shoemaker_p_value") is not None:
+                            shoe_flag = " ⚠️ Kurtosis-Adjusted Scale Heterogeneity (p < 0.05)" if simpsons.get("is_shoemaker_heterogeneous") else " (Homogeneous Stratum Scales)"
+                            st.markdown(f"**Shoemaker Kurtosis-Adjusted Scale:** Z_Shoe = `{simpsons.get('shoemaker_stat_z', 0.0):.2f}` (p = `{simpsons.get('shoemaker_p_value', 0.0):.3e}`){shoe_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -484,6 +490,12 @@ with col_right:
                         if conf_aud.get("hosman_hansen_holland_delta") is not None:
                             hhh_flag = " ⚠️ Sensitive to Modest Partial Confounding (δ < 0.15)" if conf_aud.get("is_hosman_sensitive") else " (Robust to Partial Confounding, δ ≥ 0.15)"
                             st.markdown(f"**Hosman-Hansen-Holland Sensitivity Relation:** δ_HHH = `{conf_aud.get('hosman_hansen_holland_delta', 0.0):.3f}` (scale = `{conf_aud.get('hosman_hansen_holland_scale', 0.0):.3f}`){hhh_flag}")
+                        if conf_aud.get("rosenbaum_ef_gamma_crit") is not None:
+                            ef_flag = " ⚠️ Sensitive to Dual Evidence Confounding (Γ_EF < 1.30)" if conf_aud.get("is_rosenbaum_ef_fragile") else " (Robust Dual Evidence Reinforcement, Γ_EF ≥ 1.30)"
+                            st.markdown(f"**Rosenbaum Evidence Factors Sensitivity:** Γ_EF = `{conf_aud.get('rosenbaum_ef_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_ef_p_upper', 0.0):.3e}`){ef_flag}")
+                        if conf_aud.get("ho_imai_convex_hull_overlap") is not None:
+                            hull_flag = " ⚠️ Support Deficit / Extrapolation-Prone (OH_Hull < 80%)" if conf_aud.get("is_ho_imai_deficient") else " (Robust Counterfactual Support, OH_Hull ≥ 80%)"
+                            st.markdown(f"**Ho-Imai-King-Stuart Convex Hull Overlap:** OH_Hull = `{conf_aud.get('ho_imai_convex_hull_overlap', 0.0):.1%}` (Trimming Required = `{conf_aud.get('ho_imai_trim_fraction', 0.0):.1%}`){hull_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -674,6 +686,12 @@ with col_right:
                         if stab_aud.get("rousseeuw_zomeren_max_rdz") is not None:
                             rdz_flag = f" ⚠️ High-Leverage Robust Distance Outlier ({stab_aud.get('rousseeuw_zomeren_outlier_count', 0)} influential)" if stab_aud.get("is_rousseeuw_zomeren_influential") else " (Bounded Robust Distance)"
                             st.markdown(f"**Rousseeuw-van Zomeren Robust Distance:** Max RDZ = `{stab_aud.get('rousseeuw_zomeren_max_rdz', 0.0):.3f}`{rdz_flag}")
+                        if stab_aud.get("zhang_zk_p_value") is not None:
+                            zhang_flag = f" ⚠️ Significant Empirical Likelihood Non-Normality (p = {stab_aud['zhang_zk_p_value']:.3e})" if stab_aud.get("is_zhang_non_normal") else " (Gaussian Empirical Likelihood Validated)"
+                            st.markdown(f"**Zhang Empirical Likelihood Normality:** Z_K = `{stab_aud.get('zhang_zk_stat', 0.0):.3f}` (p = `{stab_aud['zhang_zk_p_value']:.3e}`){zhang_flag}")
+                        if stab_aud.get("bacon_max_distance") is not None:
+                            bacon_flag = f" ⚠️ Unmasked Multivariate Leverage Outliers ({stab_aud.get('bacon_outlier_count', 0)} influential)" if stab_aud.get("is_bacon_influential") else " (Bounded Adaptive Distances)"
+                            st.markdown(f"**BACON Adaptive Outlier Diagnostic:** Max Dist = `{stab_aud.get('bacon_max_distance', 0.0):.3f}`{bacon_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1157,6 +1175,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Oldrich Vasicek sample entropy residual normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Oldrich Vasicek sample entropy residual normality test", findings, dataset_name=dataset_name)
 
+            sug_col70, sug_col71, sug_col72 = st.columns(3)
+            with sug_col70:
+                if st.button("📐 Berger Intersection-Union", key="sug_berger"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Roger Berger intersection-union test for qualitative interaction"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Roger Berger intersection-union test for qualitative interaction", findings, dataset_name=dataset_name)
+            with sug_col71:
+                if st.button("🛡️ Rosenbaum Evidence Factors", key="sug_ef"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum evidence factors sensitivity analysis bound Gamma EF"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum evidence factors sensitivity analysis bound Gamma EF", findings, dataset_name=dataset_name)
+            with sug_col72:
+                if st.button("🔬 Zhang Empirical Likelihood", key="sug_zhang"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Jin Zhang empirical likelihood goodness-of-fit normality test Z_K"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Jin Zhang empirical likelihood goodness-of-fit normality test Z_K", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1396,6 +1431,16 @@ with col_right:
                     "Vasicek_Entropy_p": f"{stab.get('vasicek_entropy_p', 0.0):.3e}" if stab.get("vasicek_entropy_p") is not None else "N/A",
                     "Rousseeuw_Zomeren_RDZ": f"{stab.get('rousseeuw_zomeren_max_rdz', 0.0):.3f}" if stab.get("rousseeuw_zomeren_max_rdz") is not None else "N/A",
                     "Rousseeuw_Zomeren_Outliers": f"{stab.get('rousseeuw_zomeren_outlier_count', 0)}" if stab.get("rousseeuw_zomeren_outlier_count") is not None else "N/A",
+                    "Berger_IUT_Z": f"{simp.get('berger_stat_z', 0.0):.2f}" if simp.get("berger_stat_z") is not None else "N/A",
+                    "Berger_IUT_p": f"{simp.get('berger_p_value', 0.0):.3e}" if simp.get("berger_p_value") is not None else "N/A",
+                    "Shoemaker_Kurtosis_Z": f"{simp.get('shoemaker_stat_z', 0.0):.2f}" if simp.get("shoemaker_stat_z") is not None else "N/A",
+                    "Shoemaker_Kurtosis_p": f"{simp.get('shoemaker_p_value', 0.0):.3e}" if simp.get("shoemaker_p_value") is not None else "N/A",
+                    "Rosenbaum_EF_Gamma": f"{conf.get('rosenbaum_ef_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_ef_gamma_crit") is not None else "N/A",
+                    "Ho_Imai_Convex_Hull_Overlap": f"{conf.get('ho_imai_convex_hull_overlap', 0.0):.1%}" if conf.get("ho_imai_convex_hull_overlap") is not None else "N/A",
+                    "Zhang_Normality_ZK": f"{stab.get('zhang_zk_stat', 0.0):.3f}" if stab.get("zhang_zk_stat") is not None else "N/A",
+                    "Zhang_Normality_p": f"{stab.get('zhang_zk_p_value', 0.0):.3e}" if stab.get("zhang_zk_p_value") is not None else "N/A",
+                    "BACON_Max_Distance": f"{stab.get('bacon_max_distance', 0.0):.3f}" if stab.get("bacon_max_distance") is not None else "N/A",
+                    "BACON_Outliers": f"{stab.get('bacon_outlier_count', 0)}" if stab.get("bacon_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

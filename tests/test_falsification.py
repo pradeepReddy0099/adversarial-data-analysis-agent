@@ -179,6 +179,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.silvapulle_sen_p is not None
     assert audit.simpsons_audit.miller_jackknife_stat_f is not None
     assert audit.simpsons_audit.miller_jackknife_p_value is not None
+    # Verify Berger intersection-union test and Shoemaker kurtosis-adjusted scale homogeneity test
+    assert audit.simpsons_audit.berger_stat_z is not None
+    assert audit.simpsons_audit.berger_p_value is not None
+    assert audit.simpsons_audit.shoemaker_stat_z is not None
+    assert audit.simpsons_audit.shoemaker_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -374,6 +379,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.hosman_hansen_holland_delta is not None
         assert audit_coffee.confounder_audit.hosman_hansen_holland_delta >= 0.0
         assert audit_coffee.confounder_audit.hosman_hansen_holland_scale is not None
+        # Check Rosenbaum evidence factors sensitivity and Ho-Imai convex hull overlap
+        assert audit_coffee.confounder_audit.rosenbaum_ef_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_ef_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.ho_imai_convex_hull_overlap is not None
+        assert 0.0 <= audit_coffee.confounder_audit.ho_imai_convex_hull_overlap <= 1.0
+        assert audit_coffee.confounder_audit.ho_imai_trim_fraction is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -549,6 +560,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.vasicek_entropy_p is not None
     assert audit.stability_audit.rousseeuw_zomeren_max_rdz is not None
     assert audit.stability_audit.rousseeuw_zomeren_max_rdz >= 0.0
+    # Check Zhang empirical likelihood normality and BACON adaptive outlier diagnostic
+    assert audit.stability_audit.zhang_zk_stat is not None
+    assert audit.stability_audit.zhang_zk_p_value is not None
+    assert audit.stability_audit.bacon_max_distance is not None
+    assert audit.stability_audit.bacon_max_distance >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1074,6 +1090,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_rdz = narrator.answer_query("Explain Peter Rousseeuw and Bert van Zomeren robust distance diagnostic metric", findings)
     assert "Rousseeuw" in ans_rdz or "Zomeren" in ans_rdz or "Robust" in ans_rdz or "Distance" in ans_rdz or "Mahalanobis" in ans_rdz
+
+    ans_berger = narrator.answer_query("Explain Roger Berger intersection-union test for qualitative interaction", findings)
+    assert "Berger" in ans_berger or "Intersection" in ans_berger or "Union" in ans_berger or "Qualitative" in ans_berger
+
+    ans_shoe = narrator.answer_query("Explain Terry Shoemaker kurtosis-adjusted variance homogeneity test", findings)
+    assert "Shoemaker" in ans_shoe or "Kurtosis" in ans_shoe or "Variance" in ans_shoe or "Scale" in ans_shoe
+
+    ans_ef = narrator.answer_query("Explain Paul Rosenbaum evidence factors sensitivity analysis bound Gamma EF", findings)
+    assert "Rosenbaum" in ans_ef or "Evidence" in ans_ef or "Factors" in ans_ef or "Sensitivity" in ans_ef
+
+    ans_hull = narrator.answer_query("Explain Ho Imai King Stuart convex hull support overlap metric", findings)
+    assert "Ho" in ans_hull or "Imai" in ans_hull or "Convex" in ans_hull or "Hull" in ans_hull or "Overlap" in ans_hull
+
+    ans_zk = narrator.answer_query("Explain Jin Zhang empirical likelihood goodness-of-fit normality test Z_K", findings)
+    assert "Zhang" in ans_zk or "Empirical" in ans_zk or "Likelihood" in ans_zk or "Normality" in ans_zk
+
+    ans_bacon = narrator.answer_query("Explain Billor Hadi Velleman BACON adaptive outlier and leverage diagnostic", findings)
+    assert "BACON" in ans_bacon or "Billor" in ans_bacon or "Hadi" in ans_bacon or "Outlier" in ans_bacon
 
 
 def test_end_to_end_pipeline(tmp_path):

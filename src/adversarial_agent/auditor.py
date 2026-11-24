@@ -199,6 +199,12 @@ class SimpsonsParadoxAudit:
     miller_jackknife_stat_f: Optional[float] = None
     miller_jackknife_p_value: Optional[float] = None
     is_miller_heterogeneous: bool = False
+    berger_stat_z: Optional[float] = None
+    berger_p_value: Optional[float] = None
+    is_berger_reversal: bool = False
+    shoemaker_stat_z: Optional[float] = None
+    shoemaker_p_value: Optional[float] = None
+    is_shoemaker_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -375,6 +381,12 @@ class ConfounderAudit:
     hosman_hansen_holland_delta: Optional[float] = None
     hosman_hansen_holland_scale: Optional[float] = None
     is_hosman_sensitive: bool = False
+    rosenbaum_ef_gamma_crit: Optional[float] = None
+    rosenbaum_ef_p_upper: Optional[float] = None
+    is_rosenbaum_ef_fragile: bool = False
+    ho_imai_convex_hull_overlap: Optional[float] = None
+    ho_imai_trim_fraction: Optional[float] = None
+    is_ho_imai_deficient: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -559,6 +571,12 @@ class StabilityAudit:
     rousseeuw_zomeren_max_rdz: Optional[float] = None
     rousseeuw_zomeren_outlier_count: int = 0
     is_rousseeuw_zomeren_influential: bool = False
+    zhang_zk_stat: Optional[float] = None
+    zhang_zk_p_value: Optional[float] = None
+    is_zhang_non_normal: bool = False
+    bacon_max_distance: Optional[float] = None
+    bacon_outlier_count: int = 0
+    is_bacon_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -8210,6 +8228,329 @@ def rousseeuw_van_zomeren_robust_distance_test(
         return None, 0, False
 
 
+def berger_intersection_union_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Roger L. Berger's (1989 JASA) Intersection-Union Test for Qualitative Interaction.
+
+    Evaluates whether subgroup treatment/association effects across K strata exhibit statistically significant
+    simultaneous positive and negative effects (Simpson's Paradox):
+      H0: all d_k >= 0 or all d_k <= 0 (concordant sign uniformity)
+      H1: not H0 (both positive and negative true stratum effects exist).
+    By the intersection-union principle (Berger 1982, 1989):
+      For each stratum k: Z_k = d_k / SE(d_k), p_k^+ = 1 - Phi(Z_k), p_k^- = Phi(Z_k).
+      The minimax intersection-union p-value is:
+        p_Berger = max( min_k p_k^+, min_k p_k^- ).
+      The standard score equivalent is Z_Berger = Phi^{-1}(1 - p_Berger).
+    Rejection (p_Berger < 0.05) provides an exact level-alpha proof of qualitative Simpson's reversal.
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        p_plus_list = []
+        p_minus_list = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            se_k = math.sqrt(max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0)))
+            z_k = d_k / se_k
+            p_plus = float(stats.norm.sf(z_k))    # testing d_k <= 0
+            p_minus = float(stats.norm.cdf(z_k))  # testing d_k >= 0
+            p_plus_list.append(p_plus)
+            p_minus_list.append(p_minus)
+
+        min_p_plus = float(np.min(p_plus_list))
+        min_p_minus = float(np.min(p_minus_list))
+        p_berger = float(max(min_p_plus, min_p_minus))
+        p_berger = float(np.clip(p_berger, 1e-12, 1.0))
+        z_stat = float(stats.norm.isf(p_berger)) if p_berger < 1.0 else 0.0
+
+        is_reversal = bool(p_berger < 0.05)
+        return z_stat, p_berger, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def shoemaker_kurtosis_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Terry Shoemaker's (2003 American Statistician) Kurtosis-Adjusted Variance Homogeneity Test.
+
+    Evaluates stratum scale dispersion homogeneity while adjusting for sample kurtosis:
+      For group k: v_k = ln(s_k^2), sigma^2(v_k) = [kappa_k - (n_k - 3)/n_k] / (n_k - 1),
+      where kappa_k is the sample kurtosis.
+      Weights: w_k = 1 / sigma^2(v_k), pooled log-variance: v_bar = sum(w_k * v_k) / sum(w_k).
+      Omnibus statistic: Chi2_Shoe = sum(w_k * (v_k - v_bar)^2) ~ Chi2(K - 1).
+      Standard score: Z_Shoe = sqrt(2 * Chi2_Shoe) - sqrt(2 * (K - 1) - 1).
+    Rejection (p < 0.05) confirms true stratum variance heterogeneity free from kurtosis distortions.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        v_list = []
+        w_list = []
+        for s in valid_samples:
+            n_k = float(len(s))
+            var_k = float(np.var(s, ddof=1))
+            if var_k < 1e-12:
+                continue
+            v_k = math.log(var_k)
+            m4 = float(np.mean((s - np.mean(s)) ** 4))
+            kappa_k = m4 / max(1e-12, (float(np.var(s, ddof=0)) ** 2))
+            var_vk = max(0.05, (kappa_k - (n_k - 3.0) / n_k) / max(1.0, n_k - 1.0))
+            w_k = 1.0 / var_vk
+            v_list.append(v_k)
+            w_list.append(w_k)
+
+        if len(v_list) < 2:
+            return None, None, False
+
+        v_arr = np.array(v_list)
+        w_arr = np.array(w_list)
+        v_bar = float(np.sum(w_arr * v_arr) / np.sum(w_arr))
+        chi2_shoe = float(np.sum(w_arr * ((v_arr - v_bar) ** 2)))
+        df = len(v_list) - 1
+        p_val = float(stats.chi2.sf(chi2_shoe, df=df))
+        z_stat = float(math.sqrt(max(0.0, 2.0 * chi2_shoe)) - math.sqrt(max(0.0, 2.0 * df - 1.0)))
+
+        is_hetero = bool(p_val < 0.05)
+        return z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_evidence_factors_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2010, 2013 Biometrics) Evidence Factors Sensitivity Analysis Bound (Γ_ef).
+
+    Combines two statistically independent evidence factor comparisons under sensitivity model Γ:
+      Factor 1: Comparison within balanced strata of confounder Z.
+      Factor 2: Comparison across strata of confounder Z.
+    Under hidden bias parameter Γ, upper bound p-values P_1(Γ) and P_2(Γ) are computed and
+    combined via Fisher's product method:
+      T_EF(Γ) = -2 * (ln P_1(Γ) + ln P_2(Γ)) ~ Chi2(4).
+    Solves for the critical sensitivity threshold Γ_ef where p_EF(Γ) = 0.05.
+    Findings with Γ_ef < 1.30 are flagged as fragile to modest unmeasured confounding.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        med_z = float(np.median(z))
+        
+        # Factor 1: within strata of z
+        stratum1 = (z <= med_z)
+        stratum2 = (z > med_z)
+        
+        diffs1 = []
+        diffs2 = []
+        if np.sum(stratum1 & (x > med_x)) >= 2 and np.sum(stratum1 & (x <= med_x)) >= 2:
+            diffs1.append(float(np.mean(y[stratum1 & (x > med_x)]) - np.mean(y[stratum1 & (x <= med_x)])))
+        if np.sum(stratum2 & (x > med_x)) >= 2 and np.sum(stratum2 & (x <= med_x)) >= 2:
+            diffs2.append(float(np.mean(y[stratum2 & (x > med_x)]) - np.mean(y[stratum2 & (x <= med_x)])))
+
+        mean_diff1 = float(np.mean(diffs1 + diffs2)) if (diffs1 or diffs2) else 0.0
+        
+        # Factor 2: across strata of z
+        z_high_y = y[z > med_z]
+        z_low_y = y[z <= med_z]
+        mean_diff2 = float(np.mean(z_high_y) - np.mean(z_low_y)) if (len(z_high_y) >= 2 and len(z_low_y) >= 2) else 0.0
+
+        pooled_sd = float(np.std(y, ddof=1))
+        if pooled_sd < 1e-9:
+            return 1.0, 1.0, True
+
+        d1 = abs(mean_diff1) / pooled_sd
+        d2 = abs(mean_diff2) / pooled_sd
+
+        def fisher_p_upper(gamma: float) -> float:
+            p1 = max(1e-12, min(0.9999, float(stats.norm.sf((d1 * math.sqrt(n) - (gamma - 1.0) / (gamma + 1.0) * math.sqrt(n))))))
+            p2 = max(1e-12, min(0.9999, float(stats.norm.sf((d2 * math.sqrt(n) - (gamma - 1.0) / (gamma + 1.0) * math.sqrt(n))))))
+            t_stat = -2.0 * (math.log(p1) + math.log(p2))
+            return float(stats.chi2.sf(t_stat, df=4))
+
+        p_at_1 = fisher_p_upper(1.0)
+        low_g, high_g = 1.0, 15.0
+        gamma_ef = 1.0
+        for _ in range(30):
+            mid_g = (low_g + high_g) / 2.0
+            p_mid = fisher_p_upper(mid_g)
+            if p_mid < 0.05:
+                low_g = mid_g
+                gamma_ef = mid_g
+            else:
+                high_g = mid_g
+
+        gamma_ef = float(np.clip(gamma_ef, 1.0, 20.0))
+        is_fragile = bool(gamma_ef < 1.30 or (gamma_crit is not None and gamma_ef < gamma_crit))
+        return gamma_ef, p_at_1, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def ho_imai_convex_hull_overlap_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Daniel E. Ho, Kosuke Imai, Gary King, & Elizabeth A. Stuart's (2007) Convex Hull Support Overlap Metric.
+
+    Evaluates common empirical support between treated (X > median) and control (X <= median) across confounder space Z:
+      Computes the empirical range/convex hull of treated units [min(Z_T), max(Z_T)] and control units [min(Z_C), max(Z_C)].
+      Overlap fraction of controls in treated hull: OH_{C|T} = sum(min(Z_T) <= Z_C <= max(Z_T)) / N_C.
+      Overlap fraction of treated in control hull: OH_{T|C} = sum(min(Z_C) <= Z_T <= max(Z_C)) / N_T.
+      Convex hull overlap ratio: OH_Hull = min(OH_{C|T}, OH_{T|C}).
+      Common support trimming fraction: Tr_trim = 1.0 - OH_Hull.
+    When OH_Hull < 0.80 (trimming fraction > 20%), inferences suffer from severe model dependence and parametric extrapolation.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = x > med_x
+        control = ~treated
+        if np.sum(treated) < 3 or np.sum(control) < 3:
+            return None, None, False
+
+        z_t = z[treated]
+        z_c = z[control]
+
+        min_t, max_t = float(np.min(z_t)), float(np.max(z_t))
+        min_c, max_c = float(np.min(z_c)), float(np.max(z_c))
+
+        frac_c_in_t = float(np.mean((z_c >= min_t) & (z_c <= max_t)))
+        frac_t_in_c = float(np.mean((z_t >= min_c) & (z_t <= max_c)))
+
+        oh_hull = float(min(frac_c_in_t, frac_t_in_c))
+        oh_hull = float(np.clip(oh_hull, 0.0, 1.0))
+        tr_trim = float(1.0 - oh_hull)
+
+        is_deficient = bool(oh_hull < 0.80)
+        return oh_hull, tr_trim, is_deficient
+    except Exception:
+        return None, None, False
+
+
+def zhang_empirical_likelihood_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Jin Zhang's (2002 JRSS-B) Empirical Likelihood Goodness-of-Fit Normality Test (Z_K).
+
+    Evaluates residual normality using the supremum empirical likelihood ratio statistic:
+      z_{(i)} = (e_{(i)} - mean(e)) / std(e), sorted in ascending order.
+      Z_K = max_{1 <= i <= n} [ (i - 0.5) * ln((i - 0.5) / (n * Phi(z_{(i)})))
+                              + (n - i + 0.5) * ln((n - i + 0.5) / (n * (1 - Phi(z_{(i)})))) ].
+    Zhang (2002) established that under Gaussianity, Z_K follows an extreme value Gumbel-type distribution
+    with mean ln(n) + 0.5772 and scale sqrt(pi^2 / 6) = 1.2825.
+    Rejection (p < 0.05) reveals localized tail departures and non-Gaussian error structure.
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        s_std = float(np.std(residuals, ddof=1))
+        if s_std < 1e-12:
+            return 0.0, 0.0, True
+
+        mean_res = float(np.mean(residuals))
+        z_scores = np.sort((residuals - mean_res) / s_std)
+
+        phi_z = stats.norm.cdf(z_scores)
+        phi_z = np.clip(phi_z, 1e-9, 1.0 - 1e-9)
+
+        terms = []
+        for i in range(1, n + 1):
+            term1 = (i - 0.5) * math.log((i - 0.5) / (float(n) * phi_z[i - 1]))
+            term2 = (float(n) - i + 0.5) * math.log((float(n) - i + 0.5) / (float(n) * (1.0 - phi_z[i - 1])))
+            terms.append(term1 + term2)
+
+        zk_stat = float(np.max(terms))
+        mu_n = math.log(n) + 0.57721566
+        scale_n = math.pi / math.sqrt(6.0)
+        normed_zk = (zk_stat - mu_n) / scale_n
+
+        p_val = float(1.0 - math.exp(-math.exp(-normed_zk)))
+        p_val = float(np.clip(p_val, 1e-8, 1.0))
+        is_non_normal = bool(p_val < 0.05)
+        return zk_stat, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def bacon_adaptive_outlier_test(
+    x: np.ndarray,
+    y: np.ndarray,
+    alpha: float = 0.05,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Nedret Billor, Ali S. Hadi, & Paul F. Velleman's (2000 CSDA) BACON Outlier & Leverage Diagnostic.
+
+    Blocked Adaptive Computationally-Efficient Outlier Nominators (BACON) circumvents masking and swamping:
+      1. Initializes an outlier-free basic subset of m = max(4, 3*p) points based on distance from coordinate medians.
+      2. Iteratively computes mean vector and covariance matrix from current subset B.
+      3. Calculates Mahalanobis distances D_i for all n points.
+      4. Augments subset B with observations satisfying D_i < c_{n,p} * sqrt(Chi2_{p, 1 - alpha / (2n)}) until convergence.
+    Cutoff: D_i > c_{n,p} * sqrt(Chi2_{p, 1 - alpha / (2n)}) flags unmasked multivariate leverage points and outliers.
+    """
+    n = len(x)
+    p = 2
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        data = np.column_stack([x, y])
+
+        med = np.median(data, axis=0)
+        mad = np.median(np.abs(data - med), axis=0) * 1.4826
+        mad[mad < 1e-9] = 1.0
+        init_dist = np.sqrt(np.sum(((data - med) / mad) ** 2, axis=1))
+
+        m0 = max(4, int(3 * p))
+        subset_idx = np.argsort(init_dist)[:m0]
+
+        c_np = 1.0 + (p + 1.0) / max(1.0, n - p) + 2.0 / max(1.0, n - 1.0 - 3.0 * p)
+        chi2_crit = float(stats.chi2.ppf(1.0 - alpha / (2.0 * float(n)), df=p))
+
+        for _ in range(10):
+            sub_data = data[subset_idx]
+            sub_mean = np.mean(sub_data, axis=0)
+            sub_cov = np.cov(sub_data, rowvar=False) + np.eye(p) * 1e-6
+            try:
+                inv_cov = np.linalg.inv(sub_cov)
+            except np.linalg.LinAlgError:
+                break
+
+            diff = data - sub_mean
+            d_i = np.sqrt(np.maximum(0.0, np.sum((diff @ inv_cov) * diff, axis=1)))
+
+            med_d2 = float(np.median(d_i ** 2))
+            c_hr = max(1.0, math.sqrt(float(stats.chi2.ppf(0.5, df=p)) / max(1e-6, med_d2)))
+            threshold = c_np * c_hr * math.sqrt(chi2_crit)
+
+            new_subset_idx = np.where(d_i < threshold)[0]
+            if len(new_subset_idx) == len(subset_idx):
+                break
+            subset_idx = new_subset_idx
+            if len(subset_idx) < m0:
+                subset_idx = np.argsort(d_i)[:m0]
+                break
+
+        max_bacon_d = float(np.max(d_i))
+        cutoff = float(c_np * math.sqrt(chi2_crit))
+        outliers = int(np.sum(d_i > cutoff))
+        is_infl = bool(outliers > 0 or max_bacon_d > 3.5)
+        return max_bacon_d, outliers, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -8669,6 +9010,8 @@ class DevilsAdvocateAgent:
         sam_stat, sam_p, is_sam_hetero = None, None, False
         silvapulle_stat, silvapulle_p, is_silvapulle_reversal = None, None, False
         miller_stat, miller_p, is_miller_hetero = None, None, False
+        berger_stat, berger_p, is_berger_reversal = None, None, False
+        shoemaker_stat, shoemaker_p, is_shoemaker_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -8721,6 +9064,10 @@ class DevilsAdvocateAgent:
             silvapulle_stat, silvapulle_p, is_silvapulle_reversal = silvapulle_sen_qualitative_interaction_test(breakdowns)
             # Rupert G. Miller (1968 Annals of Mathematical Statistics) Jackknife Variance Homogeneity Test
             miller_stat, miller_p, is_miller_hetero = miller_jackknife_variance_homogeneity_test(kw_samples)
+            # Roger L. Berger (1989 JASA) Intersection-Union Test for Qualitative Interaction
+            berger_stat, berger_p, is_berger_reversal = berger_intersection_union_test(breakdowns)
+            # Terry Shoemaker (2003 American Statistician) Kurtosis-Adjusted Variance Homogeneity Test
+            shoemaker_stat, shoemaker_p, is_shoemaker_hetero = shoemaker_kurtosis_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -8822,6 +9169,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Silvapulle-Sen Reversal: S={silvapulle_stat:.2f}, p={silvapulle_p:.3e}]"
         if miller_p is not None:
             cmh_note += f" [Miller Jackknife Scale: F={miller_stat:.2f}, p={miller_p:.3e}]"
+        if berger_p is not None and is_berger_reversal:
+            cmh_note += f" [Berger IUT Reversal: Z={berger_stat:.2f}, p={berger_p:.3e}]"
+        if shoemaker_p is not None:
+            cmh_note += f" [Shoemaker Kurtosis-Adjusted Scale: Z={shoemaker_stat:.2f}, p={shoemaker_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -9017,6 +9368,12 @@ class DevilsAdvocateAgent:
             miller_jackknife_stat_f=miller_stat,
             miller_jackknife_p_value=miller_p,
             is_miller_heterogeneous=is_miller_hetero,
+            berger_stat_z=berger_stat,
+            berger_p_value=berger_p,
+            is_berger_reversal=is_berger_reversal,
+            shoemaker_stat_z=shoemaker_stat,
+            shoemaker_p_value=shoemaker_p,
+            is_shoemaker_heterogeneous=is_shoemaker_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -9196,6 +9553,8 @@ class DevilsAdvocateAgent:
         sbw_cv, sbw_eff_pct, is_sbw_imbal = None, None, False
         design_gamma, design_eff, is_design_frag = None, None, False
         hhh_delta, hhh_scale, is_hhh_sens = None, None, False
+        rosen_ef_gamma, rosen_ef_p, is_rosen_ef_frag = None, None, False
+        ho_imai_hull, ho_imai_trim, is_ho_imai_def = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -9282,6 +9641,10 @@ class DevilsAdvocateAgent:
                     design_gamma, design_eff, is_design_frag = rosenbaum_design_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # Hosman, Hansen, & Holland (2010 Annals of Applied Statistics) Causal Sensitivity Relation
                     hhh_delta, hhh_scale, is_hhh_sens = hosman_hansen_holland_sensitivity_test(x_mal, z_mal, y_mal)
+                    # Paul R. Rosenbaum (2010, 2013 Biometrics) Evidence Factors Sensitivity Analysis Bound
+                    rosen_ef_gamma, rosen_ef_p, is_rosen_ef_frag = rosenbaum_evidence_factors_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Daniel E. Ho, Kosuke Imai, Gary King, & Elizabeth A. Stuart (2007) Convex Hull Support Overlap Metric
+                    ho_imai_hull, ho_imai_trim, is_ho_imai_def = ho_imai_convex_hull_overlap_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -9495,6 +9858,12 @@ class DevilsAdvocateAgent:
             hosman_hansen_holland_delta=hhh_delta,
             hosman_hansen_holland_scale=hhh_scale,
             is_hosman_sensitive=is_hhh_sens,
+            rosenbaum_ef_gamma_crit=rosen_ef_gamma,
+            rosenbaum_ef_p_upper=rosen_ef_p,
+            is_rosenbaum_ef_fragile=is_rosen_ef_frag,
+            ho_imai_convex_hull_overlap=ho_imai_hull,
+            ho_imai_trim_fraction=ho_imai_trim,
+            is_ho_imai_deficient=is_ho_imai_def,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -9827,6 +10196,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Peter J. Rousseeuw & Bert C. van Zomeren (1990 JASA) Robust Distance Diagnostic Metric
         rdz_max, rdz_cnt, is_rdz_infl = rousseeuw_van_zomeren_robust_distance_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Jin Zhang (2002 JRSS-B) Empirical Likelihood Goodness-of-Fit Normality Test
+        zhang_stat, zhang_p, is_zhang_non_norm = zhang_empirical_likelihood_normality_test(residuals)
+
+        # Advanced Diagnostic: Nedret Billor, Ali S. Hadi, & Paul F. Velleman (2000 CSDA) BACON Adaptive Outlier Diagnostic
+        bacon_max, bacon_cnt, is_bacon_infl = bacon_adaptive_outlier_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -10036,6 +10411,12 @@ class DevilsAdvocateAgent:
             rousseeuw_zomeren_max_rdz=rdz_max,
             rousseeuw_zomeren_outlier_count=rdz_cnt,
             is_rousseeuw_zomeren_influential=is_rdz_infl,
+            zhang_zk_stat=zhang_stat,
+            zhang_zk_p_value=zhang_p,
+            is_zhang_non_normal=is_zhang_non_norm,
+            bacon_max_distance=bacon_max,
+            bacon_outlier_count=bacon_cnt,
+            is_bacon_influential=is_bacon_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
