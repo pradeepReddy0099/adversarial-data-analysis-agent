@@ -205,6 +205,12 @@ class SimpsonsParadoxAudit:
     shoemaker_stat_z: Optional[float] = None
     shoemaker_p_value: Optional[float] = None
     is_shoemaker_heterogeneous: bool = False
+    demets_simon_stat_q: Optional[float] = None
+    demets_simon_p_value: Optional[float] = None
+    is_demets_simon_reversal: bool = False
+    box_andersen_stat_m: Optional[float] = None
+    box_andersen_p_value: Optional[float] = None
+    is_box_andersen_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -387,6 +393,12 @@ class ConfounderAudit:
     ho_imai_convex_hull_overlap: Optional[float] = None
     ho_imai_trim_fraction: Optional[float] = None
     is_ho_imai_deficient: bool = False
+    rosenbaum_diff_gamma_crit: Optional[float] = None
+    rosenbaum_diff_p_upper: Optional[float] = None
+    is_rosenbaum_diff_fragile: bool = False
+    bitler_gelbach_hoynes_disparity: Optional[float] = None
+    bitler_gelbach_hoynes_max_q_divergence: Optional[float] = None
+    is_bgh_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -577,6 +589,12 @@ class StabilityAudit:
     bacon_max_distance: Optional[float] = None
     bacon_outlier_count: int = 0
     is_bacon_influential: bool = False
+    lin_mudholkar_stat_z: Optional[float] = None
+    lin_mudholkar_p_value: Optional[float] = None
+    is_lin_mudholkar_non_normal: bool = False
+    hoaglin_welsch_max_leverage_ratio: Optional[float] = None
+    hoaglin_welsch_outlier_count: int = 0
+    is_hoaglin_welsch_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -8551,6 +8569,318 @@ def bacon_adaptive_outlier_test(
         return None, 0, False
 
 
+def demets_simon_qualitative_interaction_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates David L. DeMets & Richard Simon's (1983 Cancer Treat Rep / Simon 1989) Qualitative Interaction Score Test.
+
+    Evaluates whether subgroup treatment/association effects across K strata exhibit statistically significant
+    qualitative interaction (true sign reversals across subsets):
+      H0: all d_k >= 0 or all d_k <= 0 (concordant directional uniformity)
+      H1: not H0 (at least one stratum has d_k > 0 and another has d_k < 0).
+    For each stratum k: Z_k = d_k / SE(d_k).
+    Sum of squared positive and negative normalized effects:
+      Q+ = sum_{k: Z_k > 0} Z_k^2,  Q- = sum_{k: Z_k < 0} Z_k^2.
+      Q_DS = min(Q+, Q-).
+    Under H0, the asymptotic p-value follows Gail-Simon / DeMets-Simon mixture:
+      p_DS = sum_{m=1}^{K-1} binom(K, m) * 2^(-K) * [ 1 - F_{Chi2(m)}(Q_DS) ].
+    Rejection (p_DS < 0.05 with Q_DS > 0) certifies qualitative Simpson's reversal across strata.
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        z_scores = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            se_k = math.sqrt(max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0)))
+            z_k = d_k / se_k
+            z_scores.append(z_k)
+
+        q_plus = float(sum(z ** 2 for z in z_scores if z > 0))
+        q_minus = float(sum(z ** 2 for z in z_scores if z < 0))
+
+        if q_plus <= 1e-12 or q_minus <= 1e-12:
+            return 0.0, 1.0, False
+
+        q_ds = float(min(q_plus, q_minus))
+
+        p_val = 0.0
+        for m in range(1, k):
+            comb = float(math.comb(k, m))
+            weight = comb * (2.0 ** (-k))
+            p_val += weight * float(stats.chi2.sf(q_ds, df=m))
+
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+        is_reversal = bool(p_val < 0.05 and q_ds > 0.0)
+        return q_ds, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def box_andersen_kurtosis_variance_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates George E. P. Box & S. L. Andersen's (1955 JRSS-B) Permutation/Kurtosis-Corrected Variance Test.
+
+    Corrects Bartlett's scale dispersion test for non-normality via sample excess kurtosis:
+      M = (N - K) * ln(s_p^2) - sum_{k=1}^K (n_k - 1) * ln(s_k^2).
+      Pooled excess kurtosis: gamma_2 = (1/K) * sum [ m_{4,k} / s_k^4 - 3.0 ].
+      Box & Andersen correction factor: b = 1 + 0.5 * max(-1.5, gamma_2).
+      Corrected statistic: M_BA = M / b ~ Chi2(K - 1).
+    Rejection (p < 0.05) diagnoses genuine scale dispersion heterogeneity insulated from kurtosis inflation.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        n_k = [len(s) for s in valid_samples]
+        n_total = sum(n_k)
+        deg_free = n_total - k
+        if deg_free <= 0:
+            return None, None, False
+
+        s_sq_k = [float(np.var(s, ddof=1)) for s in valid_samples]
+        if any(v < 1e-12 for v in s_sq_k):
+            return None, None, False
+
+        pooled_var = sum((n - 1) * v for n, v in zip(n_k, s_sq_k)) / float(deg_free)
+        if pooled_var < 1e-12:
+            return None, None, False
+
+        bartlett_m = float(deg_free * math.log(pooled_var) - sum((n - 1) * math.log(v) for n, v in zip(n_k, s_sq_k)))
+
+        kurt_list = []
+        for s in valid_samples:
+            m4 = float(np.mean((s - np.mean(s)) ** 4))
+            v0 = float(np.var(s, ddof=0))
+            if v0 > 1e-12:
+                kurt_list.append(m4 / (v0 ** 2) - 3.0)
+
+        gamma_2 = float(np.mean(kurt_list)) if kurt_list else 0.0
+        b_divisor = max(0.1, 1.0 + 0.5 * max(-1.5, gamma_2))
+
+        m_ba = float(max(0.0, bartlett_m / b_divisor))
+        df_k = k - 1
+        p_val = float(stats.chi2.sf(m_ba, df=df_k))
+        is_hetero = bool(p_val < 0.05)
+        return m_ba, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_differential_comparison_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2004 The American Statistician / 2002) Differential Comparison Sensitivity Bound (Γ_Diff).
+
+    Evaluates sensitivity to hidden bias by constructing a differential comparison between two subgroups
+    stratified by confounder Z:
+      Computes treatment effect tau_1 in high-Z stratum and tau_2 in low-Z stratum.
+      Differential contrast: Delta_diff = |tau_1 - tau_2|.
+      Standardized differential effect: d_diff = Delta_diff / SD(Y).
+      Under sensitivity parameter Gamma:
+        Z_diff(Gamma) = d_diff * sqrt(n) - ((Gamma - 1) / (Gamma + 1)) * sqrt(n).
+        P_upper(Gamma) = 1 - Phi(Z_diff(Gamma)).
+      Finds critical threshold Gamma_Diff where P_upper(Gamma) = 0.05.
+    Findings with Gamma_Diff < 1.30 fail to cancel differential selection bias and are declared fragile.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        med_z = float(np.median(z))
+
+        # Stratum 1: High Z
+        t1 = (x > med_x) & (z > med_z)
+        c1 = (x <= med_x) & (z > med_z)
+        # Stratum 2: Low Z
+        t2 = (x > med_x) & (z <= med_z)
+        c2 = (x <= med_x) & (z <= med_z)
+
+        if np.sum(t1) < 2 or np.sum(c1) < 2 or np.sum(t2) < 2 or np.sum(c2) < 2:
+            return 1.0, 1.0, True
+
+        tau_1 = float(np.mean(y[t1]) - np.mean(y[c1]))
+        tau_2 = float(np.mean(y[t2]) - np.mean(y[c2]))
+        delta_diff = abs(tau_1 - tau_2)
+
+        sd_y = float(np.std(y, ddof=1))
+        if sd_y < 1e-9:
+            return 1.0, 1.0, True
+
+        d_diff = delta_diff / sd_y
+
+        def p_diff_upper(gamma: float) -> float:
+            bias_adj = ((gamma - 1.0) / (gamma + 1.0)) * math.sqrt(n)
+            z_stat = d_diff * math.sqrt(n) - bias_adj
+            return float(stats.norm.sf(z_stat))
+
+        p_at_1 = float(np.clip(p_diff_upper(1.0), 1e-12, 1.0))
+
+        low_g, high_g = 1.0, 15.0
+        gamma_diff = 1.0
+        for _ in range(30):
+            mid_g = (low_g + high_g) / 2.0
+            p_mid = p_diff_upper(mid_g)
+            if p_mid < 0.05:
+                low_g = mid_g
+                gamma_diff = mid_g
+            else:
+                high_g = mid_g
+
+        gamma_diff = float(np.clip(gamma_diff, 1.0, 20.0))
+        is_fragile = bool(gamma_diff < 1.30 or (gamma_crit is not None and gamma_diff < gamma_crit))
+        return gamma_diff, p_at_1, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def bitler_gelbach_hoynes_quantile_sensitivity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Marianne Bitler, Jonah Gelbach, & Hilary Hoynes' (2006 AER) Quantile Treatment Disparity Bound (Δ_BGH).
+
+    Evaluates whether unmeasured confounding violates rank preservation across distribution quantiles:
+      Quantile treatment effects for q in {0.25, 0.50, 0.75}:
+        Delta_q = Q_Y(q | X > med) - Q_Y(q | X <= med).
+      Mean quantile impact: Delta_bar = (Delta_25 + Delta_50 + Delta_75) / 3.
+      Maximal quantile divergence: D_max = max_q |Delta_q - Delta_bar|.
+      Standardized disparity: Delta_BGH = D_max / IQR(Y).
+      Max quantile divergence ratio: Q_div = D_max / max(1e-6, |Delta_bar|).
+    When Delta_BGH > 0.40 or Q_div > 0.50, the estimated effect is driven by distribution tails / rank violation.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = x > med_x
+        control = ~treated
+        if np.sum(treated) < 4 or np.sum(control) < 4:
+            return None, None, False
+
+        y_t = y[treated]
+        y_c = y[control]
+
+        deltas = []
+        for q in [0.25, 0.50, 0.75]:
+            q_t = float(np.percentile(y_t, q * 100))
+            q_c = float(np.percentile(y_c, q * 100))
+            deltas.append(q_t - q_c)
+
+        delta_bar = float(np.mean(deltas))
+        d_max = float(np.max([abs(d - delta_bar) for d in deltas]))
+
+        iqr_y = float(np.percentile(y, 75) - np.percentile(y, 25))
+        if iqr_y < 1e-6:
+            iqr_y = float(np.std(y, ddof=1))
+        if iqr_y < 1e-6:
+            return 0.0, 0.0, False
+
+        delta_bgh = float(d_max / iqr_y)
+        q_div = float(d_max / max(1e-6, abs(delta_bar)))
+
+        is_hetero = bool(delta_bgh > 0.40 or (q_div > 0.50 and delta_bgh > 0.20))
+        return delta_bgh, q_div, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def lin_mudholkar_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Chien-Pai Lin & Govind S. Mudholkar's (1980 Biometrika) Jackknife Mean-Variance Normality Test (Z_LM).
+
+    Based on the Geary-Lukacs characterization that sample mean and variance are independent if and only if
+    the population is Gaussian:
+      Computes jackknife-deleted means x_{-i} and variances s_{-i}^2.
+      Applies Wilson-Hilferty transformation: y_i = (s_{-i}^2)^(2/3).
+      Calculates Pearson correlation r = corr(x_i, y_i).
+      Under normality, E[r] = 0 and Var(r) ~ 3 / n.
+      Statistic: Z_LM = r / sqrt(3 / n).
+      Two-sided p-value: p_LM = 2 * (1 - Phi(|Z_LM|)).
+    Rejection (p < 0.05) signals statistical dependence between mean and variance, proving non-Gaussian error structure.
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        x = np.asarray(residuals, dtype=float)
+        mean_x = float(np.mean(x))
+        s_std = float(np.std(x, ddof=1))
+        if s_std < 1e-12:
+            return 0.0, 0.0, True
+
+        ss_tot = float(np.sum((x - mean_x) ** 2))
+
+        denom = float(n - 2)
+        n_factor = float(n) / float(n - 1)
+        s_del_sq = np.maximum(1e-12, (ss_tot - n_factor * ((x - mean_x) ** 2)) / denom)
+
+        y_trans = s_del_sq ** (2.0 / 3.0)
+
+        r_val, _ = stats.pearsonr(x, y_trans)
+        if math.isnan(r_val):
+            return None, None, False
+
+        se_r = math.sqrt(3.0 / float(n))
+        z_lm = float(r_val / se_r)
+        p_val = float(2.0 * stats.norm.sf(abs(z_lm)))
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+
+        is_non_normal = bool(p_val < 0.05)
+        return z_lm, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def hoaglin_welsch_leverage_ratio_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates David C. Hoaglin & Roy E. Welsch's (1978 American Statistician) Hat-Matrix Leverage Ratio (HR_max).
+
+    Evaluates disproportionate design leverage in bivariate regression:
+      Hat diagonal: h_{ii} = 1/n + (x_i - mean(x))^2 / sum((x_j - mean(x))^2).
+      Average leverage: h_bar = p / n = 2 / n.
+      Canonical 2x leverage cutoff: h_crit = 2 * p / n = 4 / n.
+      Leverage ratio: HR_i = h_{ii} / h_bar = (n * h_{ii}) / p.
+      Max leverage ratio: HR_max = max(HR_i).
+    Points with HR_i > 2.0 (h_{ii} > 2*p/n) exert excessive leverage capable of distorting regression estimates.
+    """
+    n = len(x)
+    p = 2
+    if n < 8 or np.std(x) < 1e-9:
+        return None, 0, False
+    try:
+        x_flt = np.asarray(x, dtype=float)
+        mean_x = float(np.mean(x_flt))
+        ss_x = float(np.sum((x_flt - mean_x) ** 2))
+        if ss_x < 1e-12:
+            return None, 0, False
+
+        h_ii = 1.0 / float(n) + ((x_flt - mean_x) ** 2) / ss_x
+        h_bar = float(p) / float(n)
+        h_crit = 2.0 * h_bar
+
+        hr_scores = h_ii / h_bar
+        max_hr = float(np.max(hr_scores))
+        outlier_count = int(np.sum(h_ii > h_crit))
+        is_infl = bool(outlier_count > 0 and max_hr > 2.0)
+        return max_hr, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -9012,6 +9342,8 @@ class DevilsAdvocateAgent:
         miller_stat, miller_p, is_miller_hetero = None, None, False
         berger_stat, berger_p, is_berger_reversal = None, None, False
         shoemaker_stat, shoemaker_p, is_shoemaker_hetero = None, None, False
+        demets_q, demets_p, is_demets_reversal = None, None, False
+        box_m, box_p, is_box_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -9068,6 +9400,10 @@ class DevilsAdvocateAgent:
             berger_stat, berger_p, is_berger_reversal = berger_intersection_union_test(breakdowns)
             # Terry Shoemaker (2003 American Statistician) Kurtosis-Adjusted Variance Homogeneity Test
             shoemaker_stat, shoemaker_p, is_shoemaker_hetero = shoemaker_kurtosis_variance_homogeneity_test(kw_samples)
+            # David L. DeMets & Richard Simon (1983) Qualitative Interaction Score Test
+            demets_q, demets_p, is_demets_reversal = demets_simon_qualitative_interaction_test(breakdowns)
+            # George E. P. Box & S. L. Andersen (1955 JRSS-B) Permutation/Kurtosis-Corrected Variance Test
+            box_m, box_p, is_box_hetero = box_andersen_kurtosis_variance_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -9173,6 +9509,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Berger IUT Reversal: Z={berger_stat:.2f}, p={berger_p:.3e}]"
         if shoemaker_p is not None:
             cmh_note += f" [Shoemaker Kurtosis-Adjusted Scale: Z={shoemaker_stat:.2f}, p={shoemaker_p:.3e}]"
+        if demets_p is not None and is_demets_reversal:
+            cmh_note += f" [DeMets-Simon Reversal: Q={demets_q:.2f}, p={demets_p:.3e}]"
+        if box_p is not None:
+            cmh_note += f" [Box-Andersen Kurtosis Scale: M={box_m:.2f}, p={box_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -9374,6 +9714,12 @@ class DevilsAdvocateAgent:
             shoemaker_stat_z=shoemaker_stat,
             shoemaker_p_value=shoemaker_p,
             is_shoemaker_heterogeneous=is_shoemaker_hetero,
+            demets_simon_stat_q=demets_q,
+            demets_simon_p_value=demets_p,
+            is_demets_simon_reversal=is_demets_reversal,
+            box_andersen_stat_m=box_m,
+            box_andersen_p_value=box_p,
+            is_box_andersen_heterogeneous=is_box_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -9555,6 +9901,8 @@ class DevilsAdvocateAgent:
         hhh_delta, hhh_scale, is_hhh_sens = None, None, False
         rosen_ef_gamma, rosen_ef_p, is_rosen_ef_frag = None, None, False
         ho_imai_hull, ho_imai_trim, is_ho_imai_def = None, None, False
+        rosen_diff_gamma, rosen_diff_p, is_rosen_diff_frag = None, None, False
+        bgh_disp, bgh_div, is_bgh_hetero = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -9645,6 +9993,10 @@ class DevilsAdvocateAgent:
                     rosen_ef_gamma, rosen_ef_p, is_rosen_ef_frag = rosenbaum_evidence_factors_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # Daniel E. Ho, Kosuke Imai, Gary King, & Elizabeth A. Stuart (2007) Convex Hull Support Overlap Metric
                     ho_imai_hull, ho_imai_trim, is_ho_imai_def = ho_imai_convex_hull_overlap_test(x_mal, z_mal)
+                    # Paul R. Rosenbaum (2004 The American Statistician / 2002) Differential Comparison Sensitivity Bound
+                    rosen_diff_gamma, rosen_diff_p, is_rosen_diff_frag = rosenbaum_differential_comparison_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Marianne Bitler, Jonah Gelbach, & Hilary Hoynes (2006 AER) Quantile Treatment Disparity Bound
+                    bgh_disp, bgh_div, is_bgh_hetero = bitler_gelbach_hoynes_quantile_sensitivity_test(x_mal, y_mal)
                 except Exception:
                     pass
 
@@ -9864,6 +10216,12 @@ class DevilsAdvocateAgent:
             ho_imai_convex_hull_overlap=ho_imai_hull,
             ho_imai_trim_fraction=ho_imai_trim,
             is_ho_imai_deficient=is_ho_imai_def,
+            rosenbaum_diff_gamma_crit=rosen_diff_gamma,
+            rosenbaum_diff_p_upper=rosen_diff_p,
+            is_rosenbaum_diff_fragile=is_rosen_diff_frag,
+            bitler_gelbach_hoynes_disparity=bgh_disp,
+            bitler_gelbach_hoynes_max_q_divergence=bgh_div,
+            is_bgh_heterogeneous=is_bgh_hetero,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -10202,6 +10560,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Nedret Billor, Ali S. Hadi, & Paul F. Velleman (2000 CSDA) BACON Adaptive Outlier Diagnostic
         bacon_max, bacon_cnt, is_bacon_infl = bacon_adaptive_outlier_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Chien-Pai Lin & Govind S. Mudholkar (1980 Biometrika) Jackknife Mean-Variance Normality Test
+        lm_stat, lm_p, is_lm_non_norm = lin_mudholkar_normality_test(residuals)
+
+        # Advanced Diagnostic: David C. Hoaglin & Roy E. Welsch (1978 American Statistician) Hat-Matrix Leverage Ratio
+        hw_max, hw_cnt, is_hw_infl = hoaglin_welsch_leverage_ratio_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -10417,6 +10781,12 @@ class DevilsAdvocateAgent:
             bacon_max_distance=bacon_max,
             bacon_outlier_count=bacon_cnt,
             is_bacon_influential=is_bacon_infl,
+            lin_mudholkar_stat_z=lm_stat,
+            lin_mudholkar_p_value=lm_p,
+            is_lin_mudholkar_non_normal=is_lm_non_norm,
+            hoaglin_welsch_max_leverage_ratio=hw_max,
+            hoaglin_welsch_outlier_count=hw_cnt,
+            is_hoaglin_welsch_influential=is_hw_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

@@ -193,6 +193,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Berger Intersection-Union Test: Z_Berger = {simpsons.berger_stat_z:.2f} (p = {simpsons.berger_p_value:.3e}) {'[EXACT LEVEL-ALPHA QUALITATIVE REVERSAL CERTIFIED]' if simpsons.is_berger_reversal else '[CONCORDANT SIGN UNIFORMITY]'}")
             if simpsons.shoemaker_p_value is not None:
                 rationale["key_evidence"].append(f"Shoemaker Kurtosis-Adjusted Scale Homogeneity: Z_Shoe = {simpsons.shoemaker_stat_z:.2f} (p = {simpsons.shoemaker_p_value:.3e}) {'[KURTOSIS-INVARIANT STRATUM SCALE HETEROGENEITY]' if simpsons.is_shoemaker_heterogeneous else '[HOMOGENEOUS STRATUM SCALE]'}")
+            if simpsons.demets_simon_p_value is not None:
+                rationale["key_evidence"].append(f"DeMets-Simon Qualitative Interaction Test: Q_DS = {simpsons.demets_simon_stat_q:.2f} (p = {simpsons.demets_simon_p_value:.3e}) {'[QUALITATIVE CROSS-OVER REVERSAL PROVEN]' if simpsons.is_demets_simon_reversal else '[CONCORDANT DIRECTION]'}")
+            if simpsons.box_andersen_p_value is not None:
+                rationale["key_evidence"].append(f"Box-Andersen Kurtosis-Corrected Variance: M_BA = {simpsons.box_andersen_stat_m:.2f} (p = {simpsons.box_andersen_p_value:.3e}) {'[KURTOSIS-ROBUST SCALE HETEROGENEITY]' if simpsons.is_box_andersen_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -338,6 +342,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Evidence Factors Sensitivity: Gamma_EF = {confounder.rosenbaum_ef_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_ef_p_upper:.3e}) {'[SENSITIVE TO DUAL EVIDENCE CONVOLUTION]' if confounder.is_rosenbaum_ef_fragile else '[ROBUST DUAL EVIDENCE REINFORCEMENT]'}")
             if confounder.ho_imai_convex_hull_overlap is not None:
                 rationale["key_evidence"].append(f"Ho-Imai-King-Stuart Convex Hull Overlap: OH_Hull = {confounder.ho_imai_convex_hull_overlap:.1%} (Trimming Required = {confounder.ho_imai_trim_fraction:.1%}) {'[EXTRAPOLATION-PRONE SUPPORT DEFICIT]' if confounder.is_ho_imai_deficient else '[ROBUST COMMON COUNTERFACTUAL SUPPORT]'}")
+            if confounder.rosenbaum_diff_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Differential Comparison Sensitivity: Gamma_Diff = {confounder.rosenbaum_diff_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_diff_p_upper:.3e}) {'[FRAGILE DIFFERENTIAL COMPARISON BIAS]' if confounder.is_rosenbaum_diff_fragile else '[ROBUST DIFFERENTIAL COMPARISON]'}")
+            if confounder.bitler_gelbach_hoynes_disparity is not None:
+                rationale["key_evidence"].append(f"Bitler-Gelbach-Hoynes Quantile Treatment Disparity: Delta_BGH = {confounder.bitler_gelbach_hoynes_disparity:.3f} (Max Divergence Ratio = {confounder.bitler_gelbach_hoynes_max_q_divergence:.1%}) {'[SEVERE QUANTILE HETEROGENEITY / RANK DISRUPTION]' if confounder.is_bgh_heterogeneous else '[HOMOGENEOUS QUANTILE TREATMENT IMPACT]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -484,6 +492,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Zhang Empirical Likelihood Normality: Z_K = {stability.zhang_zk_stat:.3f} (p = {stability.zhang_zk_p_value:.3e}) {'[NON-PARAMETRIC EMPIRICAL LIKELIHOOD NON-NORMALITY]' if stability.is_zhang_non_normal else '[GAUSSIAN EMPIRICAL LIKELIHOOD ALIGNED]'}")
             if stability.bacon_max_distance is not None:
                 rationale["key_evidence"].append(f"BACON Adaptive Outlier Diagnostic: Max Dist = {stability.bacon_max_distance:.3f} ({stability.bacon_outlier_count} unmasked outliers) {'[UNMASKED MULTIVARIATE LEVERAGE OUTLIERS]' if stability.is_bacon_influential else '[BOUNDED ADAPTIVE DISTANCES]'}")
+            if stability.lin_mudholkar_p_value is not None:
+                rationale["key_evidence"].append(f"Lin-Mudholkar Mean-Variance Normality: Z_LM = {stability.lin_mudholkar_stat_z:.3f} (p = {stability.lin_mudholkar_p_value:.3e}) {'[MEAN-VARIANCE STATISTICAL DEPENDENCE / NON-NORMAL]' if stability.is_lin_mudholkar_non_normal else '[GAUSSIAN INDEPENDENCE CONFIRMED]'}")
+            if stability.hoaglin_welsch_max_leverage_ratio is not None:
+                rationale["key_evidence"].append(f"Hoaglin-Welsch Hat-Matrix Leverage: HR_max = {stability.hoaglin_welsch_max_leverage_ratio:.2f} ({stability.hoaglin_welsch_outlier_count} leverage points) {'[EXCESSIVE HAT-MATRIX DESIGN LEVERAGE]' if stability.is_hoaglin_welsch_influential else '[BOUNDED DESIGN LEVERAGE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -835,6 +847,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Zhang Empirical Likelihood: Z_K = {stability.zhang_zk_stat:.3f} (p = {stability.zhang_zk_p_value:.3e})")
             if stability.bacon_max_distance is not None:
                 rationale["key_evidence"].append(f"BACON Adaptive Outlier Metric: Max Dist = {stability.bacon_max_distance:.3f}")
+            if simpsons.demets_simon_p_value is not None:
+                rationale["key_evidence"].append(f"DeMets-Simon Score: Q_DS = {simpsons.demets_simon_stat_q:.2f} (p = {simpsons.demets_simon_p_value:.3e})")
+            if simpsons.box_andersen_p_value is not None:
+                rationale["key_evidence"].append(f"Box-Andersen Variance: M_BA = {simpsons.box_andersen_stat_m:.2f} (p = {simpsons.box_andersen_p_value:.3e})")
+            if confounder.rosenbaum_diff_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Differential Sensitivity: Gamma_Diff = {confounder.rosenbaum_diff_gamma_crit:.2f}")
+            if confounder.bitler_gelbach_hoynes_disparity is not None:
+                rationale["key_evidence"].append(f"Bitler-Gelbach-Hoynes Disparity: Delta_BGH = {confounder.bitler_gelbach_hoynes_disparity:.3f}")
+            if stability.lin_mudholkar_p_value is not None:
+                rationale["key_evidence"].append(f"Lin-Mudholkar Normality: Z_LM = {stability.lin_mudholkar_stat_z:.3f} (p = {stability.lin_mudholkar_p_value:.3e})")
+            if stability.hoaglin_welsch_max_leverage_ratio is not None:
+                rationale["key_evidence"].append(f"Hoaglin-Welsch Leverage Ratio: HR_max = {stability.hoaglin_welsch_max_leverage_ratio:.2f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

@@ -354,6 +354,12 @@ with col_right:
                         if simpsons.get("shoemaker_p_value") is not None:
                             shoe_flag = " ⚠️ Kurtosis-Adjusted Scale Heterogeneity (p < 0.05)" if simpsons.get("is_shoemaker_heterogeneous") else " (Homogeneous Stratum Scales)"
                             st.markdown(f"**Shoemaker Kurtosis-Adjusted Scale:** Z_Shoe = `{simpsons.get('shoemaker_stat_z', 0.0):.2f}` (p = `{simpsons.get('shoemaker_p_value', 0.0):.3e}`){shoe_flag}")
+                        if simpsons.get("demets_simon_p_value") is not None:
+                            ds_flag = " ⚠️ Qualitative Cross-Over Reversal Proven (p < 0.05)" if simpsons.get("is_demets_simon_reversal") else " (Concordant Direction)"
+                            st.markdown(f"**DeMets-Simon Qualitative Interaction:** Q_DS = `{simpsons.get('demets_simon_stat_q', 0.0):.2f}` (p = `{simpsons.get('demets_simon_p_value', 0.0):.3e}`){ds_flag}")
+                        if simpsons.get("box_andersen_p_value") is not None:
+                            ba_flag = " ⚠️ Kurtosis-Robust Scale Heterogeneity (p < 0.05)" if simpsons.get("is_box_andersen_heterogeneous") else " (Homogeneous Stratum Dispersion)"
+                            st.markdown(f"**Box-Andersen Kurtosis Scale:** M_BA = `{simpsons.get('box_andersen_stat_m', 0.0):.2f}` (p = `{simpsons.get('box_andersen_p_value', 0.0):.3e}`){ba_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -496,6 +502,12 @@ with col_right:
                         if conf_aud.get("ho_imai_convex_hull_overlap") is not None:
                             hull_flag = " ⚠️ Support Deficit / Extrapolation-Prone (OH_Hull < 80%)" if conf_aud.get("is_ho_imai_deficient") else " (Robust Counterfactual Support, OH_Hull ≥ 80%)"
                             st.markdown(f"**Ho-Imai-King-Stuart Convex Hull Overlap:** OH_Hull = `{conf_aud.get('ho_imai_convex_hull_overlap', 0.0):.1%}` (Trimming Required = `{conf_aud.get('ho_imai_trim_fraction', 0.0):.1%}`){hull_flag}")
+                        if conf_aud.get("rosenbaum_diff_gamma_crit") is not None:
+                            diff_flag = " ⚠️ Sensitive to Differential Selection Bias (Γ_Diff < 1.30)" if conf_aud.get("is_rosenbaum_diff_fragile") else " (Robust Differential Comparison, Γ_Diff ≥ 1.30)"
+                            st.markdown(f"**Rosenbaum Differential Sensitivity:** Γ_Diff = `{conf_aud.get('rosenbaum_diff_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_diff_p_upper', 0.0):.3e}`){diff_flag}")
+                        if conf_aud.get("bitler_gelbach_hoynes_disparity") is not None:
+                            bgh_flag = f" ⚠️ Severe Quantile Disparity / Rank Disruption (Divergence = {conf_aud.get('bitler_gelbach_hoynes_max_q_divergence', 0.0):.1%})" if conf_aud.get("is_bgh_heterogeneous") else " (Homogeneous Quantile Treatment Impact)"
+                            st.markdown(f"**Bitler-Gelbach-Hoynes Quantile Disparity:** Δ_BGH = `{conf_aud.get('bitler_gelbach_hoynes_disparity', 0.0):.3f}`{bgh_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -692,6 +704,12 @@ with col_right:
                         if stab_aud.get("bacon_max_distance") is not None:
                             bacon_flag = f" ⚠️ Unmasked Multivariate Leverage Outliers ({stab_aud.get('bacon_outlier_count', 0)} influential)" if stab_aud.get("is_bacon_influential") else " (Bounded Adaptive Distances)"
                             st.markdown(f"**BACON Adaptive Outlier Diagnostic:** Max Dist = `{stab_aud.get('bacon_max_distance', 0.0):.3f}`{bacon_flag}")
+                        if stab_aud.get("lin_mudholkar_p_value") is not None:
+                            lm_flag = f" ⚠️ Significant Mean-Variance Dependence / Non-Normal (p = {stab_aud['lin_mudholkar_p_value']:.3e})" if stab_aud.get("is_lin_mudholkar_non_normal") else " (Gaussian Independence Confirmed)"
+                            st.markdown(f"**Lin-Mudholkar Normality:** Z_LM = `{stab_aud.get('lin_mudholkar_stat_z', 0.0):.3f}` (p = `{stab_aud['lin_mudholkar_p_value']:.3e}`){lm_flag}")
+                        if stab_aud.get("hoaglin_welsch_max_leverage_ratio") is not None:
+                            hw_flag = f" ⚠️ Excessive Hat-Matrix Leverage ({stab_aud.get('hoaglin_welsch_outlier_count', 0)} points > 2*p/n)" if stab_aud.get("is_hoaglin_welsch_influential") else " (Bounded Hat-Matrix Leverage)"
+                            st.markdown(f"**Hoaglin-Welsch Leverage Ratio:** Max HR = `{stab_aud.get('hoaglin_welsch_max_leverage_ratio', 0.0):.2f}x`{hw_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1192,6 +1210,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Jin Zhang empirical likelihood goodness-of-fit normality test Z_K"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Jin Zhang empirical likelihood goodness-of-fit normality test Z_K", findings, dataset_name=dataset_name)
 
+            sug_col73, sug_col74, sug_col75 = st.columns(3)
+            with sug_col73:
+                if st.button("⚖️ DeMets-Simon Interaction", key="sug_demets"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain David DeMets and Richard Simon qualitative interaction score test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain David DeMets and Richard Simon qualitative interaction score test", findings, dataset_name=dataset_name)
+            with sug_col74:
+                if st.button("📊 Bitler-Gelbach-Hoynes", key="sug_bgh"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Bitler Gelbach Hoynes quantile treatment disparity bound"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Bitler Gelbach Hoynes quantile treatment disparity bound", findings, dataset_name=dataset_name)
+            with sug_col75:
+                if st.button("🎯 Hoaglin-Welsch Leverage", key="sug_hw"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain David Hoaglin and Roy Welsch hat-matrix leverage ratio diagnostic"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain David Hoaglin and Roy Welsch hat-matrix leverage ratio diagnostic", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1441,6 +1476,16 @@ with col_right:
                     "Zhang_Normality_p": f"{stab.get('zhang_zk_p_value', 0.0):.3e}" if stab.get("zhang_zk_p_value") is not None else "N/A",
                     "BACON_Max_Distance": f"{stab.get('bacon_max_distance', 0.0):.3f}" if stab.get("bacon_max_distance") is not None else "N/A",
                     "BACON_Outliers": f"{stab.get('bacon_outlier_count', 0)}" if stab.get("bacon_outlier_count") is not None else "N/A",
+                    "DeMets_Simon_Q": f"{simp.get('demets_simon_stat_q', 0.0):.2f}" if simp.get("demets_simon_stat_q") is not None else "N/A",
+                    "DeMets_Simon_p": f"{simp.get('demets_simon_p_value', 0.0):.3e}" if simp.get("demets_simon_p_value") is not None else "N/A",
+                    "Box_Andersen_M": f"{simp.get('box_andersen_stat_m', 0.0):.2f}" if simp.get("box_andersen_stat_m") is not None else "N/A",
+                    "Box_Andersen_p": f"{simp.get('box_andersen_p_value', 0.0):.3e}" if simp.get("box_andersen_p_value") is not None else "N/A",
+                    "Rosenbaum_Diff_Gamma": f"{conf.get('rosenbaum_diff_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_diff_gamma_crit") is not None else "N/A",
+                    "BGH_Quantile_Disparity": f"{conf.get('bitler_gelbach_hoynes_disparity', 0.0):.3f}" if conf.get("bitler_gelbach_hoynes_disparity") is not None else "N/A",
+                    "Lin_Mudholkar_Z": f"{stab.get('lin_mudholkar_stat_z', 0.0):.3f}" if stab.get("lin_mudholkar_stat_z") is not None else "N/A",
+                    "Lin_Mudholkar_p": f"{stab.get('lin_mudholkar_p_value', 0.0):.3e}" if stab.get("lin_mudholkar_p_value") is not None else "N/A",
+                    "Hoaglin_Welsch_HR_Max": f"{stab.get('hoaglin_welsch_max_leverage_ratio', 0.0):.2f}" if stab.get("hoaglin_welsch_max_leverage_ratio") is not None else "N/A",
+                    "Hoaglin_Welsch_Outliers": f"{stab.get('hoaglin_welsch_outlier_count', 0)}" if stab.get("hoaglin_welsch_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

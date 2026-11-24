@@ -184,6 +184,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.berger_p_value is not None
     assert audit.simpsons_audit.shoemaker_stat_z is not None
     assert audit.simpsons_audit.shoemaker_p_value is not None
+    # Verify DeMets-Simon qualitative interaction test and Box-Andersen kurtosis-corrected variance test
+    assert audit.simpsons_audit.demets_simon_stat_q is not None
+    assert audit.simpsons_audit.demets_simon_p_value is not None
+    assert audit.simpsons_audit.box_andersen_stat_m is not None
+    assert audit.simpsons_audit.box_andersen_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -385,6 +390,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.ho_imai_convex_hull_overlap is not None
         assert 0.0 <= audit_coffee.confounder_audit.ho_imai_convex_hull_overlap <= 1.0
         assert audit_coffee.confounder_audit.ho_imai_trim_fraction is not None
+        # Check Rosenbaum differential comparison sensitivity and Bitler-Gelbach-Hoynes quantile disparity
+        assert audit_coffee.confounder_audit.rosenbaum_diff_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_diff_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_disparity is not None
+        assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_disparity >= 0.0
+        assert audit_coffee.confounder_audit.bitler_gelbach_hoynes_max_q_divergence is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -565,6 +576,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.zhang_zk_p_value is not None
     assert audit.stability_audit.bacon_max_distance is not None
     assert audit.stability_audit.bacon_max_distance >= 0.0
+    # Check Lin-Mudholkar jackknife mean-variance normality and Hoaglin-Welsch hat-matrix leverage ratio
+    assert audit.stability_audit.lin_mudholkar_stat_z is not None
+    assert audit.stability_audit.lin_mudholkar_p_value is not None
+    assert audit.stability_audit.hoaglin_welsch_max_leverage_ratio is not None
+    assert audit.stability_audit.hoaglin_welsch_max_leverage_ratio >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1108,6 +1124,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_bacon = narrator.answer_query("Explain Billor Hadi Velleman BACON adaptive outlier and leverage diagnostic", findings)
     assert "BACON" in ans_bacon or "Billor" in ans_bacon or "Hadi" in ans_bacon or "Outlier" in ans_bacon
+
+    ans_ds = narrator.answer_query("Explain David DeMets and Richard Simon qualitative interaction score test", findings)
+    assert "DeMets" in ans_ds or "Simon" in ans_ds or "Qualitative" in ans_ds or "Interaction" in ans_ds
+
+    ans_ba = narrator.answer_query("Explain George Box and Andersen kurtosis corrected variance test", findings)
+    assert "Box" in ans_ba or "Andersen" in ans_ba or "Kurtosis" in ans_ba or "Variance" in ans_ba
+
+    ans_diff = narrator.answer_query("Explain Paul Rosenbaum second-order differential comparison sensitivity bound", findings)
+    assert "Differential" in ans_diff or "Rosenbaum" in ans_diff or "Sensitivity" in ans_diff or "Comparison" in ans_diff
+
+    ans_bgh = narrator.answer_query("Explain Bitler Gelbach Hoynes quantile treatment disparity bound", findings)
+    assert "Bitler" in ans_bgh or "Gelbach" in ans_bgh or "Hoynes" in ans_bgh or "Quantile" in ans_bgh or "Disparity" in ans_bgh
+
+    ans_lm = narrator.answer_query("Explain Chien-Pai Lin and Govind Mudholkar jackknife mean-variance normality test", findings)
+    assert "Lin" in ans_lm or "Mudholkar" in ans_lm or "Mean-Variance" in ans_lm or "Normality" in ans_lm or "Geary" in ans_lm
+
+    ans_hw = narrator.answer_query("Explain David Hoaglin and Roy Welsch hat-matrix leverage ratio diagnostic", findings)
+    assert "Hoaglin" in ans_hw or "Welsch" in ans_hw or "Leverage" in ans_hw or "Hat" in ans_hw or "Ratio" in ans_hw
 
 
 def test_end_to_end_pipeline(tmp_path):
