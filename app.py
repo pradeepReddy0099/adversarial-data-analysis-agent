@@ -342,6 +342,12 @@ with col_right:
                         if simpsons.get("samiuddin_p_value") is not None:
                             sam_flag = " ⚠️ Kurtosis-Adjusted Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_samiuddin_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**Samiuddin-Atiqullah Scale Homogeneity:** F_Sam = `{simpsons.get('samiuddin_stat_f', 0.0):.2f}` (p = `{simpsons.get('samiuddin_p_value', 0.0):.3e}`){sam_flag}")
+                        if simpsons.get("silvapulle_sen_p") is not None:
+                            silva_flag = " ⚠️ Qualitative Reversal Proven (p < 0.05)" if simpsons.get("is_silvapulle_reversal") else " (Uniform Direction / Concordant)"
+                            st.markdown(f"**Silvapulle-Sen Likelihood-Ratio Inversion:** S_SS = `{simpsons.get('silvapulle_sen_stat', 0.0):.2f}` (p = `{simpsons.get('silvapulle_sen_p', 0.0):.3e}`){silva_flag}")
+                        if simpsons.get("miller_jackknife_p_value") is not None:
+                            miller_flag = " ⚠️ Distribution-Free Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_miller_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Miller Jackknife Variance Homogeneity:** F_Miller = `{simpsons.get('miller_jackknife_stat_f', 0.0):.2f}` (p = `{simpsons.get('miller_jackknife_p_value', 0.0):.3e}`){miller_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -472,6 +478,12 @@ with col_right:
                         if conf_aud.get("zubizarreta_sbw_cv") is not None:
                             sbw_flag = " ⚠️ Severe Balancing Weight Dispersion (CV > 1.50)" if conf_aud.get("is_zubizarreta_imbalanced") else " (Balanced Covariate Weight Stability)"
                             st.markdown(f"**Zubizarreta Stable Balancing Weights:** CV_w = `{conf_aud.get('zubizarreta_sbw_cv', 0.0):.2f}` (Eff Sample = `{conf_aud.get('zubizarreta_eff_sample_pct', 0.0):.1f}%`){sbw_flag}")
+                        if conf_aud.get("rosenbaum_design_sensitivity_gamma") is not None:
+                            des_flag = " ⚠️ Fragile Asymptotic Design (Γ_tilde < 1.30)" if conf_aud.get("is_design_fragile") else " (Asymptotically Robust Design, Γ_tilde ≥ 1.30)"
+                            st.markdown(f"**Rosenbaum Design Sensitivity Bounds:** Γ_tilde = `{conf_aud.get('rosenbaum_design_sensitivity_gamma', 0.0):.2f}` (μ/σ = `{conf_aud.get('rosenbaum_standardized_effect_mu_sigma', 0.0):.2f}`){des_flag}")
+                        if conf_aud.get("hosman_hansen_holland_delta") is not None:
+                            hhh_flag = " ⚠️ Sensitive to Modest Partial Confounding (δ < 0.15)" if conf_aud.get("is_hosman_sensitive") else " (Robust to Partial Confounding, δ ≥ 0.15)"
+                            st.markdown(f"**Hosman-Hansen-Holland Sensitivity Relation:** δ_HHH = `{conf_aud.get('hosman_hansen_holland_delta', 0.0):.3f}` (scale = `{conf_aud.get('hosman_hansen_holland_scale', 0.0):.3f}`){hhh_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -656,6 +668,12 @@ with col_right:
                         if stab_aud.get("max_gray_ling_influence") is not None:
                             gl_flag = f" ⚠️ Joint Leverage-Residual Outlier ({stab_aud.get('gray_ling_outlier_count', 0)} influential)" if stab_aud.get("is_gray_ling_influential") else " (Bounded Joint Influence)"
                             st.markdown(f"**Gray-Ling Leverage-Residual Influence:** Max LR = `{stab_aud.get('max_gray_ling_influence', 0.0):.3f}`{gl_flag}")
+                        if stab_aud.get("vasicek_entropy_p") is not None:
+                            vas_flag = f" ⚠️ Significant Entropy Departure (p = {stab_aud['vasicek_entropy_p']:.3e})" if stab_aud.get("is_vasicek_non_normal") else " (Gaussian Residual Entropy Validated)"
+                            st.markdown(f"**Vasicek Sample Entropy Normality:** K_mn = `{stab_aud.get('vasicek_entropy_stat', 0.0):.3f}` (p = `{stab_aud['vasicek_entropy_p']:.3e}`){vas_flag}")
+                        if stab_aud.get("rousseeuw_zomeren_max_rdz") is not None:
+                            rdz_flag = f" ⚠️ High-Leverage Robust Distance Outlier ({stab_aud.get('rousseeuw_zomeren_outlier_count', 0)} influential)" if stab_aud.get("is_rousseeuw_zomeren_influential") else " (Bounded Robust Distance)"
+                            st.markdown(f"**Rousseeuw-van Zomeren Robust Distance:** Max RDZ = `{stab_aud.get('rousseeuw_zomeren_max_rdz', 0.0):.3f}`{rdz_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1122,6 +1140,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Baringhaus Henze and Zirkler empirical characteristic function normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Baringhaus Henze and Zirkler empirical characteristic function normality test", findings, dataset_name=dataset_name)
 
+            sug_col67, sug_col68, sug_col69 = st.columns(3)
+            with sug_col67:
+                if st.button("📐 Silvapulle-Sen Inversion", key="sug_silva"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Silvapulle and Sen likelihood ratio inversion test for qualitative interaction"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Silvapulle and Sen likelihood ratio inversion test for qualitative interaction", findings, dataset_name=dataset_name)
+            with sug_col68:
+                if st.button("🛡️ Rosenbaum Design Sensitivity", key="sug_design"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum design sensitivity bound Gamma tilde"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum design sensitivity bound Gamma tilde", findings, dataset_name=dataset_name)
+            with sug_col69:
+                if st.button("🔬 Vasicek Entropy Normality", key="sug_vasicek"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Oldrich Vasicek sample entropy residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Oldrich Vasicek sample entropy residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1351,6 +1386,16 @@ with col_right:
                     "Baringhaus_Henze_p": f"{stab.get('baringhaus_henze_p', 0.0):.3e}" if stab.get("baringhaus_henze_p") is not None else "N/A",
                     "Gray_Ling_Max_Influence": f"{stab.get('max_gray_ling_influence', 0.0):.3f}" if stab.get("max_gray_ling_influence") is not None else "N/A",
                     "Gray_Ling_Outlier_Count": f"{stab.get('gray_ling_outlier_count', 0)}" if stab.get("gray_ling_outlier_count") is not None else "N/A",
+                    "Silvapulle_Sen_Stat": f"{simp.get('silvapulle_sen_stat', 0.0):.2f}" if simp.get("silvapulle_sen_stat") is not None else "N/A",
+                    "Silvapulle_Sen_p": f"{simp.get('silvapulle_sen_p', 0.0):.3e}" if simp.get("silvapulle_sen_p") is not None else "N/A",
+                    "Miller_Jackknife_F": f"{simp.get('miller_jackknife_stat_f', 0.0):.2f}" if simp.get("miller_jackknife_stat_f") is not None else "N/A",
+                    "Miller_Jackknife_p": f"{simp.get('miller_jackknife_p_value', 0.0):.3e}" if simp.get("miller_jackknife_p_value") is not None else "N/A",
+                    "Rosenbaum_Design_Gamma": f"{conf.get('rosenbaum_design_sensitivity_gamma', 0.0):.2f}" if conf.get("rosenbaum_design_sensitivity_gamma") is not None else "N/A",
+                    "Hosman_HHH_Delta": f"{conf.get('hosman_hansen_holland_delta', 0.0):.3f}" if conf.get("hosman_hansen_holland_delta") is not None else "N/A",
+                    "Vasicek_Entropy_Kmn": f"{stab.get('vasicek_entropy_stat', 0.0):.3f}" if stab.get("vasicek_entropy_stat") is not None else "N/A",
+                    "Vasicek_Entropy_p": f"{stab.get('vasicek_entropy_p', 0.0):.3e}" if stab.get("vasicek_entropy_p") is not None else "N/A",
+                    "Rousseeuw_Zomeren_RDZ": f"{stab.get('rousseeuw_zomeren_max_rdz', 0.0):.3f}" if stab.get("rousseeuw_zomeren_max_rdz") is not None else "N/A",
+                    "Rousseeuw_Zomeren_Outliers": f"{stab.get('rousseeuw_zomeren_outlier_count', 0)}" if stab.get("rousseeuw_zomeren_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

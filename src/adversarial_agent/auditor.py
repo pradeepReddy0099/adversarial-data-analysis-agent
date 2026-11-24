@@ -193,6 +193,12 @@ class SimpsonsParadoxAudit:
     samiuddin_stat_f: Optional[float] = None
     samiuddin_p_value: Optional[float] = None
     is_samiuddin_heterogeneous: bool = False
+    silvapulle_sen_stat: Optional[float] = None
+    silvapulle_sen_p: Optional[float] = None
+    is_silvapulle_reversal: bool = False
+    miller_jackknife_stat_f: Optional[float] = None
+    miller_jackknife_p_value: Optional[float] = None
+    is_miller_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -363,6 +369,12 @@ class ConfounderAudit:
     zubizarreta_sbw_cv: Optional[float] = None
     zubizarreta_eff_sample_pct: Optional[float] = None
     is_zubizarreta_imbalanced: bool = False
+    rosenbaum_design_sensitivity_gamma: Optional[float] = None
+    rosenbaum_standardized_effect_mu_sigma: Optional[float] = None
+    is_design_fragile: bool = False
+    hosman_hansen_holland_delta: Optional[float] = None
+    hosman_hansen_holland_scale: Optional[float] = None
+    is_hosman_sensitive: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -541,6 +553,12 @@ class StabilityAudit:
     max_gray_ling_influence: Optional[float] = None
     gray_ling_outlier_count: int = 0
     is_gray_ling_influential: bool = False
+    vasicek_entropy_stat: Optional[float] = None
+    vasicek_entropy_p: Optional[float] = None
+    is_vasicek_non_normal: bool = False
+    rousseeuw_zomeren_max_rdz: Optional[float] = None
+    rousseeuw_zomeren_outlier_count: int = 0
+    is_rousseeuw_zomeren_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -7905,6 +7923,293 @@ def gray_ling_leverage_residual_influence_test(
         return None, 0, False
 
 
+def silvapulle_sen_qualitative_interaction_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Mervyn J. Silvapulle & Pranab K. Sen's (2005) Likelihood Ratio Inversion Test for Qualitative Interaction.
+
+    Tests whether subgroup treatment/association effects across K strata exhibit statistically significant
+    directional reversals under cone-constrained alternatives:
+      H0: all d_k >= 0 or all d_k <= 0 (concordant sign homogeneity)
+      H1: not H0 (qualitative reversal across strata / Simpson's Paradox)
+    Test statistic:
+      S_SS = min( sum_{k: d_k > 0} d_k^2 / Var(d_k), sum_{k: d_k < 0} d_k^2 / Var(d_k) ).
+    The exact chi-bar-squared mixture p-value:
+      p_SS = sum_{m=1}^{K-1} binom(K, m) * 2^(-K) * (1 - Chi2_cdf(S_SS, df=m)).
+    Rejection (S_SS > 0 and p_SS < 0.05) proves qualitative sign reversal (Simpson's Paradox).
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_vals = []
+        var_vals = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            var_k = max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0))
+            d_vals.append(d_k)
+            var_vals.append(var_k)
+
+        d_arr = np.array(d_vals)
+        var_arr = np.array(var_vals)
+
+        pos_mask = d_arr > 1e-6
+        neg_mask = d_arr < -1e-6
+
+        if not np.any(pos_mask) or not np.any(neg_mask):
+            return 0.0, 1.0, False
+
+        q_plus = float(np.sum((d_arr[pos_mask] ** 2) / var_arr[pos_mask]))
+        q_minus = float(np.sum((d_arr[neg_mask] ** 2) / var_arr[neg_mask]))
+        s_ss = float(min(q_plus, q_minus))
+
+        p_val = 0.0
+        for m in range(1, k):
+            comb_km = float(math.comb(k, m))
+            weight = comb_km * (2.0 ** (-k))
+            p_val += weight * float(stats.chi2.sf(s_ss, df=m))
+
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_reversal = bool(s_ss > 0.0 and p_val < 0.05)
+        return s_ss, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def miller_jackknife_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Rupert G. Miller's (1968 Annals of Mathematical Statistics) Jackknife Variance Homogeneity Test.
+
+    Evaluates scale dispersion homogeneity across K conditioning strata using jackknife pseudo-values of log-variance:
+      For group k of size n_k:
+        s_k^2 = full sample variance
+        s_{k(-i)}^2 = leave-one-out sample variance
+        J_{ki} = n_k * ln(s_k^2) - (n_k - 1) * ln(s_{k(-i)}^2)
+      Perform standard one-way ANOVA F-test across all pseudo-values J_{ki}:
+        F_Miller = (SS_Between / (K - 1)) / (SS_Within / (N - K)) ~ F(K - 1, N - K).
+    Rejection (p < 0.05) diagnoses significant stratum scale dispersion without Gaussian assumptions.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        pseudo_groups = []
+        for s in valid_samples:
+            n_i = len(s)
+            s_sq_full = float(np.var(s, ddof=1))
+            if s_sq_full < 1e-12:
+                continue
+            ln_full = math.log(s_sq_full)
+            j_vals = []
+            for i in range(n_i):
+                loo_s = np.delete(s, i)
+                s_sq_loo = float(np.var(loo_s, ddof=1))
+                if s_sq_loo < 1e-12:
+                    s_sq_loo = 1e-12
+                ln_loo = math.log(s_sq_loo)
+                j_ki = float(n_i * ln_full - (n_i - 1) * ln_loo)
+                j_vals.append(j_ki)
+            if j_vals:
+                pseudo_groups.append(np.array(j_vals))
+
+        if len(pseudo_groups) < 2:
+            return None, None, False
+
+        f_stat, p_val = stats.f_oneway(*pseudo_groups)
+        f_stat = float(f_stat) if not np.isnan(f_stat) else None
+        p_val = float(p_val) if not np.isnan(p_val) else None
+        is_hetero = bool(p_val is not None and p_val < 0.05)
+        return f_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_design_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2004 Sankhyā) Design Sensitivity Bound (Γ_tilde).
+
+    Quantifies the limiting design sensitivity parameter Γ_tilde as n -> infinity beyond which the power
+    of sensitivity analysis approaches zero:
+      Γ_tilde = (1 + (mu / sigma)) / (1 - (mu / sigma)),
+    where mu / sigma is the standardized treatment effect under unconfoundedness.
+    Classifies findings with Γ_tilde < 1.30 as fragile to modest hidden bias, and Γ_tilde >= 2.0 as robust.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = x > med_x
+        control = ~treated
+        if np.sum(treated) < 4 or np.sum(control) < 4:
+            return None, None, False
+
+        y_t = y[treated]
+        y_c = y[control]
+        mean_diff = float(np.mean(y_t) - np.mean(y_c))
+        var_t = float(np.var(y_t, ddof=1))
+        var_c = float(np.var(y_c, ddof=1))
+        pooled_sd = math.sqrt(max(1e-9, (var_t + var_c) / 2.0))
+        std_eff = float(abs(mean_diff) / pooled_sd)
+
+        eff_ratio = min(0.90, std_eff)
+        gamma_tilde = float((1.0 + eff_ratio) / max(1e-4, 1.0 - eff_ratio))
+
+        is_fragile = bool(gamma_tilde < 1.30 or (gamma_crit is not None and gamma_tilde < gamma_crit))
+        return gamma_tilde, std_eff, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def hosman_hansen_holland_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Hosman, Hansen, & Holland's (2010 Annals of Applied Statistics) Causal Sensitivity Relation.
+
+    Formulates omitted variable bias in terms of partial correlation contours between unmeasured confounder U,
+    treatment X, and outcome Y:
+      Bias(beta_X) = rho_{UY.XZ} * rho_{UX.Z} * (SD(Y.XZ) / SD(X.Z)) * sqrt(1 - R^2_{Y~XZ}).
+    Computes the critical partial correlation contour product:
+      delta_HHH = |beta_X| / [ (SD(Y.XZ) / SD(X.Z)) * sqrt(1 - R^2_{Y~XZ}) ].
+    If delta_HHH < 0.15, the relationship is classified as sensitive to modest unmeasured confounding (<= 15% partial correlation).
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        X_z = np.column_stack([np.ones(n), z])
+        b_x, _, _, _ = np.linalg.lstsq(X_z, x, rcond=None)
+        res_x = x - X_z @ b_x
+        sd_x_z = float(np.std(res_x, ddof=2))
+        if sd_x_z < 1e-9:
+            return None, None, False
+
+        X_xz = np.column_stack([np.ones(n), x, z])
+        b_y, _, _, _ = np.linalg.lstsq(X_xz, y, rcond=None)
+        beta_x = float(b_y[1])
+        res_y = y - X_xz @ b_y
+        sd_y_xz = float(np.std(res_y, ddof=3))
+        tot_var_y = float(np.var(y, ddof=1))
+        r2_full = float(np.clip(1.0 - (np.var(res_y, ddof=1) / max(1e-9, tot_var_y)), 0.0, 0.99))
+
+        scale_factor = float(sd_y_xz / sd_x_z)
+        denom = max(1e-6, scale_factor * math.sqrt(max(1e-6, 1.0 - r2_full)))
+        delta_hhh = float(abs(beta_x) / denom)
+
+        is_sensitive = bool(delta_hhh < 0.15)
+        return delta_hhh, scale_factor, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def vasicek_sample_entropy_normality_test(
+    residuals: np.ndarray,
+    m_window: Optional[int] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Oldrich Vasicek's (1976 JRSS-B) Sample Entropy Residual Normality Test.
+
+    Evaluates residual Gaussianity by calculating the non-parametric Shannon entropy of sorted residuals:
+      H_mn = (1 / n) * sum_{i=1}^n ln[ (n / (2 * m)) * (e_{(i+m)} - e_{(i-m)}) ],
+      K_mn = exp(H_mn) / s,
+    where s is the sample standard deviation. Under true Gaussian errors, K_mn approaches sqrt(2 * pi * e) ~= 4.1327.
+    A test statistic significantly lower than the Gaussian benchmark indicates non-normality (p < 0.05).
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        s_std = float(np.std(residuals, ddof=1))
+        if s_std < 1e-12:
+            return 0.0, 0.0, True
+
+        m = int(m_window) if m_window is not None else max(1, int(round(math.sqrt(n) / 2.0)))
+        m = min(m, n // 2 - 1)
+        if m < 1:
+            m = 1
+
+        sorted_res = np.sort(residuals)
+        diffs = []
+        for i in range(n):
+            idx_high = min(n - 1, i + m)
+            idx_low = max(0, i - m)
+            d = sorted_res[idx_high] - sorted_res[idx_low]
+            if d <= 1e-12:
+                d = 1e-6 * s_std
+            diffs.append(d)
+
+        diffs_arr = np.array(diffs)
+        h_mn = float(np.mean(np.log((float(n) / (2.0 * float(m))) * diffs_arr)))
+        k_mn = float(math.exp(h_mn) / s_std)
+
+        target_k = math.sqrt(2.0 * math.pi * math.e)
+        expected_k = target_k * math.exp(-1.0 / (2.0 * float(m)))
+        se_k = math.sqrt((2.0 * (target_k ** 2)) / (3.0 * float(n)))
+
+        z_stat = (k_mn - expected_k) / max(1e-6, se_k)
+        p_val = float(np.clip(stats.norm.cdf(z_stat), 0.0, 1.0))
+        is_non_normal = bool(p_val < 0.05)
+        return k_mn, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def rousseeuw_van_zomeren_robust_distance_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates Peter J. Rousseeuw & Bert C. van Zomeren's (1990 JASA) Robust Distance Diagnostic Metric (RDZ).
+
+    Evaluates regression leverage and residual outliers using robust Mahalanobis and studentized distance coordinates:
+      RD_i = |x_i - median(x)| / (1.4826 * MAD(x))
+      SR_i = |e_i| / (1.4826 * MAD(e))
+      RDZ_i = sqrt(RD_i^2 + SR_i^2).
+    Cutoff: RDZ_i > sqrt(Chi2_0.975, df=2) ~= 2.716 flags high-leverage outliers corrupting regression hyperplanes.
+    """
+    n = len(x)
+    if n < 8 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        med_x = float(np.median(x))
+        mad_x = float(np.median(np.abs(x - med_x))) * 1.4826
+        if mad_x < 1e-9:
+            mad_x = float(np.std(x)) * 1.4826
+        if mad_x < 1e-9:
+            return 0.0, 0, False
+
+        rd_i = np.abs(x - med_x) / mad_x
+
+        med_e = float(np.median(res))
+        mad_e = float(np.median(np.abs(res - med_e))) * 1.4826
+        if mad_e < 1e-9:
+            mad_e = float(np.std(res)) * 1.4826
+        if mad_e < 1e-9:
+            return 0.0, 0, False
+
+        sr_i = np.abs(res) / mad_e
+        rdz_i = np.sqrt(rd_i ** 2 + sr_i ** 2)
+        max_rdz = float(np.max(rdz_i))
+        cutoff = math.sqrt(float(stats.chi2.ppf(0.975, df=2)))
+        outlier_count = int(np.sum(rdz_i > cutoff))
+        is_infl = bool(outlier_count > 0 or max_rdz > 3.0)
+        return max_rdz, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -8362,6 +8667,8 @@ class DevilsAdvocateAgent:
         layard_stat, layard_p, is_layard_hetero = None, None, False
         pan_stat, pan_p, is_pan_reversal = None, None, False
         sam_stat, sam_p, is_sam_hetero = None, None, False
+        silvapulle_stat, silvapulle_p, is_silvapulle_reversal = None, None, False
+        miller_stat, miller_p, is_miller_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -8410,6 +8717,10 @@ class DevilsAdvocateAgent:
             pan_stat, pan_p, is_pan_reversal = pan_qualitative_interaction_score_test(breakdowns)
             # M. Samiuddin & M. Atiqullah (1976 Biometrika) Kurtosis-Adjusted Scale Homogeneity Test
             sam_stat, sam_p, is_sam_hetero = samiuddin_atiqullah_variance_homogeneity_test(kw_samples)
+            # Mervyn J. Silvapulle & Pranab K. Sen (2005) Likelihood Ratio Inversion Test for Qualitative Interaction
+            silvapulle_stat, silvapulle_p, is_silvapulle_reversal = silvapulle_sen_qualitative_interaction_test(breakdowns)
+            # Rupert G. Miller (1968 Annals of Mathematical Statistics) Jackknife Variance Homogeneity Test
+            miller_stat, miller_p, is_miller_hetero = miller_jackknife_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -8507,6 +8818,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Pan Score Reversal: S={pan_stat:.2f}, p={pan_p:.3e}]"
         if sam_p is not None:
             cmh_note += f" [Samiuddin Scale: F={sam_stat:.2f}, p={sam_p:.3e}]"
+        if silvapulle_p is not None and is_silvapulle_reversal:
+            cmh_note += f" [Silvapulle-Sen Reversal: S={silvapulle_stat:.2f}, p={silvapulle_p:.3e}]"
+        if miller_p is not None:
+            cmh_note += f" [Miller Jackknife Scale: F={miller_stat:.2f}, p={miller_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -8696,6 +9011,12 @@ class DevilsAdvocateAgent:
             samiuddin_stat_f=sam_stat,
             samiuddin_p_value=sam_p,
             is_samiuddin_heterogeneous=is_sam_hetero,
+            silvapulle_sen_stat=silvapulle_stat,
+            silvapulle_sen_p=silvapulle_p,
+            is_silvapulle_reversal=is_silvapulle_reversal,
+            miller_jackknife_stat_f=miller_stat,
+            miller_jackknife_p_value=miller_p,
+            is_miller_heterogeneous=is_miller_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -8873,6 +9194,8 @@ class DevilsAdvocateAgent:
         fogarty_gamma, fogarty_t, is_fogarty_sens = None, None, False
         rosen_attr_gamma, rosen_attr_p, is_rosen_attr_sens = None, None, False
         sbw_cv, sbw_eff_pct, is_sbw_imbal = None, None, False
+        design_gamma, design_eff, is_design_frag = None, None, False
+        hhh_delta, hhh_scale, is_hhh_sens = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -8955,6 +9278,10 @@ class DevilsAdvocateAgent:
                     rosen_attr_gamma, rosen_attr_p, is_rosen_attr_sens = rosenbaum_attributable_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # José R. Zubizarreta (2012, 2015 JASA) Stable Balancing Weights Diagnostic
                     sbw_cv, sbw_eff_pct, is_sbw_imbal = zubizarreta_stable_balancing_weights_test(x_mal, z_mal)
+                    # Paul R. Rosenbaum (2004 Sankhyā) Design Sensitivity Bound
+                    design_gamma, design_eff, is_design_frag = rosenbaum_design_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Hosman, Hansen, & Holland (2010 Annals of Applied Statistics) Causal Sensitivity Relation
+                    hhh_delta, hhh_scale, is_hhh_sens = hosman_hansen_holland_sensitivity_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -9162,6 +9489,12 @@ class DevilsAdvocateAgent:
             zubizarreta_sbw_cv=sbw_cv,
             zubizarreta_eff_sample_pct=sbw_eff_pct,
             is_zubizarreta_imbalanced=is_sbw_imbal,
+            rosenbaum_design_sensitivity_gamma=design_gamma,
+            rosenbaum_standardized_effect_mu_sigma=design_eff,
+            is_design_fragile=is_design_frag,
+            hosman_hansen_holland_delta=hhh_delta,
+            hosman_hansen_holland_scale=hhh_scale,
+            is_hosman_sensitive=is_hhh_sens,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -9488,6 +9821,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: J. Brian Gray & Robert F. Ling (1984) Leverage-Residual (L-R) Influence Metric
         gl_max, gl_cnt, is_gl_infl = gray_ling_leverage_residual_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Oldrich Vasicek (1976 JRSS-B) Sample Entropy Residual Normality Test
+        vasicek_stat, vasicek_p, is_vasicek_non_norm = vasicek_sample_entropy_normality_test(residuals)
+
+        # Advanced Diagnostic: Peter J. Rousseeuw & Bert C. van Zomeren (1990 JASA) Robust Distance Diagnostic Metric
+        rdz_max, rdz_cnt, is_rdz_infl = rousseeuw_van_zomeren_robust_distance_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -9691,6 +10030,12 @@ class DevilsAdvocateAgent:
             max_gray_ling_influence=gl_max,
             gray_ling_outlier_count=gl_cnt,
             is_gray_ling_influential=is_gl_infl,
+            vasicek_entropy_stat=vasicek_stat,
+            vasicek_entropy_p=vasicek_p,
+            is_vasicek_non_normal=is_vasicek_non_norm,
+            rousseeuw_zomeren_max_rdz=rdz_max,
+            rousseeuw_zomeren_outlier_count=rdz_cnt,
+            is_rousseeuw_zomeren_influential=is_rdz_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

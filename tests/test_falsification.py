@@ -174,6 +174,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.pan_score_p is not None
     assert audit.simpsons_audit.samiuddin_stat_f is not None
     assert audit.simpsons_audit.samiuddin_p_value is not None
+    # Verify Silvapulle-Sen likelihood ratio inversion test and Miller jackknife variance homogeneity test
+    assert audit.simpsons_audit.silvapulle_sen_stat is not None
+    assert audit.simpsons_audit.silvapulle_sen_p is not None
+    assert audit.simpsons_audit.miller_jackknife_stat_f is not None
+    assert audit.simpsons_audit.miller_jackknife_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -362,6 +367,13 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.zubizarreta_sbw_cv is not None
         assert audit_coffee.confounder_audit.zubizarreta_sbw_cv >= 0.0
         assert audit_coffee.confounder_audit.zubizarreta_eff_sample_pct is not None
+        # Check Rosenbaum design sensitivity and Hosman-Hansen-Holland sensitivity relation
+        assert audit_coffee.confounder_audit.rosenbaum_design_sensitivity_gamma is not None
+        assert audit_coffee.confounder_audit.rosenbaum_design_sensitivity_gamma >= 1.0
+        assert audit_coffee.confounder_audit.rosenbaum_standardized_effect_mu_sigma is not None
+        assert audit_coffee.confounder_audit.hosman_hansen_holland_delta is not None
+        assert audit_coffee.confounder_audit.hosman_hansen_holland_delta >= 0.0
+        assert audit_coffee.confounder_audit.hosman_hansen_holland_scale is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -532,6 +544,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.baringhaus_henze_p is not None
     assert audit.stability_audit.max_gray_ling_influence is not None
     assert audit.stability_audit.max_gray_ling_influence >= 0.0
+    # Check Vasicek sample entropy residual normality and Rousseeuw-van Zomeren robust distance metric
+    assert audit.stability_audit.vasicek_entropy_stat is not None
+    assert audit.stability_audit.vasicek_entropy_p is not None
+    assert audit.stability_audit.rousseeuw_zomeren_max_rdz is not None
+    assert audit.stability_audit.rousseeuw_zomeren_max_rdz >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1039,6 +1056,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_gl = narrator.answer_query("Explain Brian Gray and Robert Ling leverage residual joint influence metric", findings)
     assert "Gray" in ans_gl or "Ling" in ans_gl or "Leverage" in ans_gl or "Influence" in ans_gl
+
+    ans_silva = narrator.answer_query("Explain Silvapulle and Sen likelihood ratio inversion test for qualitative interaction", findings)
+    assert "Silvapulle" in ans_silva or "Sen" in ans_silva or "Qualitative" in ans_silva or "Inversion" in ans_silva
+
+    ans_miller = narrator.answer_query("Explain Rupert Miller jackknife variance homogeneity test", findings)
+    assert "Miller" in ans_miller or "Jackknife" in ans_miller or "Variance" in ans_miller or "Scale" in ans_miller
+
+    ans_design = narrator.answer_query("Explain Paul Rosenbaum design sensitivity bound Gamma tilde", findings)
+    assert "Rosenbaum" in ans_design or "Design" in ans_design or "Sensitivity" in ans_design or "Gamma" in ans_design
+
+    ans_hhh = narrator.answer_query("Explain Hosman Hansen Holland causal sensitivity relation via partial correlation", findings)
+    assert "Hosman" in ans_hhh or "Hansen" in ans_hhh or "Holland" in ans_hhh or "Sensitivity" in ans_hhh or "Partial" in ans_hhh
+
+    ans_vas = narrator.answer_query("Explain Oldrich Vasicek sample entropy residual normality test", findings)
+    assert "Vasicek" in ans_vas or "Entropy" in ans_vas or "Normality" in ans_vas or "Shannon" in ans_vas
+
+    ans_rdz = narrator.answer_query("Explain Peter Rousseeuw and Bert van Zomeren robust distance diagnostic metric", findings)
+    assert "Rousseeuw" in ans_rdz or "Zomeren" in ans_rdz or "Robust" in ans_rdz or "Distance" in ans_rdz or "Mahalanobis" in ans_rdz
 
 
 def test_end_to_end_pipeline(tmp_path):

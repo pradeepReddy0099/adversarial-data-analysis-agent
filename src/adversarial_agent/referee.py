@@ -185,6 +185,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Pan Directional Qualitative Score Test: S_Pan = {simpsons.pan_score_stat:.2f} (p = {simpsons.pan_score_p:.3e}) {'[CONFIRMED DIRECTIONAL QUALITATIVE REVERSAL]' if simpsons.is_pan_reversal else '[UNIFORM MONOTONE DIRECTION]'}")
             if simpsons.samiuddin_p_value is not None:
                 rationale["key_evidence"].append(f"Samiuddin-Atiqullah Scale Homogeneity: F_Sam = {simpsons.samiuddin_stat_f:.2f} (p = {simpsons.samiuddin_p_value:.3e}) {'[KURTOSIS-ADJUSTED STRATUM SCALE HETEROGENEITY]' if simpsons.is_samiuddin_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
+            if simpsons.silvapulle_sen_p is not None:
+                rationale["key_evidence"].append(f"Silvapulle-Sen Qualitative Inversion Test: S_SS = {simpsons.silvapulle_sen_stat:.2f} (p = {simpsons.silvapulle_sen_p:.3e}) {'[CONFIRMED LIKELIHOOD-RATIO QUALITATIVE REVERSAL]' if simpsons.is_silvapulle_reversal else '[UNIFORM CONCORDANT DIRECTION]'}")
+            if simpsons.miller_jackknife_p_value is not None:
+                rationale["key_evidence"].append(f"Miller Jackknife Variance Homogeneity: F_Miller = {simpsons.miller_jackknife_stat_f:.2f} (p = {simpsons.miller_jackknife_p_value:.3e}) {'[DISTRIBUTION-FREE STRATUM SCALE HETEROGENEITY]' if simpsons.is_miller_heterogeneous else '[HOMOGENEOUS STRATUM SCALE]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -322,6 +326,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Attributable Sensitivity Bounds: Gamma_attr = {confounder.rosenbaum_attr_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_attr_p_upper:.3e}) {'[SENSITIVE TO ATTRIBUTABLE HIDDEN BIAS]' if confounder.is_rosenbaum_attr_sensitive else '[ATTRIBUTABLE EFFECT ROBUST]'}")
             if confounder.zubizarreta_sbw_cv is not None:
                 rationale["key_evidence"].append(f"Zubizarreta Stable Balancing Weights Diagnostic: CV_w = {confounder.zubizarreta_sbw_cv:.2f} (Eff Sample = {confounder.zubizarreta_eff_sample_pct:.1f}%) {'[SEVERE BALANCING WEIGHT DISPERSION]' if confounder.is_zubizarreta_imbalanced else '[BALANCED COVARIATE WEIGHT STABILITY]'}")
+            if confounder.rosenbaum_design_sensitivity_gamma is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Design Sensitivity Bounds: Gamma_tilde = {confounder.rosenbaum_design_sensitivity_gamma:.2f} (mu/sigma = {confounder.rosenbaum_standardized_effect_mu_sigma:.2f}) {'[FRAGILE ASYMPTOTIC DESIGN]' if confounder.is_design_fragile else '[ASYMPTOTICALLY ROBUST DESIGN]'}")
+            if confounder.hosman_hansen_holland_delta is not None:
+                rationale["key_evidence"].append(f"Hosman-Hansen-Holland Sensitivity Relation: delta_HHH = {confounder.hosman_hansen_holland_delta:.3f} (scale = {confounder.hosman_hansen_holland_scale:.3f}) {'[SENSITIVE TO MODEST PARTIAL CONVOLUTION]' if confounder.is_hosman_sensitive else '[RESISTANT TO PARTIAL UNOBSERVED CONVOLUTION]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -460,6 +468,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Baringhaus-Henze-Zirkler Characteristic Normality: T_BHZ = {stability.baringhaus_henze_stat:.3f} (p = {stability.baringhaus_henze_p:.3e}) {'[DEPARTURE FROM GAUSSIAN FOURIER GEOMETRY]' if stability.is_baringhaus_henze_non_normal else '[GAUSSIAN CHARACTERISTIC FUNCTION VALIDATED]'}")
             if stability.max_gray_ling_influence is not None:
                 rationale["key_evidence"].append(f"Gray-Ling Leverage-Residual Influence: Max LR = {stability.max_gray_ling_influence:.3f} ({stability.gray_ling_outlier_count} influential) {'[LEVERAGE-RESIDUAL JOINT OUTLIER]' if stability.is_gray_ling_influential else '[BOUNDED JOINT INFLUENCE]'}")
+            if stability.vasicek_entropy_p is not None:
+                rationale["key_evidence"].append(f"Vasicek Sample Entropy Normality: K_mn = {stability.vasicek_entropy_stat:.3f} (p = {stability.vasicek_entropy_p:.3e}) {'[INFORMATION-THEORETIC SHANNON ENTROPY NON-NORMALITY]' if stability.is_vasicek_non_normal else '[GAUSSIAN ENTROPY CALIBRATED]'}")
+            if stability.rousseeuw_zomeren_max_rdz is not None:
+                rationale["key_evidence"].append(f"Rousseeuw-van Zomeren Robust Distance: Max RDZ = {stability.rousseeuw_zomeren_max_rdz:.3f} ({stability.rousseeuw_zomeren_outlier_count} influential) {'[HIGH-LEVERAGE ROBUST MAHALANOBIS OUTLIER]' if stability.is_rousseeuw_zomeren_influential else '[BOUNDED ROBUST DISTANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -787,6 +799,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Baringhaus-Henze-Zirkler Test: T_BHZ = {stability.baringhaus_henze_stat:.3f} (p = {stability.baringhaus_henze_p:.3e})")
             if stability.max_gray_ling_influence is not None:
                 rationale["key_evidence"].append(f"Gray-Ling Influence: Max LR = {stability.max_gray_ling_influence:.3f}")
+            if simpsons.silvapulle_sen_p is not None:
+                rationale["key_evidence"].append(f"Silvapulle-Sen Test: S_SS = {simpsons.silvapulle_sen_stat:.2f} (p = {simpsons.silvapulle_sen_p:.3e})")
+            if simpsons.miller_jackknife_p_value is not None:
+                rationale["key_evidence"].append(f"Miller Jackknife Test: F_Miller = {simpsons.miller_jackknife_stat_f:.2f} (p = {simpsons.miller_jackknife_p_value:.3e})")
+            if confounder.rosenbaum_design_sensitivity_gamma is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Design Sensitivity: Gamma_tilde = {confounder.rosenbaum_design_sensitivity_gamma:.2f}")
+            if confounder.hosman_hansen_holland_delta is not None:
+                rationale["key_evidence"].append(f"Hosman-Hansen-Holland Relation: delta_HHH = {confounder.hosman_hansen_holland_delta:.3f}")
+            if stability.vasicek_entropy_p is not None:
+                rationale["key_evidence"].append(f"Vasicek Entropy Test: K_mn = {stability.vasicek_entropy_stat:.3f} (p = {stability.vasicek_entropy_p:.3e})")
+            if stability.rousseeuw_zomeren_max_rdz is not None:
+                rationale["key_evidence"].append(f"Rousseeuw-van Zomeren Robust Distance: Max RDZ = {stability.rousseeuw_zomeren_max_rdz:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",
