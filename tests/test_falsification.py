@@ -159,6 +159,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.cochran_c_stat is not None
     assert audit.simpsons_audit.cochran_c_stat > 0.0
     assert audit.simpsons_audit.cochran_c_p is not None
+    # Verify Gail-Simon qualitative interaction test and Hartley F_max variance ratio test
+    assert audit.simpsons_audit.gail_simon_stat is not None
+    assert audit.simpsons_audit.gail_simon_p is not None
+    assert audit.simpsons_audit.hartley_fmax_stat is not None
+    assert audit.simpsons_audit.hartley_fmax_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -328,6 +333,12 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.austin_stuart_masd is not None
         assert audit_coffee.confounder_audit.austin_stuart_masd >= 0.0
         assert audit_coffee.confounder_audit.austin_stuart_p is not None
+        # Check Kallus minimax confounding bounds and Imai-Ratkovic CBPS balance
+        assert audit_coffee.confounder_audit.kallus_gamma_crit is not None
+        assert audit_coffee.confounder_audit.kallus_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.kallus_bias_max is not None
+        assert audit_coffee.confounder_audit.cbps_overid_j is not None
+        assert audit_coffee.confounder_audit.cbps_overid_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -481,6 +492,13 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.szroeter_p_value is not None
     assert audit.stability_audit.max_ap_deviation is not None
     assert audit.stability_audit.max_ap_deviation >= 0.0
+    # Check Anscombe-Glynn normalizing kurtosis transformation and Rousseeuw-Croux Qn scale estimator
+    assert audit.stability_audit.anscombe_glynn_z is not None
+    assert audit.stability_audit.anscombe_glynn_p is not None
+    assert audit.stability_audit.rousseeuw_croux_qn is not None
+    assert audit.stability_audit.rousseeuw_croux_qn > 0.0
+    assert audit.stability_audit.scale_inflation_ratio_qn is not None
+    assert audit.stability_audit.scale_inflation_ratio_qn > 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -934,6 +952,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_ap = narrator.answer_query("Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic", findings)
     assert "Andrews" in ans_ap or "Pregibon" in ans_ap or "Ellipsoid" in ans_ap or "Influence" in ans_ap
+
+    ans_gs = narrator.answer_query("Explain Mitchell Gail and Richard Simon test for qualitative interactions", findings)
+    assert "Gail" in ans_gs or "Simon" in ans_gs or "Qualitative" in ans_gs or "Reversal" in ans_gs
+
+    ans_hartley = narrator.answer_query("Explain H. O. Hartley F_max maximum variance ratio test", findings)
+    assert "Hartley" in ans_hartley or "F_max" in ans_hartley or "Variance" in ans_hartley or "Scale" in ans_hartley
+
+    ans_kallus = narrator.answer_query("Explain Nathan Kallus minimax confounding bias bounds", findings)
+    assert "Kallus" in ans_kallus or "Minimax" in ans_kallus or "Confounding" in ans_kallus or "Bias" in ans_kallus
+
+    ans_cbps = narrator.answer_query("Explain Kosuke Imai and Marc Ratkovic CBPS overidentifying moment balance test", findings)
+    assert "CBPS" in ans_cbps or "Imai" in ans_cbps or "Ratkovic" in ans_cbps or "Moment" in ans_cbps
+
+    ans_ag = narrator.answer_query("Explain F. J. Anscombe and William Glynn normalizing kurtosis transformation", findings)
+    assert "Anscombe" in ans_ag or "Glynn" in ans_ag or "Kurtosis" in ans_ag or "Transformation" in ans_ag
+
+    ans_qn = narrator.answer_query("Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator", findings)
+    assert "Rousseeuw" in ans_qn or "Croux" in ans_qn or "Qn" in ans_qn or "Scale" in ans_qn
 
 
 def test_end_to_end_pipeline(tmp_path):

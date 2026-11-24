@@ -324,6 +324,12 @@ with col_right:
                         if simpsons.get("cochran_c_p") is not None:
                             cochran_flag = " ⚠️ Disproportionate Variance Outlier (p < 0.05)" if simpsons.get("is_cochran_c_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**Cochran's C Variance Test:** C = `{simpsons.get('cochran_c_stat', 0.0):.3f}` (p = `{simpsons.get('cochran_c_p', 0.0):.3e}`){cochran_flag}")
+                        if simpsons.get("gail_simon_p") is not None:
+                            gs_flag = " ⚠️ Qualitative Reversal Proven (p < 0.05)" if simpsons.get("is_gail_simon_reversal") else " (Quantitative Interaction / Uniform Sign)"
+                            st.markdown(f"**Gail-Simon Qualitative Interaction Test:** s_GS = `{simpsons.get('gail_simon_stat', 0.0):.2f}` (p = `{simpsons.get('gail_simon_p', 0.0):.3e}`){gs_flag}")
+                        if simpsons.get("hartley_fmax_p") is not None:
+                            hartley_flag = " ⚠️ Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_hartley_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Hartley F_max Variance Ratio:** F_max = `{simpsons.get('hartley_fmax_stat', 0.0):.2f}` (p = `{simpsons.get('hartley_fmax_p', 0.0):.3e}`){hartley_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -436,6 +442,12 @@ with col_right:
                         if conf_aud.get("austin_stuart_masd") is not None:
                             masd_flag = " ⚠️ Residual IPTW Imbalance (MASD > 0.10)" if conf_aud.get("is_austin_stuart_imbalanced") else " (Balanced under IPTW)"
                             st.markdown(f"**Austin-Stuart IPTW Balance:** MASD = `{conf_aud.get('austin_stuart_masd', 0.0):.3f}` (p = `{conf_aud.get('austin_stuart_p', 0.0):.3e}`){masd_flag}")
+                        if conf_aud.get("kallus_gamma_crit") is not None:
+                            kallus_flag = " ⚠️ Sensitive to Bounded Confounding (Γ_crit < 1.30)" if conf_aud.get("is_kallus_sensitive") else " (Minimax Robust, Γ_crit ≥ 1.30)"
+                            st.markdown(f"**Kallus Minimax Confounding Bounds:** Γ_crit = `{conf_aud.get('kallus_gamma_crit', 0.0):.2f}` (Bias_max = `{conf_aud.get('kallus_bias_max', 0.0):.3f}`, β ∈ `[{conf_aud.get('kallus_bound_low', 0.0):.3f}, {conf_aud.get('kallus_bound_high', 0.0):.3f}]`){kallus_flag}")
+                        if conf_aud.get("cbps_overid_p") is not None:
+                            cbps_flag = " ⚠️ Moment Balance Rejected (p < 0.05)" if conf_aud.get("is_cbps_rejected") else " (Exact Moment Balance Verified)"
+                            st.markdown(f"**Imai-Ratkovic CBPS Balance Test:** J = `{conf_aud.get('cbps_overid_j', 0.0):.2f}` (p = `{conf_aud.get('cbps_overid_p', 0.0):.3e}`){cbps_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -602,6 +614,12 @@ with col_right:
                         if stab_aud.get("max_ap_deviation") is not None:
                             ap_flag = f" ⚠️ Ellipsoid Volume Shrinkage ({stab_aud.get('ap_outlier_count', 0)} influential)" if stab_aud.get("is_ap_influential") else " (Bounded Ellipsoid Shrinkage)"
                             st.markdown(f"**Andrews-Pregibon Ellipsoid Influence:** Max Δ_AP = `{stab_aud.get('max_ap_deviation', 0.0):.3f}`{ap_flag}")
+                        if stab_aud.get("anscombe_glynn_p") is not None:
+                            ag_flag = f" ⚠️ Significant Residual Kurtosis (p = {stab_aud['anscombe_glynn_p']:.3e})" if stab_aud.get("is_anscombe_glynn_non_normal") else " (Gaussian Error Kurtosis)"
+                            st.markdown(f"**Anscombe-Glynn Kurtosis Test:** Z_AG = `{stab_aud.get('anscombe_glynn_z', 0.0):.2f}` (p = `{stab_aud['anscombe_glynn_p']:.3e}`){ag_flag}")
+                        if stab_aud.get("scale_inflation_ratio_qn") is not None:
+                            qn_flag = f" ⚠️ Scale Inflation by Outliers (SIR = {stab_aud['scale_inflation_ratio_qn']:.2f}x > 1.30)" if stab_aud.get("is_qn_inflated") else " (Stable Robust Scale)"
+                            st.markdown(f"**Rousseeuw-Croux Q_n Scale Estimator:** Q_n = `{stab_aud.get('rousseeuw_croux_qn', 0.0):.4f}` (SIR = `{stab_aud.get('scale_inflation_ratio_qn', 0.0):.2f}x`){qn_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1017,6 +1035,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic", findings, dataset_name=dataset_name)
 
+            sug_col58, sug_col59, sug_col60 = st.columns(3)
+            with sug_col58:
+                if st.button("🔬 Gail-Simon Reversal Test", key="sug_gs"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Mitchell Gail and Richard Simon test for qualitative interactions"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Mitchell Gail and Richard Simon test for qualitative interactions", findings, dataset_name=dataset_name)
+            with sug_col59:
+                if st.button("⚖️ Kallus Minimax Confounding", key="sug_kallus"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Nathan Kallus minimax confounding bias bounds"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Nathan Kallus minimax confounding bias bounds", findings, dataset_name=dataset_name)
+            with sug_col60:
+                if st.button("📐 Rousseeuw-Croux Qn Scale", key="sug_qn"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Peter Rousseeuw and Christophe Croux Qn robust scale estimator", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1210,6 +1245,18 @@ with col_right:
                     "Imbens_Contour_p": f"{conf.get('imbens_contour_p', 0.0):.3e}" if conf.get("imbens_contour_p") is not None else "N/A",
                     "Austin_Stuart_MASD": f"{conf.get('austin_stuart_masd', 0.0):.3f}" if conf.get("austin_stuart_masd") is not None else "N/A",
                     "Austin_Stuart_p": f"{conf.get('austin_stuart_p', 0.0):.3e}" if conf.get("austin_stuart_p") is not None else "N/A",
+                    "Kallus_Gamma_Crit": f"{conf.get('kallus_gamma_crit', 0.0):.2f}" if conf.get("kallus_gamma_crit") is not None else "N/A",
+                    "Kallus_Bias_Max": f"{conf.get('kallus_bias_max', 0.0):.3f}" if conf.get("kallus_bias_max") is not None else "N/A",
+                    "CBPS_Overid_J": f"{conf.get('cbps_overid_j', 0.0):.2f}" if conf.get("cbps_overid_j") is not None else "N/A",
+                    "CBPS_Overid_p": f"{conf.get('cbps_overid_p', 0.0):.3e}" if conf.get("cbps_overid_p") is not None else "N/A",
+                    "Gail_Simon_Stat": f"{simp.get('gail_simon_stat', 0.0):.2f}" if simp.get("gail_simon_stat") is not None else "N/A",
+                    "Gail_Simon_p": f"{simp.get('gail_simon_p', 0.0):.3e}" if simp.get("gail_simon_p") is not None else "N/A",
+                    "Hartley_Fmax_Stat": f"{simp.get('hartley_fmax_stat', 0.0):.2f}" if simp.get("hartley_fmax_stat") is not None else "N/A",
+                    "Hartley_Fmax_p": f"{simp.get('hartley_fmax_p', 0.0):.3e}" if simp.get("hartley_fmax_p") is not None else "N/A",
+                    "Anscombe_Glynn_Z": f"{stab.get('anscombe_glynn_z', 0.0):.2f}" if stab.get("anscombe_glynn_z") is not None else "N/A",
+                    "Anscombe_Glynn_p": f"{stab.get('anscombe_glynn_p', 0.0):.3e}" if stab.get("anscombe_glynn_p") is not None else "N/A",
+                    "Rousseeuw_Croux_Qn": f"{stab.get('rousseeuw_croux_qn', 0.0):.4f}" if stab.get("rousseeuw_croux_qn") is not None else "N/A",
+                    "Scale_Inflation_Ratio_Qn": f"{stab.get('scale_inflation_ratio_qn', 0.0):.2f}" if stab.get("scale_inflation_ratio_qn") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

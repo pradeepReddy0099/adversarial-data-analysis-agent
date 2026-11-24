@@ -173,6 +173,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Copas Selection Asymmetry Test: t = {simpsons.copas_test_t:.2f} (p = {simpsons.copas_test_p:.3e}) {'[SELECTION BIAS / FUNNEL ASYMMETRY]' if simpsons.is_copas_asymmetric else '[UNBIASED REPORTING / SYMMETRIC]'}")
             if simpsons.cochran_c_p is not None:
                 rationale["key_evidence"].append(f"Cochran's C Outlier Variance Test: C = {simpsons.cochran_c_stat:.3f} (p = {simpsons.cochran_c_p:.3e}) {'[DISPROPORTIONATE STRATUM VARIANCE OUTLIER]' if simpsons.is_cochran_c_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
+            if simpsons.gail_simon_p is not None:
+                rationale["key_evidence"].append(f"Gail-Simon Qualitative Interaction Test: s_GS = {simpsons.gail_simon_stat:.2f} (p = {simpsons.gail_simon_p:.3e}) {'[CONFIRMED TRUE QUALITATIVE REVERSAL / SIMPSON PARADOX]' if simpsons.is_gail_simon_reversal else '[QUANTITATIVE INTERACTION / UNIFORM SIGN]'}")
+            if simpsons.hartley_fmax_p is not None:
+                rationale["key_evidence"].append(f"Hartley F_max Variance Homogeneity: F_max = {simpsons.hartley_fmax_stat:.2f} (p = {simpsons.hartley_fmax_p:.3e}) {'[STRATUM SCALE HETEROGENEITY]' if simpsons.is_hartley_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -298,6 +302,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Imbens Sensitivity Contour: q_Imbens = {confounder.imbens_contour_q:.3f} (p = {confounder.imbens_contour_p:.3e}) {'[SENSITIVE TO WEAK UNMEASURED CONFOUNDING]' if confounder.is_imbens_sensitive else '[ROBUST TO MODERATE OMITTED CONFOUNDING]'}")
             if confounder.austin_stuart_p is not None:
                 rationale["key_evidence"].append(f"Austin-Stuart IPTW Standardized Balance: MASD = {confounder.austin_stuart_masd:.3f} (p = {confounder.austin_stuart_p:.3e}) {'[RESIDUAL COVARIATE IMBALANCE AFTER IPTW]' if confounder.is_austin_stuart_imbalanced else '[BALANCED UNDER INVERSE PROBABILITY WEIGHTING]'}")
+            if confounder.kallus_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Kallus Minimax Confounding Sensitivity: Γ_K,crit = {confounder.kallus_gamma_crit:.2f} (Bias_max = {confounder.kallus_bias_max:.3f}, [{confounder.kallus_bound_low:.3f}, {confounder.kallus_bound_high:.3f}]) {'[SENSITIVE TO BOUNDED UNOBSERVED CONVOLUTION]' if confounder.is_kallus_sensitive else '[MINIMAX CONVOLUTION ROBUST]'}")
+            if confounder.cbps_overid_p is not None:
+                rationale["key_evidence"].append(f"Imai-Ratkovic CBPS Overidentifying Moment Test: J_CBPS = {confounder.cbps_overid_j:.2f} (p = {confounder.cbps_overid_p:.3e}) {'[COVARIATE BALANCING OVERIDENTIFICATION REJECTED]' if confounder.is_cbps_rejected else '[EXACT BALANCING MOMENTS SATISFIED]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -424,6 +432,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Szroeter Monotonic Rank Homoskedasticity: Q = {stability.szroeter_stat_q:.3f} (Z = {stability.szroeter_stat_z:.2f}, p = {stability.szroeter_p_value:.3e}) {'[MONOTONIC VARIANCE EXPANSION / HETEROSKEDASTIC]' if stability.is_szroeter_heteroskedastic else '[RANK HOMOSKEDASTIC RESIDUALS]'}")
             if stability.max_ap_deviation is not None:
                 rationale["key_evidence"].append(f"Andrews-Pregibon Ellipsoid Influence: Max Delta_AP = {stability.max_ap_deviation:.3f} ({stability.ap_outlier_count} influential) {'[CONFIDENCE ELLIPSOID VOLUME DISTORTION]' if stability.is_ap_influential else '[BOUNDED ELLIPSOID SHRINKAGE]'}")
+            if stability.anscombe_glynn_p is not None:
+                rationale["key_evidence"].append(f"Anscombe-Glynn Kurtosis Transformation: Z_AG = {stability.anscombe_glynn_z:.2f} (p = {stability.anscombe_glynn_p:.3e}) {'[NON-GAUSSIAN RESIDUAL KURTOSIS]' if stability.is_anscombe_glynn_non_normal else '[GAUSSIAN ERROR KURTOSIS]'}")
+            if stability.scale_inflation_ratio_qn is not None:
+                rationale["key_evidence"].append(f"Rousseeuw-Croux Q_n Scale Estimator: Q_n = {stability.rousseeuw_croux_qn:.4f} (Scale Inflation Ratio = {stability.scale_inflation_ratio_qn:.2f}x) {'[SEVERE SCALE INFLATION BY OUTLIERS]' if stability.is_qn_inflated else '[STABLE SCALE VARIANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -715,6 +727,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Szroeter Homoskedasticity: Q = {stability.szroeter_stat_q:.3f} (p = {stability.szroeter_p_value:.3e})")
             if stability.max_ap_deviation is not None:
                 rationale["key_evidence"].append(f"Andrews-Pregibon Influence: Max Delta_AP = {stability.max_ap_deviation:.3f}")
+            if simpsons.gail_simon_p is not None:
+                rationale["key_evidence"].append(f"Gail-Simon Test: s_GS = {simpsons.gail_simon_stat:.2f} (p = {simpsons.gail_simon_p:.3e})")
+            if simpsons.hartley_fmax_p is not None:
+                rationale["key_evidence"].append(f"Hartley F_max: F = {simpsons.hartley_fmax_stat:.2f} (p = {simpsons.hartley_fmax_p:.3e})")
+            if confounder.kallus_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Kallus Minimax Sensitivity: Γ_K,crit = {confounder.kallus_gamma_crit:.2f}")
+            if confounder.cbps_overid_p is not None:
+                rationale["key_evidence"].append(f"Imai-Ratkovic CBPS Test: J = {confounder.cbps_overid_j:.2f} (p = {confounder.cbps_overid_p:.3e})")
+            if stability.anscombe_glynn_p is not None:
+                rationale["key_evidence"].append(f"Anscombe-Glynn Kurtosis: Z_AG = {stability.anscombe_glynn_z:.2f} (p = {stability.anscombe_glynn_p:.3e})")
+            if stability.scale_inflation_ratio_qn is not None:
+                rationale["key_evidence"].append(f"Rousseeuw-Croux Q_n: Scale Inflation = {stability.scale_inflation_ratio_qn:.2f}x")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

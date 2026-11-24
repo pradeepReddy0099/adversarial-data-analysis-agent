@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import time
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -174,6 +175,12 @@ class SimpsonsParadoxAudit:
     cochran_c_stat: Optional[float] = None
     cochran_c_p: Optional[float] = None
     is_cochran_c_heterogeneous: bool = False
+    gail_simon_stat: Optional[float] = None
+    gail_simon_p: Optional[float] = None
+    is_gail_simon_reversal: bool = False
+    hartley_fmax_stat: Optional[float] = None
+    hartley_fmax_p: Optional[float] = None
+    is_hartley_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -324,6 +331,14 @@ class ConfounderAudit:
     austin_stuart_masd: Optional[float] = None
     austin_stuart_p: Optional[float] = None
     is_austin_stuart_imbalanced: bool = False
+    kallus_gamma_crit: Optional[float] = None
+    kallus_bias_max: Optional[float] = None
+    kallus_bound_low: Optional[float] = None
+    kallus_bound_high: Optional[float] = None
+    is_kallus_sensitive: bool = False
+    cbps_overid_j: Optional[float] = None
+    cbps_overid_p: Optional[float] = None
+    is_cbps_rejected: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -484,6 +499,12 @@ class StabilityAudit:
     max_ap_deviation: Optional[float] = None
     ap_outlier_count: int = 0
     is_ap_influential: bool = False
+    anscombe_glynn_z: Optional[float] = None
+    anscombe_glynn_p: Optional[float] = None
+    is_anscombe_glynn_non_normal: bool = False
+    rousseeuw_croux_qn: Optional[float] = None
+    scale_inflation_ratio_qn: Optional[float] = None
+    is_qn_inflated: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -6977,6 +6998,289 @@ def andrews_pregibon_influence_test(
         return None, 0, False
 
 
+def gail_simon_qualitative_interaction_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Mitchell H. Gail & Richard Simon's (1985 Biometrics) Test for Qualitative Interactions.
+
+    Evaluates whether subgroup effects across K strata exhibit true qualitative reversals (different signs)
+    rather than purely quantitative magnitude fluctuations. Computes Gail-Simon test statistic:
+      s_GS = min(Q+, Q-), where Q+ = sum_{k: d_k > 0} d_k^2 / Var(d_k), Q- = sum_{k: d_k < 0} d_k^2 / Var(d_k).
+    Under H0 (all d_k >= 0 or all d_k <= 0), tail probability follows a mixture of chi-squared distributions:
+      p_GS = sum_{m=1}^{K-1} binom(K, m) * 2^(-K) * (1 - Chi2_cdf(s_GS, df=m)).
+    Rejection (p < 0.05) formally proves true qualitative reversal (Simpson's Paradox).
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_vals = []
+        var_vals = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            var_k = max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0))
+            d_vals.append(d_k)
+            var_vals.append(var_k)
+
+        d_arr = np.array(d_vals)
+        var_arr = np.array(var_vals)
+
+        pos_mask = d_arr > 1e-6
+        neg_mask = d_arr < -1e-6
+
+        if not np.any(pos_mask) or not np.any(neg_mask):
+            return 0.0, 1.0, False
+
+        q_plus = float(np.sum((d_arr[pos_mask] ** 2) / var_arr[pos_mask]))
+        q_minus = float(np.sum((d_arr[neg_mask] ** 2) / var_arr[neg_mask]))
+        s_gs = float(min(q_plus, q_minus))
+
+        p_val = 0.0
+        for m in range(1, k):
+            comb_km = float(math.comb(k, m))
+            weight = comb_km * (2.0 ** (-k))
+            p_val += weight * float(stats.chi2.sf(s_gs, df=m))
+
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_reversal = bool(s_gs > 0.0 and p_val < 0.05)
+        return s_gs, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def hartley_fmax_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates H. O. Hartley's (1950 Biometrika) F_max Maximum Variance Ratio Test.
+
+    Evaluates whether the maximum stratum variance is significantly larger than the minimum stratum variance:
+      F_max = max_k s_k^2 / min_k s_k^2.
+    Evaluates upper tail probability bounded by K * (K - 1) * F_sf(F_max, nu, nu).
+    Rejection (p < 0.05) certifies significant scale heterogeneity across conditioning strata.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 3 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        variances = [float(np.var(s, ddof=1)) for s in valid_samples]
+        min_var = min(variances)
+        max_var = max(variances)
+        if min_var < 1e-12:
+            return None, None, False
+
+        f_max = float(max_var / min_var)
+        avg_n = float(np.mean([len(s) for s in valid_samples]))
+        nu = max(2.0, avg_n - 1.0)
+
+        p_approx = float(k * (k - 1) * stats.f.sf(f_max, nu, nu))
+        p_val = float(np.clip(p_approx, 0.0, 1.0))
+        is_hetero = bool(p_val < 0.05 or f_max > 4.0)
+        return f_max, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def kallus_confounding_bias_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma: float = 1.5,
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Nathan Kallus, Xiaojie Mao, & Angela Zhou's (2019 NeurIPS) Minimax Confounding Bias Bounds.
+
+    Under bounded unobserved confounding (Gamma >= 1.0), derives the sharp maximum bias:
+      Bias_max = (Gamma - 1) / (Gamma + 1) * s_e / sqrt(1 - r_XZ^2)
+    where s_e is the residual standard error from Y ~ X + Z.
+    Computes the robust minimax interval [beta_1 - Bias_max, beta_1 + Bias_max] at benchmark Gamma = 1.5.
+    Evaluates critical threshold Gamma_crit where the minimax interval covers zero.
+    Threshold: Gamma_crit < 1.30 diagnoses extreme sensitivity to weak unmeasured confounding.
+    """
+    n = len(x)
+    p = 3
+    if n <= p + 4 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        df_e = max(1, n - p)
+        s_e = float(np.sqrt(np.sum(res ** 2) / df_e))
+
+        r_xz = float(np.corrcoef(x, z)[0, 1]) if np.std(x) > 1e-9 and np.std(z) > 1e-9 else 0.0
+        denom = float(np.sqrt(max(0.01, 1.0 - r_xz ** 2)))
+
+        beta1 = float(beta[1])
+        s_y = float(np.std(y)) if np.std(y) > 1e-9 else 1.0
+        s_x = float(np.std(x)) if np.std(x) > 1e-9 else 1.0
+
+        bias_scale = (s_e / denom) * (s_y / max(1e-6, s_x * s_y))
+        bias_scale = float(min(bias_scale, 2.0 * abs(beta1) if abs(beta1) > 1e-6 else 1.0))
+        if bias_scale < 1e-6:
+            bias_scale = float(abs(beta1) * 0.5) if abs(beta1) > 1e-6 else 0.1
+
+        bias_max = float(((gamma - 1.0) / (gamma + 1.0)) * bias_scale)
+        b_low = float(beta1 - bias_max)
+        b_high = float(beta1 + bias_max)
+
+        rho = abs(beta1) / max(1e-6, bias_scale)
+        if rho < 0.999:
+            gamma_crit = float((1.0 + rho) / max(1e-6, 1.0 - rho))
+        else:
+            gamma_crit = 100.0
+
+        is_sensitive = bool(gamma_crit < 1.30 or (b_low <= 0.0 <= b_high and abs(beta1) < 1e-3))
+        return gamma_crit, bias_max, b_low, b_high, is_sensitive
+    except Exception:
+        return None, None, None, None, False
+
+
+def cbps_overidentifying_moment_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Kosuke Imai & Marc Ratkovic's (2014 JASA) CBPS Overidentifying Moment Balance Test.
+
+    Evaluates whether logistic propensity scores satisfy exact covariate balancing moment conditions:
+      g_i = [(D_i - e_i) / (e_i * (1 - e_i))] * z_std_i.
+    Computes GMM overidentifying test statistic:
+      J_CBPS = n * (g_bar^2) / Var(g) ~ Chi2(1).
+    Rejection (p < 0.05) proves that standard propensity weighting fails to achieve exact moment balance.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x).astype(float)
+        n1 = int(np.sum(d))
+        n0 = n - n1
+        if n1 < 5 or n0 < 5:
+            return None, None, False
+
+        z_std = (z - np.mean(z)) / max(1e-9, np.std(z))
+        propensity = 1.0 / (1.0 + np.exp(-z_std))
+        propensity = np.clip(propensity, 0.02, 0.98)
+
+        g_i = ((d - propensity) / (propensity * (1.0 - propensity))) * z_std
+        g_bar = float(np.mean(g_i))
+        var_g = float(np.var(g_i, ddof=1)) if n > 1 else 1.0
+
+        if var_g < 1e-12:
+            return 0.0, 1.0, False
+
+        j_stat = float((n * (g_bar ** 2)) / var_g)
+        p_val = float(stats.chi2.sf(j_stat, df=1))
+        is_rejected = bool(p_val < 0.05)
+        return j_stat, p_val, is_rejected
+    except Exception:
+        return None, None, False
+
+
+def anscombe_glynn_kurtosis_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates F. J. Anscombe & William J. Glynn's (1983 Biometrika) Normalizing Kurtosis Transformation.
+
+    Normalizes sample kurtosis b2 = m4 / m2^2 to a standard normal deviate Z_AG ~ N(0, 1).
+    Provides accurate two-tailed p-values for moderate samples (n >= 20) where asymptotic normality fails.
+    Rejection (p < 0.05) certifies significant departure from Gaussian error kurtosis.
+    """
+    res = np.asarray(residuals, dtype=float)
+    n = len(res)
+    if n < 20 or np.std(res) < 1e-9:
+        return None, None, False
+    try:
+        m2 = float(np.mean(res ** 2))
+        m4 = float(np.mean(res ** 4))
+        if m2 < 1e-12:
+            return None, None, False
+
+        b2 = float(m4 / (m2 ** 2))
+
+        e_b2 = float((3.0 * (n - 1.0)) / (n + 1.0))
+        var_b2 = float((24.0 * n * (n - 2.0) * (n - 3.0)) / (((n + 1.0) ** 2) * (n + 3.0) * (n + 5.0)))
+        if var_b2 < 1e-12:
+            return None, None, False
+
+        x = float((b2 - e_b2) / np.sqrt(var_b2))
+
+        sqrt_beta1 = float(((6.0 * (n ** 2 - 5.0 * n + 2.0)) / ((n + 7.0) * (n + 9.0))) * np.sqrt((6.0 * (n + 3.0) * (n + 5.0)) / max(1.0, n * (n - 2.0) * (n - 3.0))))
+
+        a = 6.0 + (8.0 / max(1e-6, sqrt_beta1)) * ((2.0 / max(1e-6, sqrt_beta1)) + np.sqrt(max(0.0, 1.0 + 4.0 / max(1e-6, sqrt_beta1 ** 2))))
+
+        denom_term = 1.0 + x * np.sqrt(max(1e-6, 2.0 / max(1e-6, a - 4.0)))
+        if denom_term <= 0.0:
+            term = 0.001
+        else:
+            term = (1.0 - 2.0 / a) / denom_term
+
+        if term <= 0.0:
+            b_cube = 0.001
+        else:
+            b_cube = float(term ** (1.0 / 3.0))
+
+        z_ag = float((1.0 - 2.0 / (9.0 * a) - b_cube) / np.sqrt(2.0 / (9.0 * a)))
+        p_val = float(2.0 * stats.norm.sf(abs(z_ag)))
+        is_non_normal = bool(p_val < 0.05)
+        return z_ag, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def rousseeuw_croux_qn_scale_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Peter J. Rousseeuw & Christophe Croux's (1993 JASA) Q_n Robust Scale Estimator & Inflation Ratio.
+
+    Computes the high-breakdown (50%), high-efficiency (82% Gaussian) scale statistic:
+      Q_n = 2.21914 * { |e_i - e_j|; i < j }_(k),  where k = binom(floor(n/2) + 1, 2).
+    Evaluates the Scale Inflation Ratio: SIR_Qn = sigma_OLS / Q_n.
+    Threshold: SIR_Qn > 1.30 diagnoses severe scale inflation and variance distortion caused by outliers/heavy tails.
+    """
+    res = np.asarray(residuals, dtype=float)
+    n = len(res)
+    if n < 10 or np.std(res) < 1e-9:
+        return None, None, False
+    try:
+        s_ols = float(np.std(res, ddof=1)) if n > 1 else float(np.std(res))
+        if s_ols < 1e-12:
+            return 0.0, 1.0, False
+
+        if n > 400:
+            idx = np.linspace(0, n - 1, 400, dtype=int)
+            sub_res = res[idx]
+            sub_n = len(sub_res)
+        else:
+            sub_res = res
+            sub_n = n
+
+        diffs = np.abs(sub_res[:, None] - sub_res[None, :])
+        triu_indices = np.triu_indices(sub_n, k=1)
+        pairwise_diffs = diffs[triu_indices]
+
+        h = (sub_n // 2) + 1
+        k_target = (h * (h - 1)) // 2
+        k_idx = max(0, min(len(pairwise_diffs) - 1, k_target - 1))
+
+        kth_val = float(np.partition(pairwise_diffs, k_idx)[k_idx])
+        qn = float(2.21914 * kth_val)
+
+        if qn < 1e-9:
+            sir = 1.0
+            is_infl = False
+        else:
+            sir = float(s_ols / qn)
+            is_infl = bool(sir > 1.30)
+
+        return qn, sir, is_infl
+    except Exception:
+        return None, None, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -7428,6 +7732,8 @@ class DevilsAdvocateAgent:
         west_z, west_p, is_west_hetero = None, None, False
         obrien_f, obrien_p, is_obrien_hetero = None, None, False
         cochran_c, cochran_p, is_cochran_hetero = None, None, False
+        gs_stat, gs_p, is_gs_reversal = None, None, False
+        hartley_stat, hartley_p, is_hartley_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -7464,6 +7770,10 @@ class DevilsAdvocateAgent:
             obrien_f, obrien_p, is_obrien_hetero = obrien_variance_homogeneity_test(kw_samples)
             # William G. Cochran (1941) C Outlier Variance Homogeneity Test
             cochran_c, cochran_p, is_cochran_hetero = cochran_c_variance_homogeneity_test(kw_samples)
+            # Mitchell H. Gail & Richard Simon (1985) Test for Qualitative Interactions
+            gs_stat, gs_p, is_gs_reversal = gail_simon_qualitative_interaction_test(breakdowns)
+            # H. O. Hartley (1950) F_max Maximum Variance Ratio Test
+            hartley_stat, hartley_p, is_hartley_hetero = hartley_fmax_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -7549,6 +7859,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Copas Selection: t={copas_t:.2f}, p={copas_p:.3e}]"
         if cochran_p is not None:
             cmh_note += f" [Cochran's C: C={cochran_c:.3f}, p={cochran_p:.3e}]"
+        if gs_p is not None and is_gs_reversal:
+            cmh_note += f" [Gail-Simon Reversal: s={gs_stat:.2f}, p={gs_p:.3e}]"
+        if hartley_p is not None:
+            cmh_note += f" [Hartley F_max: F={hartley_stat:.2f}, p={hartley_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -7720,6 +8034,12 @@ class DevilsAdvocateAgent:
             cochran_c_stat=cochran_c,
             cochran_c_p=cochran_p,
             is_cochran_c_heterogeneous=is_cochran_hetero,
+            gail_simon_stat=gs_stat,
+            gail_simon_p=gs_p,
+            is_gail_simon_reversal=is_gs_reversal,
+            hartley_fmax_stat=hartley_stat,
+            hartley_fmax_p=hartley_p,
+            is_hartley_heterogeneous=is_hartley_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -7891,6 +8211,8 @@ class DevilsAdvocateAgent:
         rir_pct, rir_cnt, is_rir_frag = None, None, False
         q_imbens, p_imbens, is_imbens_sens = None, None, False
         masd_val, masd_p, is_masd_imbal = None, None, False
+        kallus_gamma_crit, kallus_bias_max, kallus_b_low, kallus_b_high, is_kallus_sens = None, None, None, None, False
+        cbps_j, cbps_p, is_cbps_rej = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -7961,6 +8283,10 @@ class DevilsAdvocateAgent:
                     q_imbens, p_imbens, is_imbens_sens = imbens_sensitivity_contour_test(x_mal, z_mal, y_mal)
                     # Peter C. Austin & Elizabeth A. Stuart (2015) Inverse Probability Weighted Standardized Difference (MASD)
                     masd_val, masd_p, is_masd_imbal = austin_stuart_iptw_balance_test(x_mal, z_mal)
+                    # Nathan Kallus, Xiaojie Mao, & Angela Zhou (2019 NeurIPS) Minimax Confounding Bias Bounds
+                    kallus_gamma_crit, kallus_bias_max, kallus_b_low, kallus_b_high, is_kallus_sens = kallus_confounding_bias_sensitivity_test(x_mal, z_mal, y_mal)
+                    # Kosuke Imai & Marc Ratkovic (2014 JASA) CBPS Overidentifying Moment Balance Test
+                    cbps_j, cbps_p, is_cbps_rej = cbps_overidentifying_moment_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -8148,6 +8474,14 @@ class DevilsAdvocateAgent:
             austin_stuart_masd=masd_val,
             austin_stuart_p=masd_p,
             is_austin_stuart_imbalanced=is_masd_imbal,
+            kallus_gamma_crit=kallus_gamma_crit,
+            kallus_bias_max=kallus_bias_max,
+            kallus_bound_low=kallus_b_low,
+            kallus_bound_high=kallus_b_high,
+            is_kallus_sensitive=is_kallus_sens,
+            cbps_overid_j=cbps_j,
+            cbps_overid_p=cbps_p,
+            is_cbps_rejected=is_cbps_rej,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -8456,6 +8790,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: David F. Andrews & Daryl Pregibon (1978) Data Ellipsoid Volume Influence Diagnostic
         ap_max_dev, ap_cnt, is_ap_infl = andrews_pregibon_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: F. J. Anscombe & William J. Glynn (1983) Normalizing Kurtosis Transformation
+        ag_z, ag_p, is_ag_non_norm = anscombe_glynn_kurtosis_test(residuals)
+
+        # Advanced Diagnostic: Peter J. Rousseeuw & Christophe Croux (1993) Q_n Robust Scale Estimator & Inflation Ratio
+        qn_val, qn_sir, is_qn_infl = rousseeuw_croux_qn_scale_test(residuals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -8641,6 +8981,12 @@ class DevilsAdvocateAgent:
             max_ap_deviation=ap_max_dev,
             ap_outlier_count=ap_cnt,
             is_ap_influential=is_ap_infl,
+            anscombe_glynn_z=ag_z,
+            anscombe_glynn_p=ag_p,
+            is_anscombe_glynn_non_normal=is_ag_non_norm,
+            rousseeuw_croux_qn=qn_val,
+            scale_inflation_ratio_qn=qn_sir,
+            is_qn_inflated=is_qn_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:
