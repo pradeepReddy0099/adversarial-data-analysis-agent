@@ -169,6 +169,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Ioannidis-Trikalinos TES Excess Test: A = {simpsons.tes_excess_ratio:.2f} (chi2 = {simpsons.tes_chi2:.2f}, p = {simpsons.tes_p_value:.3e}) {'[EXCESS SIGNIFICANCE / SELECTIVE DISCOVERY]' if simpsons.is_tes_excessive else '[EXPECTED STATISTICAL DISCOVERY POWER]'}")
             if simpsons.obrien_p_value is not None:
                 rationale["key_evidence"].append(f"O'Brien Scale Homogeneity Test: F = {simpsons.obrien_stat_f:.2f} (p = {simpsons.obrien_p_value:.3e}) {'[ROBUST SCALE SPREAD HETEROGENEITY]' if simpsons.is_obrien_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
+            if simpsons.copas_test_p is not None:
+                rationale["key_evidence"].append(f"Copas Selection Asymmetry Test: t = {simpsons.copas_test_t:.2f} (p = {simpsons.copas_test_p:.3e}) {'[SELECTION BIAS / FUNNEL ASYMMETRY]' if simpsons.is_copas_asymmetric else '[UNBIASED REPORTING / SYMMETRIC]'}")
+            if simpsons.cochran_c_p is not None:
+                rationale["key_evidence"].append(f"Cochran's C Outlier Variance Test: C = {simpsons.cochran_c_stat:.3f} (p = {simpsons.cochran_c_p:.3e}) {'[DISPROPORTIONATE STRATUM VARIANCE OUTLIER]' if simpsons.is_cochran_c_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -290,6 +294,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Hodges-Lehmann Shift: Delta_HL = {confounder.hodges_lehmann_shift:.3f} (Z = {confounder.hodges_lehmann_z:.2f}, p = {confounder.hodges_lehmann_p:.3e}) {'[NON-PARAMETRIC COVARIATE LOCATION SHIFT]' if confounder.is_hl_imbalanced else '[BALANCED NON-PARAMETRIC LOCATION]'}")
             if confounder.frank_rir_pct is not None:
                 rationale["key_evidence"].append(f"Frank Robustness of Inference to Replacement (RIR): RIR = {confounder.frank_rir_pct:.1f}% ({confounder.frank_rir_count} cases) {'[HIGH INFERENTIAL FRAGILITY TO REPLACEMENT]' if confounder.is_rir_fragile else '[ROBUST INFERENTIAL REPLACEMENT BUFFER]'}")
+            if confounder.imbens_contour_p is not None:
+                rationale["key_evidence"].append(f"Imbens Sensitivity Contour: q_Imbens = {confounder.imbens_contour_q:.3f} (p = {confounder.imbens_contour_p:.3e}) {'[SENSITIVE TO WEAK UNMEASURED CONFOUNDING]' if confounder.is_imbens_sensitive else '[ROBUST TO MODERATE OMITTED CONFOUNDING]'}")
+            if confounder.austin_stuart_p is not None:
+                rationale["key_evidence"].append(f"Austin-Stuart IPTW Standardized Balance: MASD = {confounder.austin_stuart_masd:.3f} (p = {confounder.austin_stuart_p:.3e}) {'[RESIDUAL COVARIATE IMBALANCE AFTER IPTW]' if confounder.is_austin_stuart_imbalanced else '[BALANCED UNDER INVERSE PROBABILITY WEIGHTING]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -412,6 +420,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Gel-Gastwirth Robust Jarque-Bera (RJB): RJB = {stability.gel_gastwirth_rjb:.2f} (p = {stability.gel_gastwirth_p:.3e}) {'[ROBUST RESIDUAL NON-NORMALITY]' if stability.is_rjb_non_normal else '[NORMAL GAUSSIAN SPREAD]'}")
             if stability.max_pena_influence is not None:
                 rationale["key_evidence"].append(f"Daniel Peña Influence: Max P = {stability.max_pena_influence:.3f} ({stability.pena_outlier_count} influential) {'[PROJECTION SUBSPACE DISTORTION]' if stability.is_pena_influential else '[BOUNDED PEÑA INFLUENCE]'}")
+            if stability.szroeter_p_value is not None:
+                rationale["key_evidence"].append(f"Szroeter Monotonic Rank Homoskedasticity: Q = {stability.szroeter_stat_q:.3f} (Z = {stability.szroeter_stat_z:.2f}, p = {stability.szroeter_p_value:.3e}) {'[MONOTONIC VARIANCE EXPANSION / HETEROSKEDASTIC]' if stability.is_szroeter_heteroskedastic else '[RANK HOMOSKEDASTIC RESIDUALS]'}")
+            if stability.max_ap_deviation is not None:
+                rationale["key_evidence"].append(f"Andrews-Pregibon Ellipsoid Influence: Max Delta_AP = {stability.max_ap_deviation:.3f} ({stability.ap_outlier_count} influential) {'[CONFIDENCE ELLIPSOID VOLUME DISTORTION]' if stability.is_ap_influential else '[BOUNDED ELLIPSOID SHRINKAGE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -691,6 +703,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Gel-Gastwirth RJB Normality: RJB = {stability.gel_gastwirth_rjb:.2f} (p = {stability.gel_gastwirth_p:.3e})")
             if stability.max_pena_influence is not None:
                 rationale["key_evidence"].append(f"Peña Influence: Max P = {stability.max_pena_influence:.3f}")
+            if simpsons.copas_test_p is not None:
+                rationale["key_evidence"].append(f"Copas Selection Test: t = {simpsons.copas_test_t:.2f} (p = {simpsons.copas_test_p:.3e})")
+            if simpsons.cochran_c_p is not None:
+                rationale["key_evidence"].append(f"Cochran's C Variance Test: C = {simpsons.cochran_c_stat:.3f} (p = {simpsons.cochran_c_p:.3e})")
+            if confounder.imbens_contour_p is not None:
+                rationale["key_evidence"].append(f"Imbens Sensitivity: q = {confounder.imbens_contour_q:.3f} (p = {confounder.imbens_contour_p:.3e})")
+            if confounder.austin_stuart_p is not None:
+                rationale["key_evidence"].append(f"Austin-Stuart IPTW MASD: {confounder.austin_stuart_masd:.3f}")
+            if stability.szroeter_p_value is not None:
+                rationale["key_evidence"].append(f"Szroeter Homoskedasticity: Q = {stability.szroeter_stat_q:.3f} (p = {stability.szroeter_p_value:.3e})")
+            if stability.max_ap_deviation is not None:
+                rationale["key_evidence"].append(f"Andrews-Pregibon Influence: Max Delta_AP = {stability.max_ap_deviation:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

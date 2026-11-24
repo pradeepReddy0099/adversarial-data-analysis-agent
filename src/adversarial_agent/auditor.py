@@ -168,6 +168,12 @@ class SimpsonsParadoxAudit:
     obrien_stat_f: Optional[float] = None
     obrien_p_value: Optional[float] = None
     is_obrien_heterogeneous: bool = False
+    copas_test_t: Optional[float] = None
+    copas_test_p: Optional[float] = None
+    is_copas_asymmetric: bool = False
+    cochran_c_stat: Optional[float] = None
+    cochran_c_p: Optional[float] = None
+    is_cochran_c_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -312,6 +318,12 @@ class ConfounderAudit:
     frank_rir_pct: Optional[float] = None
     frank_rir_count: Optional[int] = None
     is_rir_fragile: bool = False
+    imbens_contour_q: Optional[float] = None
+    imbens_contour_p: Optional[float] = None
+    is_imbens_sensitive: bool = False
+    austin_stuart_masd: Optional[float] = None
+    austin_stuart_p: Optional[float] = None
+    is_austin_stuart_imbalanced: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -465,6 +477,13 @@ class StabilityAudit:
     max_pena_influence: Optional[float] = None
     pena_outlier_count: int = 0
     is_pena_influential: bool = False
+    szroeter_stat_q: Optional[float] = None
+    szroeter_stat_z: Optional[float] = None
+    szroeter_p_value: Optional[float] = None
+    is_szroeter_heteroskedastic: bool = False
+    max_ap_deviation: Optional[float] = None
+    ap_outlier_count: int = 0
+    is_ap_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -6673,6 +6692,291 @@ def pena_influence_test(
         return None, 0, False
 
 
+def copas_selection_asymmetry_test(
+    tables_2x2: List[np.ndarray],
+    alpha: float = 0.05,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates John B. Copas & Frank Q. Shi's (2000, 2001) Heuristic Selection Model Funnel Asymmetry Test.
+
+    Evaluates publication/subgroup reporting selection bias by regressing standardized stratum log odds ratios
+    z_k = y_k / SE_k against stratum precision u_k = 1 / SE_k:
+      z_k = alpha_0 + gamma_Copas * u_k + epsilon_k.
+    Under the null hypothesis of unselective reporting, alpha_0 = 0 (or regression lines pass through origin).
+    A statistically significant non-zero intercept (p < 0.05) diagnoses severe selection bias / funnel asymmetry.
+    """
+    if len(tables_2x2) < 3:
+        return None, None, False
+    try:
+        theta_list, se_list = [], []
+        for tab in tables_2x2:
+            if isinstance(tab, (tuple, list)):
+                if len(tab) == 4:
+                    a, b, c, d = float(tab[0]), float(tab[1]), float(tab[2]), float(tab[3])
+                else:
+                    tab = np.array(tab, dtype=float)
+                    a, b = float(tab[0, 0]), float(tab[0, 1])
+                    c, d = float(tab[1, 0]), float(tab[1, 1])
+            elif isinstance(tab, np.ndarray) and tab.shape == (2, 2):
+                a, b = float(tab[0, 0]), float(tab[0, 1])
+                c, d = float(tab[1, 0]), float(tab[1, 1])
+            else:
+                arr = np.array(tab, dtype=float).ravel()
+                a, b, c, d = float(arr[0]), float(arr[1]), float(arr[2]), float(arr[3])
+
+            n1, n0 = a + b, c + d
+            if n1 < 1.0 or n0 < 1.0:
+                continue
+
+            a_adj, b_adj, c_adj, d_adj = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            lor = float(np.log((a_adj * d_adj) / (b_adj * c_adj)))
+            se = float(np.sqrt(1.0 / a_adj + 1.0 / b_adj + 1.0 / c_adj + 1.0 / d_adj))
+            theta_list.append(lor)
+            se_list.append(se)
+
+        k = len(theta_list)
+        if k < 3:
+            return None, None, False
+
+        theta_arr = np.array(theta_list, dtype=float)
+        se_arr = np.array(se_list, dtype=float)
+
+        z = theta_arr / np.maximum(1e-9, se_arr)
+        u = 1.0 / np.maximum(1e-9, se_arr)
+
+        X = np.column_stack([np.ones(k), u])
+        beta, _, _, _ = np.linalg.lstsq(X, z, rcond=None)
+        res = z - X @ beta
+
+        df_e = max(1, k - 2)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X.T @ X)
+        se_intercept = float(np.sqrt(max(1e-12, cov_mat[0, 0])))
+
+        t_stat = float(beta[0] / se_intercept)
+        p_val = float(2.0 * stats.t.sf(abs(t_stat), df=df_e))
+        is_asym = bool(p_val < alpha)
+        return t_stat, p_val, is_asym
+    except Exception:
+        return None, None, False
+
+
+def cochran_c_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates William G. Cochran's (1941) C Outlier Variance Homogeneity Test.
+
+    Evaluates whether the maximum stratum variance is disproportionately larger than the remaining strata:
+      C = max_k s_k^2 / sum_{k=1}^K s_k^2.
+    Computes exact upper tail significance p-value:
+      p approx K * Beta_sf(C, (n_0 - 1) / 2, (K - 1)(n_0 - 1) / 2).
+    Rejection (p < 0.05) identifies disproportionate variance outliers across conditioning subgroups.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 3 and np.std(s) > 1e-9]
+    if len(valid_samples) < 2:
+        return None, None, False
+    try:
+        variances = [float(np.var(s, ddof=1)) for s in valid_samples]
+        k = len(variances)
+        sum_var = sum(variances)
+        if sum_var < 1e-12:
+            return None, None, False
+
+        max_var = max(variances)
+        c_stat = float(max_var / sum_var)
+
+        avg_n = float(np.mean([len(s) for s in valid_samples]))
+        nu = max(1.0, avg_n - 1.0)
+        a = nu / 2.0
+        b = ((k - 1.0) * nu) / 2.0
+
+        p_approx = float(k * stats.beta.sf(c_stat, a, b))
+        p_val = min(1.0, max(0.0, p_approx))
+        is_hetero = bool(p_val < 0.05)
+        return c_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def imbens_sensitivity_contour_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Guido W. Imbens' (2003 AER) Parametric Sensitivity Contour Boundary (q_Imbens).
+
+    Derives the minimal bivariate partial R^2 correlation product an unobserved confounder U
+    must have with treatment X and outcome Y to explain away the estimated effect to zero:
+      q_Imbens = t_obs^2 / (n - p + t_obs^2),
+    where t_obs is the studentized t-statistic of X in the controlled regression Y ~ X + Z.
+    Threshold: q_Imbens < 0.05 (or p < 0.05) diagnoses extreme sensitivity to weak unmeasured confounding.
+    """
+    n = len(x)
+    p = 3
+    if n <= p + 4 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x, z])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        df_e = max(1, n - p)
+        s_sq = float(np.sum(res ** 2) / df_e)
+        cov_mat = s_sq * np.linalg.pinv(X_mat.T @ X_mat)
+        se_beta1 = float(np.sqrt(max(1e-12, cov_mat[1, 1])))
+
+        t_obs = float(beta[1] / se_beta1)
+        q_stat = float((t_obs ** 2) / (df_e + (t_obs ** 2)))
+
+        p_val = float(2.0 * stats.t.sf(abs(t_obs), df=df_e))
+        is_sensitive = bool(q_stat < 0.05 or p_val > 0.05)
+        return q_stat, p_val, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def austin_stuart_iptw_balance_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Peter C. Austin & Elizabeth A. Stuart's (2015) Inverse Probability Weighted Standardized Difference (MASD).
+
+    Dichotomizes treatment X at median into D = 1 and D = 0 cohorts.
+    Estimates propensity scores e_i = P(D = 1 | Z_i) via logistic sigmoid and computes IPTW weights:
+      w_i = D_i / e_i + (1 - D_i) / (1 - e_i).
+    Calculates the IPTW-weighted mean absolute standardized difference (MASD):
+      MASD = |Z_bar_{1,w} - Z_bar_{0,w}| / s_pooled.
+    Threshold: MASD > 0.10 diagnoses residual covariate imbalance under inverse probability weighting.
+    """
+    n = len(x)
+    if n < 16 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        d = (x > med_x).astype(float)
+        n1 = int(np.sum(d))
+        n0 = n - n1
+        if n1 < 5 or n0 < 5:
+            return None, None, False
+
+        z_std = (z - np.mean(z)) / max(1e-9, np.std(z))
+        propensity = 1.0 / (1.0 + np.exp(-z_std))
+        propensity = np.clip(propensity, 0.02, 0.98)
+
+        weights = d / propensity + (1.0 - d) / (1.0 - propensity)
+
+        w1 = weights * d
+        w0 = weights * (1.0 - d)
+        sum_w1, sum_w0 = float(np.sum(w1)), float(np.sum(w0))
+        if sum_w1 < 1e-9 or sum_w0 < 1e-9:
+            return None, None, False
+
+        mean1_w = float(np.sum(w1 * z) / sum_w1)
+        mean0_w = float(np.sum(w0 * z) / sum_w0)
+
+        s1_sq = float(np.var(z[d == 1.0], ddof=1)) if n1 > 1 else 1.0
+        s0_sq = float(np.var(z[d == 0.0], ddof=1)) if n0 > 1 else 1.0
+        s_pooled = float(np.sqrt(max(1e-9, (s1_sq + s0_sq) / 2.0)))
+
+        masd = float(abs(mean1_w - mean0_w) / s_pooled)
+
+        z_diff = abs(mean1_w - mean0_w) / (s_pooled * np.sqrt(1.0 / n1 + 1.0 / n0))
+        p_val = float(2.0 * stats.norm.sf(z_diff))
+        is_imbalanced = bool(masd > 0.10)
+        return masd, p_val, is_imbalanced
+    except Exception:
+        return None, None, False
+
+
+def szroeter_rank_homoskedasticity_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Jerzy Szroeter's (1978) Monotonic Rank Homoskedasticity Test.
+
+    Ranks observations by regressor X and assigns cosine weights h_i = 1 - cos(i * pi / (n + 1)).
+    Computes rank-weighted squared residual statistic:
+      Q = sum_{i=1}^n h_i e_i^2 / sum_{i=1}^n e_i^2.
+    Evaluates standardized deviate Z_Szroeter ~ N(0, 1) and two-sided p-value.
+    Rejection (p < 0.05) certifies monotonic error variance expansion along regressor domain.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 5 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        order = np.argsort(x)
+        res_sorted = res[order]
+
+        i_vec = np.arange(1, n + 1, dtype=float)
+        h = 1.0 - np.cos((i_vec * np.pi) / (n + 1.0))
+
+        e_sq = res_sorted ** 2
+        sum_e_sq = float(np.sum(e_sq))
+        if sum_e_sq < 1e-12:
+            return 1.0, 0.0, 1.0, False
+
+        q_stat = float(np.sum(h * e_sq) / sum_e_sq)
+        h_bar = float(np.mean(h))
+
+        var_h = float(np.sum((h - h_bar) ** 2))
+        se_q = float(np.sqrt(max(1e-12, (2.0 * var_h) / (n ** 2))))
+
+        z_stat = float((q_stat - h_bar) / se_q)
+        p_val = float(2.0 * stats.norm.sf(abs(z_stat)))
+        is_hetero = bool(p_val < 0.05)
+        return q_stat, z_stat, p_val, is_hetero
+    except Exception:
+        return None, None, None, False
+
+
+def andrews_pregibon_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates David F. Andrews & Daryl Pregibon's (1978) Data Ellipsoid Volume Influence Diagnostic (AP_i).
+
+    Evaluates the relative reduction in the volume of the augmented data ellipsoid [X, y] upon deleting observation i:
+      AP_i = (1 - h_ii) * [1 - e_i^2 / ((1 - h_ii) * SSE)].
+    Computes leverage-residual shrinkage deviation Delta_i = 1 - AP_i.
+    Threshold: Delta_crit = max(2 * p / n, mean(Delta) + 2.5 * std(Delta)).
+    Flags observations that jointly distort parameter variance and sample geometry.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H), 1e-6, 1.0 - 1e-6)
+
+        sse = float(np.sum(res ** 2))
+        if sse < 1e-12:
+            return 0.0, 0, False
+
+        term2 = (res ** 2) / np.maximum(1e-9, (1.0 - h_diag) * sse)
+        ap_i = (1.0 - h_diag) * (1.0 - np.clip(term2, 0.0, 0.9999))
+        delta_i = 1.0 - ap_i
+
+        mean_delta = float(np.mean(delta_i))
+        std_delta = float(np.std(delta_i))
+        delta_crit = max((2.0 * p) / n, mean_delta + 2.5 * std_delta)
+
+        max_delta = float(np.max(delta_i))
+        outlier_count = int(np.sum(delta_i > delta_crit))
+        is_infl = bool(outlier_count > 0 and max_delta > delta_crit)
+        return max_delta, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -7054,6 +7358,8 @@ class DevilsAdvocateAgent:
                 schw_t, schw_p, is_schw_asym = schwarzer_funnel_asymmetry_test(tables_2x2)
                 # John Ioannidis & Thomas Trikalinos (2007) Test for Excess Significance (TES)
                 tes_ratio, tes_chi2, tes_p, is_tes_excess = ioannidis_trikalinos_tes_test(tables_2x2)
+                # John B. Copas & Frank Q. Shi (2000, 2001) Heuristic Selection Model Funnel Asymmetry Test
+                copas_t, copas_p, is_copas_asym = copas_selection_asymmetry_test(tables_2x2)
                 # E-value for unmeasured confounding
                 simpson_e_val, simpson_e_desc = calculate_e_value(cmh_or)
         else:
@@ -7063,6 +7369,7 @@ class DevilsAdvocateAgent:
             pust_t, pust_p, is_pust_asym = None, None, False
             schw_t, schw_p, is_schw_asym = None, None, False
             tes_ratio, tes_chi2, tes_p, is_tes_excess = None, None, None, False
+            copas_t, copas_p, is_copas_asym = None, None, False
 
         # Advanced Metric 2: Cohen's d Effect Size for Group Differences
         cohens_d: Optional[float] = None
@@ -7119,6 +7426,8 @@ class DevilsAdvocateAgent:
         # Advanced Metric 11: Kruskal & Wallis (1952) Non-Parametric Rank-Sum Heterogeneity Test
         kw_h, kw_p, is_kw_hetero = None, None, False
         west_z, west_p, is_west_hetero = None, None, False
+        obrien_f, obrien_p, is_obrien_hetero = None, None, False
+        cochran_c, cochran_p, is_cochran_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -7153,6 +7462,8 @@ class DevilsAdvocateAgent:
             west_z, west_p, is_west_hetero = westenberg_scale_dispersion_test(kw_samples)
             # Peter C. O'Brien (1979, 1981) Homogeneity of Variance Test
             obrien_f, obrien_p, is_obrien_hetero = obrien_variance_homogeneity_test(kw_samples)
+            # William G. Cochran (1941) C Outlier Variance Homogeneity Test
+            cochran_c, cochran_p, is_cochran_hetero = cochran_c_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -7234,6 +7545,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Westenberg Scale: Z={west_z:.2f}, p={west_p:.3e}]"
         if obrien_p is not None:
             cmh_note += f" [O'Brien Scale: F={obrien_f:.2f}, p={obrien_p:.3e}]"
+        if copas_p is not None:
+            cmh_note += f" [Copas Selection: t={copas_t:.2f}, p={copas_p:.3e}]"
+        if cochran_p is not None:
+            cmh_note += f" [Cochran's C: C={cochran_c:.3f}, p={cochran_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -7399,6 +7714,12 @@ class DevilsAdvocateAgent:
             obrien_stat_f=obrien_f,
             obrien_p_value=obrien_p,
             is_obrien_heterogeneous=is_obrien_hetero,
+            copas_test_t=copas_t,
+            copas_test_p=copas_p,
+            is_copas_asymmetric=is_copas_asym,
+            cochran_c_stat=cochran_c,
+            cochran_c_p=cochran_p,
+            is_cochran_c_heterogeneous=is_cochran_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -7568,6 +7889,8 @@ class DevilsAdvocateAgent:
         iw_quad_diff, is_iw_quad_excess = None, False
         hl_shift, hl_z, hl_p, is_hl_imbal = None, None, None, False
         rir_pct, rir_cnt, is_rir_frag = None, None, False
+        q_imbens, p_imbens, is_imbens_sens = None, None, False
+        masd_val, masd_p, is_masd_imbal = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -7634,6 +7957,10 @@ class DevilsAdvocateAgent:
                     hl_shift, hl_z, hl_p, is_hl_imbal = rosenbaum_hodges_lehmann_balance_test(x_mal, z_mal)
                     # Kenneth A. Frank et al. (2013) Robustness of Inference to Replacement (RIR)
                     rir_pct, rir_cnt, is_rir_frag = frank_rir_fragility_test(x_mal, z_mal, y_mal)
+                    # Guido W. Imbens (2003 AER) Parametric Sensitivity Contour Boundary
+                    q_imbens, p_imbens, is_imbens_sens = imbens_sensitivity_contour_test(x_mal, z_mal, y_mal)
+                    # Peter C. Austin & Elizabeth A. Stuart (2015) Inverse Probability Weighted Standardized Difference (MASD)
+                    masd_val, masd_p, is_masd_imbal = austin_stuart_iptw_balance_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -7815,6 +8142,12 @@ class DevilsAdvocateAgent:
             frank_rir_pct=rir_pct,
             frank_rir_count=rir_cnt,
             is_rir_fragile=is_rir_frag,
+            imbens_contour_q=q_imbens,
+            imbens_contour_p=p_imbens,
+            is_imbens_sensitive=is_imbens_sens,
+            austin_stuart_masd=masd_val,
+            austin_stuart_p=masd_p,
+            is_austin_stuart_imbalanced=is_masd_imbal,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -8117,6 +8450,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Daniel Peña (2001) Measure of Influence in Linear Regression
         pena_max, pena_cnt, is_pena_infl = pena_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Jerzy Szroeter (1978) Monotonic Rank Homoskedasticity Test
+        szroeter_q, szroeter_z, szroeter_p, is_szroeter_hetero = szroeter_rank_homoskedasticity_test(x_vals, y_vals)
+
+        # Advanced Diagnostic: David F. Andrews & Daryl Pregibon (1978) Data Ellipsoid Volume Influence Diagnostic
+        ap_max_dev, ap_cnt, is_ap_infl = andrews_pregibon_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -8295,6 +8634,13 @@ class DevilsAdvocateAgent:
             max_pena_influence=pena_max,
             pena_outlier_count=pena_cnt,
             is_pena_influential=is_pena_infl,
+            szroeter_stat_q=szroeter_q,
+            szroeter_stat_z=szroeter_z,
+            szroeter_p_value=szroeter_p,
+            is_szroeter_heteroskedastic=is_szroeter_hetero,
+            max_ap_deviation=ap_max_dev,
+            ap_outlier_count=ap_cnt,
+            is_ap_influential=is_ap_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

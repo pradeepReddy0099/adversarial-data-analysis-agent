@@ -318,6 +318,12 @@ with col_right:
                         if simpsons.get("obrien_stat_f") is not None:
                             ob_flag = " ⚠️ Scale Dispersion Heterogeneity (p < 0.05)" if simpsons.get("is_obrien_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**O'Brien Homogeneity of Variance:** F = `{simpsons.get('obrien_stat_f', 0.0):.2f}` (p = `{simpsons.get('obrien_p_value', 0.0):.3e}`){ob_flag}")
+                        if simpsons.get("copas_test_p") is not None:
+                            copas_flag = " ⚠️ Selection Bias / Funnel Asymmetry (p < 0.05)" if simpsons.get("is_copas_asymmetric") else " (Unbiased Stratum Precision)"
+                            st.markdown(f"**Copas Selection Asymmetry:** t = `{simpsons.get('copas_test_t', 0.0):.2f}` (p = `{simpsons.get('copas_test_p', 0.0):.3e}`){copas_flag}")
+                        if simpsons.get("cochran_c_p") is not None:
+                            cochran_flag = " ⚠️ Disproportionate Variance Outlier (p < 0.05)" if simpsons.get("is_cochran_c_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Cochran's C Variance Test:** C = `{simpsons.get('cochran_c_stat', 0.0):.3f}` (p = `{simpsons.get('cochran_c_p', 0.0):.3e}`){cochran_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -424,6 +430,12 @@ with col_right:
                         if conf_aud.get("frank_rir_pct") is not None:
                             rir_flag = f" ⚠️ Extreme Causal Fragility (< 15%, {conf_aud.get('frank_rir_count', 0)} cases)" if conf_aud.get("is_rir_fragile") else f" (Robust Replacement Buffer, {conf_aud.get('frank_rir_count', 0)} cases)"
                             st.markdown(f"**Frank Robustness of Inference to Replacement (RIR):** RIR = `{conf_aud.get('frank_rir_pct', 0.0):.1f}%`{rir_flag}")
+                        if conf_aud.get("imbens_contour_q") is not None:
+                            imb_flag = " ⚠️ Sensitive to Weak Unmeasured Confounder (q < 0.05)" if conf_aud.get("is_imbens_sensitive") else " (Robust to Moderate Confounding)"
+                            st.markdown(f"**Imbens Sensitivity Contour:** q = `{conf_aud.get('imbens_contour_q', 0.0):.3f}` (p = `{conf_aud.get('imbens_contour_p', 0.0):.3e}`){imb_flag}")
+                        if conf_aud.get("austin_stuart_masd") is not None:
+                            masd_flag = " ⚠️ Residual IPTW Imbalance (MASD > 0.10)" if conf_aud.get("is_austin_stuart_imbalanced") else " (Balanced under IPTW)"
+                            st.markdown(f"**Austin-Stuart IPTW Balance:** MASD = `{conf_aud.get('austin_stuart_masd', 0.0):.3f}` (p = `{conf_aud.get('austin_stuart_p', 0.0):.3e}`){masd_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -584,6 +596,12 @@ with col_right:
                         if stab_aud.get("max_pena_influence") is not None:
                             pena_flag = f" ⚠️ Projection Subspace Outliers ({stab_aud.get('pena_outlier_count', 0)} influential)" if stab_aud.get("is_pena_influential") else " (Bounded Peña Influence)"
                             st.markdown(f"**Daniel Peña Influence Diagnostic:** Max P = `{stab_aud.get('max_pena_influence', 0.0):.3f}`{pena_flag}")
+                        if stab_aud.get("szroeter_p_value") is not None:
+                            sz_flag = f" ⚠️ Monotonic Variance Expansion (p = {stab_aud['szroeter_p_value']:.3e})" if stab_aud.get("is_szroeter_heteroskedastic") else " (Rank Homoskedastic)"
+                            st.markdown(f"**Szroeter Monotonic Homoskedasticity:** Q = `{stab_aud.get('szroeter_stat_q', 0.0):.3f}` (Z = `{stab_aud.get('szroeter_stat_z', 0.0):.2f}`, p = `{stab_aud['szroeter_p_value']:.3e}`){sz_flag}")
+                        if stab_aud.get("max_ap_deviation") is not None:
+                            ap_flag = f" ⚠️ Ellipsoid Volume Shrinkage ({stab_aud.get('ap_outlier_count', 0)} influential)" if stab_aud.get("is_ap_influential") else " (Bounded Ellipsoid Shrinkage)"
+                            st.markdown(f"**Andrews-Pregibon Ellipsoid Influence:** Max Δ_AP = `{stab_aud.get('max_ap_deviation', 0.0):.3f}`{ap_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -982,6 +1000,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Daniel Peña measure of influence in regression"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Daniel Peña measure of influence in regression", findings, dataset_name=dataset_name)
 
+            sug_col55, sug_col56, sug_col57 = st.columns(3)
+            with sug_col55:
+                if st.button("📉 Copas Selection Funnel", key="sug_copas"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain John Copas and Frank Shi heuristic selection model funnel asymmetry test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain John Copas and Frank Shi heuristic selection model funnel asymmetry test", findings, dataset_name=dataset_name)
+            with sug_col56:
+                if st.button("🛡️ Imbens Sensitivity Contour", key="sug_imbens"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Guido Imbens parametric sensitivity contour boundary test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Guido Imbens parametric sensitivity contour boundary test", findings, dataset_name=dataset_name)
+            with sug_col57:
+                if st.button("🎯 Andrews-Pregibon Influence", key="sug_ap"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1098,6 +1133,10 @@ with col_right:
                     "TES_Excess_p": f"{simp.get('tes_p_value', 0.0):.3e}" if simp.get("tes_p_value") is not None else "N/A",
                     "OBrien_Scale_F": f"{simp.get('obrien_stat_f', 0.0):.2f}" if simp.get("obrien_stat_f") is not None else "N/A",
                     "OBrien_Scale_p": f"{simp.get('obrien_p_value', 0.0):.3e}" if simp.get("obrien_p_value") is not None else "N/A",
+                    "Copas_Selection_t": f"{simp.get('copas_test_t', 0.0):.2f}" if simp.get("copas_test_t") is not None else "N/A",
+                    "Copas_Selection_p": f"{simp.get('copas_test_p', 0.0):.3e}" if simp.get("copas_test_p") is not None else "N/A",
+                    "Cochran_C_Stat": f"{simp.get('cochran_c_stat', 0.0):.3f}" if simp.get("cochran_c_stat") is not None else "N/A",
+                    "Cochran_C_p": f"{simp.get('cochran_c_p', 0.0):.3e}" if simp.get("cochran_c_p") is not None else "N/A",
                     "DerSimonian_Laird_Tau2": f"{simp.get('tau_squared', 0.0):.4f}" if simp.get("tau_squared") is not None else "N/A",
                     "Trim_and_Fill_k0": f"{simp.get('trim_and_fill_k0', 0)}" if simp.get("trim_and_fill_k0") is not None else "N/A",
                     "Hausman_p": f"{simp.get('hausman_p', 0.0):.3e}" if simp.get("hausman_p") is not None else "N/A",
@@ -1167,6 +1206,10 @@ with col_right:
                     "Hodges_Lehmann_p": f"{conf.get('hodges_lehmann_p', 0.0):.3e}" if conf.get("hodges_lehmann_p") is not None else "N/A",
                     "Frank_RIR_Pct": f"{conf.get('frank_rir_pct', 0.0):.1f}%" if conf.get("frank_rir_pct") is not None else "N/A",
                     "Frank_RIR_Count": f"{conf.get('frank_rir_count', 0)}" if conf.get("frank_rir_count") is not None else "N/A",
+                    "Imbens_Contour_q": f"{conf.get('imbens_contour_q', 0.0):.3f}" if conf.get("imbens_contour_q") is not None else "N/A",
+                    "Imbens_Contour_p": f"{conf.get('imbens_contour_p', 0.0):.3e}" if conf.get("imbens_contour_p") is not None else "N/A",
+                    "Austin_Stuart_MASD": f"{conf.get('austin_stuart_masd', 0.0):.3f}" if conf.get("austin_stuart_masd") is not None else "N/A",
+                    "Austin_Stuart_p": f"{conf.get('austin_stuart_p', 0.0):.3e}" if conf.get("austin_stuart_p") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
@@ -1245,6 +1288,10 @@ with col_right:
                     "Gel_Gastwirth_p": f"{stab.get('gel_gastwirth_p', 0.0):.3e}" if stab.get("gel_gastwirth_p") is not None else "N/A",
                     "Max_Pena_Influence": f"{stab.get('max_pena_influence', 0.0):.3f}" if stab.get("max_pena_influence") is not None else "N/A",
                     "Pena_Outlier_Count": f"{stab.get('pena_outlier_count', 0)}" if stab.get("pena_outlier_count") is not None else "N/A",
+                    "Szroeter_Stat_Q": f"{stab.get('szroeter_stat_q', 0.0):.3f}" if stab.get("szroeter_stat_q") is not None else "N/A",
+                    "Szroeter_p": f"{stab.get('szroeter_p_value', 0.0):.3e}" if stab.get("szroeter_p_value") is not None else "N/A",
+                    "Max_AP_Deviation": f"{stab.get('max_ap_deviation', 0.0):.3f}" if stab.get("max_ap_deviation") is not None else "N/A",
+                    "AP_Outlier_Count": f"{stab.get('ap_outlier_count', 0)}" if stab.get("ap_outlier_count") is not None else "N/A",
                     "HC3_Robust_p": f"{stab.get('hc3_robust_p', 0.0):.3e}" if stab.get("hc3_robust_p") is not None else "N/A",
                     "Durbin_Watson": f"{stab.get('durbin_watson_stat', 0.0):.2f}" if stab.get("durbin_watson_stat") is not None else "N/A",
                     "Jarque_Bera_p": f"{stab.get('jarque_bera_p', 0.0):.3e}" if stab.get("jarque_bera_p") is not None else "N/A",

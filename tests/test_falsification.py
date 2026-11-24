@@ -153,6 +153,12 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.tes_p_value is not None
     assert audit.simpsons_audit.obrien_stat_f is not None
     assert audit.simpsons_audit.obrien_p_value is not None
+    # Verify Copas selection asymmetry test and Cochran's C outlier variance test
+    assert audit.simpsons_audit.copas_test_t is not None
+    assert audit.simpsons_audit.copas_test_p is not None
+    assert audit.simpsons_audit.cochran_c_stat is not None
+    assert audit.simpsons_audit.cochran_c_stat > 0.0
+    assert audit.simpsons_audit.cochran_c_p is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -315,6 +321,13 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.frank_rir_pct is not None
         assert audit_coffee.confounder_audit.frank_rir_pct >= 0.0
         assert audit_coffee.confounder_audit.frank_rir_count is not None
+        # Check Imbens sensitivity contour and Austin-Stuart IPTW balance
+        assert audit_coffee.confounder_audit.imbens_contour_q is not None
+        assert audit_coffee.confounder_audit.imbens_contour_q >= 0.0
+        assert audit_coffee.confounder_audit.imbens_contour_p is not None
+        assert audit_coffee.confounder_audit.austin_stuart_masd is not None
+        assert audit_coffee.confounder_audit.austin_stuart_masd >= 0.0
+        assert audit_coffee.confounder_audit.austin_stuart_p is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -462,6 +475,12 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.gel_gastwirth_p is not None
     assert audit.stability_audit.max_pena_influence is not None
     assert audit.stability_audit.max_pena_influence >= 0.0
+    # Check Szroeter monotonic rank homoskedasticity and Andrews-Pregibon influence
+    assert audit.stability_audit.szroeter_stat_q is not None
+    assert audit.stability_audit.szroeter_stat_z is not None
+    assert audit.stability_audit.szroeter_p_value is not None
+    assert audit.stability_audit.max_ap_deviation is not None
+    assert audit.stability_audit.max_ap_deviation >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -897,6 +916,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_pena = narrator.answer_query("Explain Daniel Peña measure of influence in regression", findings)
     assert "Peña" in ans_pena or "Pena" in ans_pena or "Influence" in ans_pena or "Projection" in ans_pena
+
+    ans_copas = narrator.answer_query("Explain John Copas and Frank Shi heuristic selection model funnel asymmetry test", findings)
+    assert "Copas" in ans_copas or "Selection" in ans_copas or "Precision" in ans_copas or "Funnel" in ans_copas
+
+    ans_cochran = narrator.answer_query("Explain William Cochran C outlier variance homogeneity test", findings)
+    assert "Cochran" in ans_cochran or "Variance" in ans_cochran or "Outlier" in ans_cochran or "Scale" in ans_cochran
+
+    ans_imbens = narrator.answer_query("Explain Guido Imbens parametric sensitivity contour boundary test", findings)
+    assert "Imbens" in ans_imbens or "Sensitivity" in ans_imbens or "Contour" in ans_imbens or "Boundary" in ans_imbens
+
+    ans_as = narrator.answer_query("Explain Peter Austin and Elizabeth Stuart inverse probability weighted standardized difference", findings)
+    assert "Austin" in ans_as or "Stuart" in ans_as or "IPTW" in ans_as or "MASD" in ans_as or "Balance" in ans_as
+
+    ans_szroeter = narrator.answer_query("Explain Jerzy Szroeter monotonic rank homoskedasticity test", findings)
+    assert "Szroeter" in ans_szroeter or "Homoskedasticity" in ans_szroeter or "Rank" in ans_szroeter or "Monotonic" in ans_szroeter
+
+    ans_ap = narrator.answer_query("Explain David Andrews and Daryl Pregibon data ellipsoid volume influence diagnostic", findings)
+    assert "Andrews" in ans_ap or "Pregibon" in ans_ap or "Ellipsoid" in ans_ap or "Influence" in ans_ap
 
 
 def test_end_to_end_pipeline(tmp_path):
