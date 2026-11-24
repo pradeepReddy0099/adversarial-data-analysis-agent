@@ -181,6 +181,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Piantadosi-Byar-Green Qualitative Interaction Test: s_PBG = {simpsons.piantadosi_byar_green_stat:.2f} (p = {simpsons.piantadosi_byar_green_p:.3e}) {'[CONFIRMED LIKELIHOOD-RATIO QUALITATIVE REVERSAL]' if simpsons.is_pbg_reversal else '[UNIFORM MONOTONE SIGN DIRECTION]'}")
             if simpsons.layard_p_value is not None:
                 rationale["key_evidence"].append(f"Layard Kurtosis-Robust Variance Homogeneity: L = {simpsons.layard_stat_l:.2f} (p = {simpsons.layard_p_value:.3e}) {'[KURTOSIS-INVARIANT STRATUM SCALE HETEROGENEITY]' if simpsons.is_layard_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
+            if simpsons.pan_score_p is not None:
+                rationale["key_evidence"].append(f"Pan Directional Qualitative Score Test: S_Pan = {simpsons.pan_score_stat:.2f} (p = {simpsons.pan_score_p:.3e}) {'[CONFIRMED DIRECTIONAL QUALITATIVE REVERSAL]' if simpsons.is_pan_reversal else '[UNIFORM MONOTONE DIRECTION]'}")
+            if simpsons.samiuddin_p_value is not None:
+                rationale["key_evidence"].append(f"Samiuddin-Atiqullah Scale Homogeneity: F_Sam = {simpsons.samiuddin_stat_f:.2f} (p = {simpsons.samiuddin_p_value:.3e}) {'[KURTOSIS-ADJUSTED STRATUM SCALE HETEROGENEITY]' if simpsons.is_samiuddin_heterogeneous else '[HOMOGENEOUS STRATUM VARIANCES]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -314,6 +318,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum-Silber Hidden Bias Amplification: Delta_crit = {confounder.rosenbaum_silber_delta_crit:.2f} at Lambda = {confounder.rosenbaum_silber_lambda:.1f} {'[SENSITIVE TO MODEST OUTCOME CONVOLUTION]' if confounder.is_silber_sensitive else '[RESISTANT TO HIDDEN BIAS AMPLIFICATION]'}")
             if confounder.fogarty_gamma_crit is not None:
                 rationale["key_evidence"].append(f"Fogarty Studentized Sensitivity Bounds: Gamma_crit = {confounder.fogarty_gamma_crit:.2f} (t_sens = {confounder.fogarty_studentized_t:.2f}) {'[SENSITIVE TO STUDENTIZED UNOBSERVED CONVOLUTION]' if confounder.is_fogarty_sensitive else '[STUDENTIZED CONVOLUTION ROBUST]'}")
+            if confounder.rosenbaum_attr_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Attributable Sensitivity Bounds: Gamma_attr = {confounder.rosenbaum_attr_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_attr_p_upper:.3e}) {'[SENSITIVE TO ATTRIBUTABLE HIDDEN BIAS]' if confounder.is_rosenbaum_attr_sensitive else '[ATTRIBUTABLE EFFECT ROBUST]'}")
+            if confounder.zubizarreta_sbw_cv is not None:
+                rationale["key_evidence"].append(f"Zubizarreta Stable Balancing Weights Diagnostic: CV_w = {confounder.zubizarreta_sbw_cv:.2f} (Eff Sample = {confounder.zubizarreta_eff_sample_pct:.1f}%) {'[SEVERE BALANCING WEIGHT DISPERSION]' if confounder.is_zubizarreta_imbalanced else '[BALANCED COVARIATE WEIGHT STABILITY]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -448,6 +456,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Epps-Pulley Characteristic Function Test: T_EP = {stability.epps_pulley_stat:.3f} (p = {stability.epps_pulley_p:.3e}) {'[DEPARTURE FROM GAUSSIAN FOURIER GEOMETRY]' if stability.is_epps_pulley_non_normal else '[GAUSSIAN CHARACTERISTIC FUNCTION VALIDATED]'}")
             if stability.max_chatterjee_hadi_influence is not None:
                 rationale["key_evidence"].append(f"Chatterjee-Hadi Unified Influence Measure: Max H^2 = {stability.max_chatterjee_hadi_influence:.3f} ({stability.chatterjee_hadi_outlier_count} influential) {'[LEVERAGE-RESIDUAL COMPOUNDING OUTLIER]' if stability.is_chatterjee_hadi_influential else '[BOUNDED JOINT INFLUENCE]'}")
+            if stability.baringhaus_henze_p is not None:
+                rationale["key_evidence"].append(f"Baringhaus-Henze-Zirkler Characteristic Normality: T_BHZ = {stability.baringhaus_henze_stat:.3f} (p = {stability.baringhaus_henze_p:.3e}) {'[DEPARTURE FROM GAUSSIAN FOURIER GEOMETRY]' if stability.is_baringhaus_henze_non_normal else '[GAUSSIAN CHARACTERISTIC FUNCTION VALIDATED]'}")
+            if stability.max_gray_ling_influence is not None:
+                rationale["key_evidence"].append(f"Gray-Ling Leverage-Residual Influence: Max LR = {stability.max_gray_ling_influence:.3f} ({stability.gray_ling_outlier_count} influential) {'[LEVERAGE-RESIDUAL JOINT OUTLIER]' if stability.is_gray_ling_influential else '[BOUNDED JOINT INFLUENCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -763,6 +775,18 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Epps-Pulley Test: T_EP = {stability.epps_pulley_stat:.3f} (p = {stability.epps_pulley_p:.3e})")
             if stability.max_chatterjee_hadi_influence is not None:
                 rationale["key_evidence"].append(f"Chatterjee-Hadi Influence: Max H^2 = {stability.max_chatterjee_hadi_influence:.3f}")
+            if simpsons.pan_score_p is not None:
+                rationale["key_evidence"].append(f"Pan Qualitative Score Test: S_Pan = {simpsons.pan_score_stat:.2f} (p = {simpsons.pan_score_p:.3e})")
+            if simpsons.samiuddin_p_value is not None:
+                rationale["key_evidence"].append(f"Samiuddin-Atiqullah Scale Test: F_Sam = {simpsons.samiuddin_stat_f:.2f} (p = {simpsons.samiuddin_p_value:.3e})")
+            if confounder.rosenbaum_attr_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Attributable Sensitivity: Gamma_attr = {confounder.rosenbaum_attr_gamma_crit:.2f} (p = {confounder.rosenbaum_attr_p_upper:.3e})")
+            if confounder.zubizarreta_sbw_cv is not None:
+                rationale["key_evidence"].append(f"Zubizarreta SBW Balance: CV_w = {confounder.zubizarreta_sbw_cv:.2f} (Eff = {confounder.zubizarreta_eff_sample_pct:.1f}%)")
+            if stability.baringhaus_henze_p is not None:
+                rationale["key_evidence"].append(f"Baringhaus-Henze-Zirkler Test: T_BHZ = {stability.baringhaus_henze_stat:.3f} (p = {stability.baringhaus_henze_p:.3e})")
+            if stability.max_gray_ling_influence is not None:
+                rationale["key_evidence"].append(f"Gray-Ling Influence: Max LR = {stability.max_gray_ling_influence:.3f}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

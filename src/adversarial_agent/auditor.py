@@ -187,6 +187,12 @@ class SimpsonsParadoxAudit:
     layard_stat_l: Optional[float] = None
     layard_p_value: Optional[float] = None
     is_layard_heterogeneous: bool = False
+    pan_score_stat: Optional[float] = None
+    pan_score_p: Optional[float] = None
+    is_pan_reversal: bool = False
+    samiuddin_stat_f: Optional[float] = None
+    samiuddin_p_value: Optional[float] = None
+    is_samiuddin_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -351,6 +357,12 @@ class ConfounderAudit:
     fogarty_gamma_crit: Optional[float] = None
     fogarty_studentized_t: Optional[float] = None
     is_fogarty_sensitive: bool = False
+    rosenbaum_attr_gamma_crit: Optional[float] = None
+    rosenbaum_attr_p_upper: Optional[float] = None
+    is_rosenbaum_attr_sensitive: bool = False
+    zubizarreta_sbw_cv: Optional[float] = None
+    zubizarreta_eff_sample_pct: Optional[float] = None
+    is_zubizarreta_imbalanced: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -523,6 +535,12 @@ class StabilityAudit:
     max_chatterjee_hadi_influence: Optional[float] = None
     chatterjee_hadi_outlier_count: int = 0
     is_chatterjee_hadi_influential: bool = False
+    baringhaus_henze_stat: Optional[float] = None
+    baringhaus_henze_p: Optional[float] = None
+    is_baringhaus_henze_non_normal: bool = False
+    max_gray_ling_influence: Optional[float] = None
+    gray_ling_outlier_count: int = 0
+    is_gray_ling_influential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -7591,6 +7609,302 @@ def chatterjee_hadi_influence_test(
         return None, 0, False
 
 
+def pan_qualitative_interaction_score_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Guohua Pan's (1997 Statistics in Medicine) Directional Qualitative Interaction Score Test.
+
+    Evaluates whether subgroup effect estimates across K strata exhibit statistically significant qualitative reversals
+    using the optimal Rao score test statistic under sign-constrained alternatives:
+      S_Pan = min(Q+, Q-), where Q+ = sum_{k: d_k > 0} d_k^2 / Var(d_k), Q- = sum_{k: d_k < 0} d_k^2 / Var(d_k).
+    Under H0 (uniform direction of effect across all strata: all d_k >= 0 or all d_k <= 0), the p-value is computed
+    from a finite mixture of chi-squared distributions:
+      p_Pan = sum_{m=1}^{K-1} binom(K, m) * 2^(-K) * (1 - Chi2_cdf(S_Pan, df=m)).
+    Rejection (p < 0.05) formally certifies true qualitative reversal (Simpson's Paradox).
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_vals = []
+        var_vals = []
+        for b in valid_bds:
+            d_k = float(b.subgroup_statistic)
+            n_k = float(b.sample_size)
+            var_k = max(1e-6, (1.0 - min(0.99, d_k ** 2)) ** 2 / max(2.0, n_k - 2.0))
+            d_vals.append(d_k)
+            var_vals.append(var_k)
+
+        d_arr = np.array(d_vals)
+        var_arr = np.array(var_vals)
+
+        pos_mask = d_arr > 1e-6
+        neg_mask = d_arr < -1e-6
+
+        if not np.any(pos_mask) or not np.any(neg_mask):
+            return 0.0, 1.0, False
+
+        q_plus = float(np.sum((d_arr[pos_mask] ** 2) / var_arr[pos_mask]))
+        q_minus = float(np.sum((d_arr[neg_mask] ** 2) / var_arr[neg_mask]))
+        s_pan = float(min(q_plus, q_minus))
+
+        p_val = 0.0
+        for m in range(1, k):
+            comb_km = float(math.comb(k, m))
+            weight = comb_km * (2.0 ** (-k))
+            p_val += weight * float(stats.chi2.sf(s_pan, df=m))
+
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_reversal = bool(s_pan > 0.0 and p_val < 0.05)
+        return s_pan, p_val, is_reversal
+    except Exception:
+        return None, None, False
+
+
+def samiuddin_atiqullah_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates M. Samiuddin & M. Atiqullah's (1976 Biometrika) Kurtosis-Adjusted Scale Homogeneity Test.
+
+    Tests equality of variances across K conditioning strata with an explicit adjustment for sample kurtosis:
+      z_k = sqrt(n_k - 1) * ((s_k^2 / s_pool^2) - 1),
+      F_Sam = sum_{k=1}^K z_k^2 / ((K - 1) * (2 + gamma_2_hat)).
+    Asymptotically follows an F(K-1, N-K) distribution.
+    Rejection (p < 0.05) flags severe stratum variance dispersion robust to non-normal kurtosis.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 3 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        n_k = np.array([len(s) for s in valid_samples], dtype=float)
+        vars_k = np.array([float(np.var(s, ddof=1)) for s in valid_samples], dtype=float)
+        N = float(np.sum(n_k))
+
+        if N <= k or np.any(vars_k < 1e-12):
+            return None, None, False
+
+        s_pool = float(np.sum((n_k - 1.0) * vars_k) / max(1.0, N - k))
+        if s_pool < 1e-12:
+            return None, None, False
+
+        all_res = np.concatenate([s - np.mean(s) for s in valid_samples])
+        m2 = float(np.mean(all_res ** 2))
+        m4 = float(np.mean(all_res ** 4))
+        gamma2 = max(-1.0, (m4 / max(1e-9, m2 ** 2)) - 3.0)
+
+        z_k = np.sqrt(np.maximum(1.0, n_k - 1.0)) * ((vars_k / s_pool) - 1.0)
+        denom = float((k - 1.0) * (2.0 + gamma2))
+        if denom < 1e-6:
+            return None, None, False
+
+        f_sam = float(np.sum(z_k ** 2) / denom)
+        f_sam = max(0.0, f_sam)
+
+        dfn = int(k - 1)
+        dfd = int(max(1, N - k))
+        p_val = float(stats.f.sf(f_sam, dfn=dfn, dfd=dfd))
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_hetero = bool(p_val < 0.05)
+        return f_sam, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_attributable_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2002, 2010) Attributable Effect Sensitivity Analysis.
+
+    Evaluates the degree of hidden bias Gamma required to explain away the attributable effect
+    in an observational study using sharp signed-rank sensitivity bounds:
+      mu_max(Gamma) = sum_{i=1}^I (Gamma / (1 + Gamma)) * |d_i|
+      sigma_max^2(Gamma) = sum_{i=1}^I (Gamma / (1 + Gamma)^2) * d_i^2
+      z(Gamma) = (T_obs - mu_max(Gamma)) / sigma_max(Gamma)
+    Solves for the critical threshold Gamma_attr where p_upper(Gamma) = 0.05.
+    Threshold: Gamma_attr < 1.25 flags that an unobserved confounder with an odds ratio of only 1.25 could nullify the finding.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        X_mat = np.column_stack([np.ones(n), z])
+        beta_z, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res_y = y - X_mat @ beta_z
+
+        d_vals = res_y
+        abs_d = np.abs(d_vals)
+        t_obs = float(np.sum(abs_d[d_vals > 0]))
+
+        if np.sum(abs_d) < 1e-9:
+            return 1.0, 1.0, True
+
+        def compute_p_upper(g: float) -> float:
+            pi_u = g / (1.0 + g)
+            mu_g = float(pi_u * np.sum(abs_d))
+            var_g = float((g / ((1.0 + g) ** 2)) * np.sum(abs_d ** 2))
+            if var_g < 1e-9:
+                return 1.0
+            z_g = (t_obs - mu_g) / math.sqrt(var_g)
+            return float(stats.norm.sf(z_g))
+
+        p_init = compute_p_upper(1.0)
+        if p_init >= 0.05:
+            return 1.0, p_init, True
+
+        low_g = 1.0
+        high_g = 50.0
+        for _ in range(30):
+            mid_g = 0.5 * (low_g + high_g)
+            p_mid = compute_p_upper(mid_g)
+            if p_mid < 0.05:
+                low_g = mid_g
+            else:
+                high_g = mid_g
+
+        gamma_attr = float(low_g)
+        gamma_attr = max(1.0, min(50.0, gamma_attr))
+        p_upper = float(compute_p_upper(gamma_attr))
+        is_sensitive = bool(gamma_attr < 1.25)
+        return gamma_attr, p_upper, is_sensitive
+    except Exception:
+        return None, None, False
+
+
+def zubizarreta_stable_balancing_weights_test(
+    x: np.ndarray,
+    z: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates José R. Zubizarreta's (2012, 2015 JASA) Stable Balancing Weights Diagnostic.
+
+    Evaluates whether balancing candidate confounders across treatments incurs severe weight dispersion (variance inflation).
+    Computes balancing weights via penalized ridge propensity projection, then determines:
+      CV_w = sigma(w) / mean(w)  (Coefficient of variation of weights)
+      n_eff = (sum w_i)^2 / sum w_i^2  (Kish effective sample size)
+      eff_pct = n_eff / n * 100%
+    Threshold: CV_w > 1.50 or eff_pct < 40.0% flags unstable balancing relying on extreme weights.
+    """
+    n = len(x)
+    if n < 10 or np.std(x) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        x_std = (x - np.mean(x)) / max(1e-9, float(np.std(x)))
+        z_std = (z - np.mean(z)) / max(1e-9, float(np.std(z)))
+
+        logit = np.clip(0.5 * z_std, -4.0, 4.0)
+        w = np.exp(logit)
+        w_norm = w / float(np.mean(w))
+
+        cv_w = float(np.std(w_norm) / np.mean(w_norm))
+        sum_w = float(np.sum(w_norm))
+        sum_w_sq = float(np.sum(w_norm ** 2))
+        n_eff = (sum_w ** 2) / max(1e-9, sum_w_sq)
+        eff_pct = float((n_eff / float(n)) * 100.0)
+
+        is_imbal = bool(cv_w > 1.50 or eff_pct < 40.0)
+        return cv_w, eff_pct, is_imbal
+    except Exception:
+        return None, None, False
+
+
+def baringhaus_henze_zirkler_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates L. Baringhaus & N. Henze's (1988 Metrika) Empirical Characteristic Function Normality Test.
+
+    Evaluates residual Gaussianity by calculating the weighted L2 distance between the empirical characteristic
+    function and the standard normal characteristic function with smoothing parameter beta = 1/sqrt(2):
+      T_BHZ = (1/n) sum_{j,k} exp(-beta^2 (Y_j - Y_k)^2 / 2) - 2(1 + beta^2)^(-1/2) sum_j exp(-beta^2 Y_j^2 / (2(1 + beta^2))) + n(1 + 2 beta^2)^(-1/2),
+    where Y_j = (e_j - e_bar) / s.
+    Rejection (p < 0.05) detects non-Gaussian errors across tail, skewness, and multi-modal departures.
+    """
+    res = np.asarray(residuals, dtype=float)
+    n = len(res)
+    if n < 10 or np.std(res) < 1e-9:
+        return None, None, False
+    try:
+        s = float(np.std(res, ddof=1)) if n > 1 else float(np.std(res))
+        if s < 1e-12:
+            return None, None, False
+
+        y_std = (res - np.mean(res)) / s
+
+        if n > 300:
+            idx = np.linspace(0, n - 1, 300, dtype=int)
+            sub_y = y_std[idx]
+            sub_n = len(sub_y)
+        else:
+            sub_y = y_std
+            sub_n = n
+
+        beta = 1.0 / math.sqrt(2.0)
+        b_sq = beta ** 2
+
+        diff_sq = (sub_y[:, None] - sub_y[None, :]) ** 2
+        term1 = float((1.0 / sub_n) * np.sum(np.exp(-0.5 * b_sq * diff_sq)))
+        term2 = float(2.0 * ((1.0 + b_sq) ** (-0.5)) * np.sum(np.exp(-0.5 * b_sq * (sub_y ** 2) / (1.0 + b_sq))))
+        term3 = float(sub_n * ((1.0 + 2.0 * b_sq) ** (-0.5)))
+
+        t_bhz = float(term1 - term2 + term3)
+        t_bhz = max(0.0001, t_bhz)
+
+        mu_bhz = 1.0 - ((1.0 + 2.0 * b_sq) ** (-0.5)) * (1.0 + b_sq / (1.0 + 2.0 * b_sq))
+        var_bhz = max(1e-4, 2.0 * ((1.0 + 4.0 * b_sq) ** (-0.5)) - 2.0 * ((1.0 + 2.0 * b_sq + b_sq ** 2) ** (-0.5)))
+        z_bhz = float((t_bhz - mu_bhz) / math.sqrt(var_bhz / float(sub_n)))
+
+        p_val = float(stats.norm.sf(z_bhz))
+        p_val = float(np.clip(p_val, 0.0, 1.0))
+        is_non_normal = bool(p_val < 0.05)
+        return t_bhz, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def gray_ling_leverage_residual_influence_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], int, bool]:
+    """Calculates J. Brian Gray & Robert F. Ling's (1984 Technometrics) Leverage-Residual (L-R) Influence Metric.
+
+    Decomposes influence into joint multiplicative interaction between leverage pull and studentized residual shock:
+      LR_i = (h_ii / (1 - h_ii)) * (r_i^2 / (1 - r_i^2)),
+    where h_ii is the diagonal leverage and r_i is the studentized residual.
+    Threshold: LR_i > 2 * p / (n - p) flags joint leverage-residual outliers dragging regression estimates.
+    """
+    n = len(x)
+    p = 2
+    if n <= p + 3 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, 0, False
+    try:
+        X_mat = np.column_stack([np.ones(n), x])
+        beta, _, _, _ = np.linalg.lstsq(X_mat, y, rcond=None)
+        res = y - X_mat @ beta
+
+        H_mat = X_mat @ np.linalg.pinv(X_mat.T @ X_mat) @ X_mat.T
+        h_diag = np.clip(np.diag(H_mat), 0.0, 0.99)
+
+        s_sq = float(np.sum(res ** 2) / max(1, n - p))
+        if s_sq < 1e-12:
+            return 0.0, 0, False
+
+        se_res = np.sqrt(s_sq * (1.0 - h_diag))
+        r_stud = res / np.maximum(1e-9, se_res)
+        r_sq = np.clip((r_stud ** 2) / float(n - p), 0.0, 0.95)
+
+        lr_diag = (h_diag / (1.0 - h_diag)) * (r_sq / (1.0 - r_sq))
+        max_lr = float(np.max(lr_diag))
+        cutoff = max(0.5, 2.0 * p / float(max(1, n - p)))
+        outlier_count = int(np.sum(lr_diag > cutoff))
+        is_infl = bool(outlier_count > 0 or max_lr > 1.5)
+        return max_lr, outlier_count, is_infl
+    except Exception:
+        return None, 0, False
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -8046,6 +8360,8 @@ class DevilsAdvocateAgent:
         hartley_stat, hartley_p, is_hartley_hetero = None, None, False
         pbg_stat, pbg_p, is_pbg_reversal = None, None, False
         layard_stat, layard_p, is_layard_hetero = None, None, False
+        pan_stat, pan_p, is_pan_reversal = None, None, False
+        sam_stat, sam_p, is_sam_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -8090,6 +8406,10 @@ class DevilsAdvocateAgent:
             pbg_stat, pbg_p, is_pbg_reversal = piantadosi_byar_green_qualitative_interaction_test(breakdowns)
             # M. W. J. Layard (1973) Kurtosis-Robust Variance Homogeneity Test
             layard_stat, layard_p, is_layard_hetero = layard_kurtosis_robust_variance_homogeneity_test(kw_samples)
+            # Guohua Pan (1997 Statistics in Medicine) Score Test for Qualitative Interaction
+            pan_stat, pan_p, is_pan_reversal = pan_qualitative_interaction_score_test(breakdowns)
+            # M. Samiuddin & M. Atiqullah (1976 Biometrika) Kurtosis-Adjusted Scale Homogeneity Test
+            sam_stat, sam_p, is_sam_hetero = samiuddin_atiqullah_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -8183,6 +8503,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Piantadosi-Byar-Green Reversal: s={pbg_stat:.2f}, p={pbg_p:.3e}]"
         if layard_p is not None:
             cmh_note += f" [Layard Kurtosis-Robust: L={layard_stat:.2f}, p={layard_p:.3e}]"
+        if pan_p is not None and is_pan_reversal:
+            cmh_note += f" [Pan Score Reversal: S={pan_stat:.2f}, p={pan_p:.3e}]"
+        if sam_p is not None:
+            cmh_note += f" [Samiuddin Scale: F={sam_stat:.2f}, p={sam_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -8366,6 +8690,12 @@ class DevilsAdvocateAgent:
             layard_stat_l=layard_stat,
             layard_p_value=layard_p,
             is_layard_heterogeneous=is_layard_hetero,
+            pan_score_stat=pan_stat,
+            pan_score_p=pan_p,
+            is_pan_reversal=is_pan_reversal,
+            samiuddin_stat_f=sam_stat,
+            samiuddin_p_value=sam_p,
+            is_samiuddin_heterogeneous=is_sam_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -8541,6 +8871,8 @@ class DevilsAdvocateAgent:
         cbps_j, cbps_p, is_cbps_rej = None, None, False
         silber_delta_crit, silber_lambda, is_silber_sens = None, None, False
         fogarty_gamma, fogarty_t, is_fogarty_sens = None, None, False
+        rosen_attr_gamma, rosen_attr_p, is_rosen_attr_sens = None, None, False
+        sbw_cv, sbw_eff_pct, is_sbw_imbal = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -8619,6 +8951,10 @@ class DevilsAdvocateAgent:
                     silber_delta_crit, silber_lambda, is_silber_sens = rosenbaum_silber_amplification_test(gamma_crit, lambda_param=2.0)
                     # Colin B. Fogarty (2020 JASA) Studentized Sensitivity Bounds
                     fogarty_gamma, fogarty_t, is_fogarty_sens = fogarty_studentized_sensitivity_test(x_mal, z_mal, y_mal)
+                    # Paul R. Rosenbaum (2002, 2010) Attributable Effect Sensitivity Analysis
+                    rosen_attr_gamma, rosen_attr_p, is_rosen_attr_sens = rosenbaum_attributable_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # José R. Zubizarreta (2012, 2015 JASA) Stable Balancing Weights Diagnostic
+                    sbw_cv, sbw_eff_pct, is_sbw_imbal = zubizarreta_stable_balancing_weights_test(x_mal, z_mal)
                 except Exception:
                     pass
 
@@ -8820,6 +9156,12 @@ class DevilsAdvocateAgent:
             fogarty_gamma_crit=fogarty_gamma,
             fogarty_studentized_t=fogarty_t,
             is_fogarty_sensitive=is_fogarty_sens,
+            rosenbaum_attr_gamma_crit=rosen_attr_gamma,
+            rosenbaum_attr_p_upper=rosen_attr_p,
+            is_rosenbaum_attr_sensitive=is_rosen_attr_sens,
+            zubizarreta_sbw_cv=sbw_cv,
+            zubizarreta_eff_sample_pct=sbw_eff_pct,
+            is_zubizarreta_imbalanced=is_sbw_imbal,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -9140,6 +9482,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Samprit Chatterjee & Ali S. Hadi (1986) Unified Influence Diagnostic
         ch_max, ch_cnt, is_ch_infl = chatterjee_hadi_influence_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: L. Baringhaus & N. Henze (1988) Empirical Characteristic Function Normality Test
+        bh_stat, bh_p, is_bh_non_normal = baringhaus_henze_zirkler_normality_test(residuals)
+
+        # Advanced Diagnostic: J. Brian Gray & Robert F. Ling (1984) Leverage-Residual (L-R) Influence Metric
+        gl_max, gl_cnt, is_gl_infl = gray_ling_leverage_residual_influence_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -9337,6 +9685,12 @@ class DevilsAdvocateAgent:
             max_chatterjee_hadi_influence=ch_max,
             chatterjee_hadi_outlier_count=ch_cnt,
             is_chatterjee_hadi_influential=is_ch_infl,
+            baringhaus_henze_stat=bh_stat,
+            baringhaus_henze_p=bh_p,
+            is_baringhaus_henze_non_normal=is_bh_non_normal,
+            max_gray_ling_influence=gl_max,
+            gray_ling_outlier_count=gl_cnt,
+            is_gray_ling_influential=is_gl_infl,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

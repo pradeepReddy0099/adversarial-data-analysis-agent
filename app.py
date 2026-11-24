@@ -336,6 +336,12 @@ with col_right:
                         if simpsons.get("layard_p_value") is not None:
                             layard_flag = " ⚠️ Kurtosis-Robust Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_layard_heterogeneous") else " (Homogeneous Stratum Variances)"
                             st.markdown(f"**Layard Kurtosis-Robust Variance Test:** L = `{simpsons.get('layard_stat_l', 0.0):.2f}` (p = `{simpsons.get('layard_p_value', 0.0):.3e}`){layard_flag}")
+                        if simpsons.get("pan_score_p") is not None:
+                            pan_flag = " ⚠️ Qualitative Reversal Proven (p < 0.05)" if simpsons.get("is_pan_reversal") else " (Uniform Direction / Monotone)"
+                            st.markdown(f"**Pan Directional Qualitative Score Test:** S_Pan = `{simpsons.get('pan_score_stat', 0.0):.2f}` (p = `{simpsons.get('pan_score_p', 0.0):.3e}`){pan_flag}")
+                        if simpsons.get("samiuddin_p_value") is not None:
+                            sam_flag = " ⚠️ Kurtosis-Adjusted Stratum Variance Heterogeneity (p < 0.05)" if simpsons.get("is_samiuddin_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Samiuddin-Atiqullah Scale Homogeneity:** F_Sam = `{simpsons.get('samiuddin_stat_f', 0.0):.2f}` (p = `{simpsons.get('samiuddin_p_value', 0.0):.3e}`){sam_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -460,6 +466,12 @@ with col_right:
                         if conf_aud.get("fogarty_gamma_crit") is not None:
                             fogarty_flag = " ⚠️ Sensitive to Studentized Confounding (Γ_crit < 1.30)" if conf_aud.get("is_fogarty_sensitive") else " (Studentized Robust, Γ_crit ≥ 1.30)"
                             st.markdown(f"**Fogarty Studentized Sensitivity Bounds:** Γ_crit = `{conf_aud.get('fogarty_gamma_crit', 0.0):.2f}` (t_sens = `{conf_aud.get('fogarty_studentized_t', 0.0):.2f}`){fogarty_flag}")
+                        if conf_aud.get("rosenbaum_attr_gamma_crit") is not None:
+                            attr_flag = " ⚠️ Fragile to Attributable Hidden Bias (Γ_attr < 1.25)" if conf_aud.get("is_rosenbaum_attr_sensitive") else " (Robust Attributable Effect, Γ_attr ≥ 1.25)"
+                            st.markdown(f"**Rosenbaum Attributable Sensitivity:** Γ_attr = `{conf_aud.get('rosenbaum_attr_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_attr_p_upper', 0.0):.3e}`){attr_flag}")
+                        if conf_aud.get("zubizarreta_sbw_cv") is not None:
+                            sbw_flag = " ⚠️ Severe Balancing Weight Dispersion (CV > 1.50)" if conf_aud.get("is_zubizarreta_imbalanced") else " (Balanced Covariate Weight Stability)"
+                            st.markdown(f"**Zubizarreta Stable Balancing Weights:** CV_w = `{conf_aud.get('zubizarreta_sbw_cv', 0.0):.2f}` (Eff Sample = `{conf_aud.get('zubizarreta_eff_sample_pct', 0.0):.1f}%`){sbw_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -638,6 +650,12 @@ with col_right:
                         if stab_aud.get("max_chatterjee_hadi_influence") is not None:
                             ch_flag = f" ⚠️ Compounding Leverage-Residual Outlier ({stab_aud.get('chatterjee_hadi_outlier_count', 0)} influential)" if stab_aud.get("is_chatterjee_hadi_influential") else " (Bounded Joint Influence)"
                             st.markdown(f"**Chatterjee-Hadi Unified Influence Measure:** Max H^2 = `{stab_aud.get('max_chatterjee_hadi_influence', 0.0):.3f}`{ch_flag}")
+                        if stab_aud.get("baringhaus_henze_p") is not None:
+                            bh_flag = f" ⚠️ Significant Fourier Non-Normality (p = {stab_aud['baringhaus_henze_p']:.3e})" if stab_aud.get("is_baringhaus_henze_non_normal") else " (Gaussian Characteristic Function Validated)"
+                            st.markdown(f"**Baringhaus-Henze-Zirkler Normality Test:** T_BHZ = `{stab_aud.get('baringhaus_henze_stat', 0.0):.3f}` (p = `{stab_aud['baringhaus_henze_p']:.3e}`){bh_flag}")
+                        if stab_aud.get("max_gray_ling_influence") is not None:
+                            gl_flag = f" ⚠️ Joint Leverage-Residual Outlier ({stab_aud.get('gray_ling_outlier_count', 0)} influential)" if stab_aud.get("is_gray_ling_influential") else " (Bounded Joint Influence)"
+                            st.markdown(f"**Gray-Ling Leverage-Residual Influence:** Max LR = `{stab_aud.get('max_gray_ling_influence', 0.0):.3f}`{gl_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1087,6 +1105,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Epps and Pulley empirical characteristic function normality test"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Epps and Pulley empirical characteristic function normality test", findings, dataset_name=dataset_name)
 
+            sug_col64, sug_col65, sug_col66 = st.columns(3)
+            with sug_col64:
+                if st.button("🎯 Pan Qualitative Score", key="sug_pan"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Guohua Pan directional qualitative interaction score test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Guohua Pan directional qualitative interaction score test", findings, dataset_name=dataset_name)
+            with sug_col65:
+                if st.button("⚖️ Zubizarreta Stable Weights", key="sug_sbw"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Jose Zubizarreta stable balancing weights diagnostic"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Jose Zubizarreta stable balancing weights diagnostic", findings, dataset_name=dataset_name)
+            with sug_col66:
+                if st.button("🔬 Baringhaus-Henze-Zirkler Normality", key="sug_bhz"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Baringhaus Henze and Zirkler empirical characteristic function normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Baringhaus Henze and Zirkler empirical characteristic function normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1304,6 +1339,18 @@ with col_right:
                     "Epps_Pulley_p": f"{stab.get('epps_pulley_p', 0.0):.3e}" if stab.get("epps_pulley_p") is not None else "N/A",
                     "Chatterjee_Hadi_Max_H2": f"{stab.get('max_chatterjee_hadi_influence', 0.0):.3f}" if stab.get("max_chatterjee_hadi_influence") is not None else "N/A",
                     "Chatterjee_Hadi_Outlier_Count": f"{stab.get('chatterjee_hadi_outlier_count', 0)}" if stab.get("chatterjee_hadi_outlier_count") is not None else "N/A",
+                    "Pan_Score_Stat": f"{simp.get('pan_score_stat', 0.0):.2f}" if simp.get("pan_score_stat") is not None else "N/A",
+                    "Pan_Score_p": f"{simp.get('pan_score_p', 0.0):.3e}" if simp.get("pan_score_p") is not None else "N/A",
+                    "Samiuddin_Stat_F": f"{simp.get('samiuddin_stat_f', 0.0):.2f}" if simp.get("samiuddin_stat_f") is not None else "N/A",
+                    "Samiuddin_p_value": f"{simp.get('samiuddin_p_value', 0.0):.3e}" if simp.get("samiuddin_p_value") is not None else "N/A",
+                    "Rosenbaum_Attr_Gamma_Crit": f"{conf.get('rosenbaum_attr_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_attr_gamma_crit") is not None else "N/A",
+                    "Rosenbaum_Attr_p_upper": f"{conf.get('rosenbaum_attr_p_upper', 0.0):.3e}" if conf.get("rosenbaum_attr_p_upper") is not None else "N/A",
+                    "Zubizarreta_SBW_CV": f"{conf.get('zubizarreta_sbw_cv', 0.0):.2f}" if conf.get("zubizarreta_sbw_cv") is not None else "N/A",
+                    "Zubizarreta_Eff_Sample_Pct": f"{conf.get('zubizarreta_eff_sample_pct', 0.0):.1f}%" if conf.get("zubizarreta_eff_sample_pct") is not None else "N/A",
+                    "Baringhaus_Henze_Stat": f"{stab.get('baringhaus_henze_stat', 0.0):.3f}" if stab.get("baringhaus_henze_stat") is not None else "N/A",
+                    "Baringhaus_Henze_p": f"{stab.get('baringhaus_henze_p', 0.0):.3e}" if stab.get("baringhaus_henze_p") is not None else "N/A",
+                    "Gray_Ling_Max_Influence": f"{stab.get('max_gray_ling_influence', 0.0):.3f}" if stab.get("max_gray_ling_influence") is not None else "N/A",
+                    "Gray_Ling_Outlier_Count": f"{stab.get('gray_ling_outlier_count', 0)}" if stab.get("gray_ling_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

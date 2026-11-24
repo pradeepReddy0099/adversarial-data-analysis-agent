@@ -169,6 +169,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.piantadosi_byar_green_p is not None
     assert audit.simpsons_audit.layard_stat_l is not None
     assert audit.simpsons_audit.layard_p_value is not None
+    # Verify Pan directional qualitative interaction score test and Samiuddin-Atiqullah scale homogeneity test
+    assert audit.simpsons_audit.pan_score_stat is not None
+    assert audit.simpsons_audit.pan_score_p is not None
+    assert audit.simpsons_audit.samiuddin_stat_f is not None
+    assert audit.simpsons_audit.samiuddin_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -350,6 +355,13 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.fogarty_gamma_crit is not None
         assert audit_coffee.confounder_audit.fogarty_gamma_crit >= 1.0
         assert audit_coffee.confounder_audit.fogarty_studentized_t is not None
+        # Check Rosenbaum attributable sensitivity and Zubizarreta stable balancing weights diagnostic
+        assert audit_coffee.confounder_audit.rosenbaum_attr_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_attr_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.rosenbaum_attr_p_upper is not None
+        assert audit_coffee.confounder_audit.zubizarreta_sbw_cv is not None
+        assert audit_coffee.confounder_audit.zubizarreta_sbw_cv >= 0.0
+        assert audit_coffee.confounder_audit.zubizarreta_eff_sample_pct is not None
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -515,6 +527,11 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.epps_pulley_p is not None
     assert audit.stability_audit.max_chatterjee_hadi_influence is not None
     assert audit.stability_audit.max_chatterjee_hadi_influence >= 0.0
+    # Check Baringhaus-Henze-Zirkler characteristic normality and Gray-Ling leverage-residual influence metric
+    assert audit.stability_audit.baringhaus_henze_stat is not None
+    assert audit.stability_audit.baringhaus_henze_p is not None
+    assert audit.stability_audit.max_gray_ling_influence is not None
+    assert audit.stability_audit.max_gray_ling_influence >= 0.0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1004,6 +1021,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_ch = narrator.answer_query("Explain Samprit Chatterjee and Ali Hadi unified influence measure", findings)
     assert "Chatterjee" in ans_ch or "Hadi" in ans_ch or "Influence" in ans_ch or "Measure" in ans_ch
+
+    ans_pan = narrator.answer_query("Explain Guohua Pan directional qualitative interaction score test", findings)
+    assert "Pan" in ans_pan or "Qualitative" in ans_pan or "Score" in ans_pan or "Directional" in ans_pan
+
+    ans_sam = narrator.answer_query("Explain Samiuddin and Atiqullah kurtosis adjusted scale homogeneity test", findings)
+    assert "Samiuddin" in ans_sam or "Atiqullah" in ans_sam or "Kurtosis" in ans_sam or "Scale" in ans_sam
+
+    ans_attr = narrator.answer_query("Explain Paul Rosenbaum attributable effect sensitivity analysis", findings)
+    assert "Rosenbaum" in ans_attr or "Attributable" in ans_attr or "Sensitivity" in ans_attr or "Bias" in ans_attr
+
+    ans_sbw = narrator.answer_query("Explain Jose Zubizarreta stable balancing weights diagnostic", findings)
+    assert "Zubizarreta" in ans_sbw or "Stable" in ans_sbw or "Weights" in ans_sbw or "Balancing" in ans_sbw
+
+    ans_bhz = narrator.answer_query("Explain Baringhaus Henze and Zirkler empirical characteristic function normality test", findings)
+    assert "Baringhaus" in ans_bhz or "Henze" in ans_bhz or "Zirkler" in ans_bhz or "Characteristic" in ans_bhz or "Fourier" in ans_bhz
+
+    ans_gl = narrator.answer_query("Explain Brian Gray and Robert Ling leverage residual joint influence metric", findings)
+    assert "Gray" in ans_gl or "Ling" in ans_gl or "Leverage" in ans_gl or "Influence" in ans_gl
 
 
 def test_end_to_end_pipeline(tmp_path):
