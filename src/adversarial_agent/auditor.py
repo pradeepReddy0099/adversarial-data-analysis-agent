@@ -229,6 +229,12 @@ class SimpsonsParadoxAudit:
     conover_johnson_stat_t: Optional[float] = None
     conover_johnson_p_value: Optional[float] = None
     is_conover_johnson_heterogeneous: bool = False
+    hirotsu_stat_s: Optional[float] = None
+    hirotsu_p_value: Optional[float] = None
+    is_hirotsu_heterogeneous: bool = False
+    bartlett_kendall_stat_t: Optional[float] = None
+    bartlett_kendall_p_value: Optional[float] = None
+    is_bartlett_kendall_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -437,6 +443,12 @@ class ConfounderAudit:
     imai_king_stuart_disparity: Optional[float] = None
     imai_king_stuart_balance_smd: Optional[float] = None
     is_imai_king_stuart_fragile: bool = False
+    rosenbaum_adaptive_gamma_crit: Optional[float] = None
+    rosenbaum_adaptive_p_upper: Optional[float] = None
+    is_rosenbaum_adaptive_fragile: bool = False
+    abadie_imbens_disparity: Optional[float] = None
+    abadie_imbens_balance_smd: Optional[float] = None
+    is_abadie_imbens_fragile: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -654,6 +666,13 @@ class StabilityAudit:
     andrews_sine_discrepancy: Optional[float] = None
     andrews_sine_outlier_count: int = 0
     is_andrews_sine_distorted: bool = False
+    martinez_iglewicz_stat_i: Optional[float] = None
+    martinez_iglewicz_p_value: Optional[float] = None
+    is_martinez_iglewicz_non_normal: bool = False
+    beaton_tukey_slope: Optional[float] = None
+    beaton_tukey_discrepancy: Optional[float] = None
+    beaton_tukey_outlier_count: int = 0
+    is_beaton_tukey_distorted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -10136,6 +10155,389 @@ def andrews_sine_estimator_test(
         return None, None, 0, False
 
 
+def hirotsu_cumulative_chi_squared_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Chihiro Hirotsu's (1986 Biometrika, 1997) Cumulative Chi-Squared Statistic for Ordered Alternative Subgroup Effects (S*_HIR).
+
+    Tests whether subgroup stratum-specific treatment effects exhibit systematic ordered monotonic departures
+    against the null of homogeneous effects H0: theta_1 = ... = theta_K:
+      Cumulative partial sums: C_m = sum_{k=1}^m w_k * (d_k - d_bar), m = 1, ..., K-1.
+      Cumulative chi-squared statistic:
+        S*_HIR = sum_{m=1}^{K-1} [ C_m^2 / (W_m * (1 - W_m / W)) ] / s_0^2.
+      Under H0, S*_HIR approximates a chi-squared distribution with K-1 degrees of freedom.
+      p_HIR = 1.0 - stats.chi2.cdf(S*_HIR, K - 1).
+    Rejection (p_HIR < 0.05 with S*_HIR > 1.645) proves systematic ordered subgroup effect heterogeneity.
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_k = np.array([float(b.subgroup_statistic) for b in valid_bds], dtype=float)
+        w_k = np.array([float(max(4, b.sample_size)) for b in valid_bds], dtype=float)
+        total_w = float(np.sum(w_k))
+        if total_w <= 0:
+            return None, None, False
+
+        d_bar = float(np.sum(w_k * d_k) / total_w)
+        devs = d_k - d_bar
+        s0_sq = float(np.sum(w_k * (devs**2)) / total_w)
+        if s0_sq < 1e-9:
+            return 0.0, 1.0, False
+
+        cum_c = 0.0
+        cum_w = 0.0
+        s_star = 0.0
+        for m in range(k - 1):
+            cum_w += w_k[m]
+            cum_c += w_k[m] * devs[m]
+            frac = cum_w / total_w
+            var_cm = cum_w * (1.0 - frac)
+            if var_cm > 1e-9:
+                s_star += (cum_c**2) / (var_cm * s0_sq)
+
+        s_star = float(s_star)
+        df = max(1, k - 1)
+        p_hir = float(1.0 - stats.chi2.cdf(s_star, df))
+        p_hir = max(0.0, min(1.0, p_hir))
+        is_hetero = bool(p_hir < 0.05 and s_star > 1.645)
+        return s_star, p_hir, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def bartlett_kendall_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates M. S. Bartlett & D. G. Kendall's (1946 JRSS-B) Log-Variance Transformation ANOVA Homogeneity Test (T_BK).
+
+    Tests equality of variances across K subgroup strata by exploiting the asymptotic variance
+    of log sample variances: Var(ln(s_k^2)) ~ 2 / (n_k - 1):
+      Log-variances: z_k = ln(s_k^2).
+      Weights: w_k = (n_k - 1) / 2.
+      Pooled weighted mean: z_bar = sum(w_k * z_k) / sum(w_k).
+      Test statistic:
+        T_BK = sum_{k=1}^K w_k * (z_k - z_bar)^2 ~ Chi2(K - 1).
+        p_BK = 1.0 - stats.chi2.cdf(T_BK, K - 1).
+    Rejection (p_BK < 0.05 with T_BK > chi2_crit) confirms genuine stratum scale dispersion heterogeneity.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.var(s, ddof=1) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        z_k = []
+        w_k = []
+        for s in valid_samples:
+            n_sub = len(s)
+            v_sub = float(np.var(s, ddof=1))
+            z_k.append(np.log(v_sub))
+            w_k.append((n_sub - 1.0) / 2.0)
+
+        z_arr = np.array(z_k, dtype=float)
+        w_arr = np.array(w_k, dtype=float)
+        sum_w = float(np.sum(w_arr))
+        if sum_w <= 0:
+            return None, None, False
+
+        z_bar = float(np.sum(w_arr * z_arr) / sum_w)
+        t_bk = float(np.sum(w_arr * (z_arr - z_bar)**2))
+        df = max(1, k - 1)
+        p_bk = float(1.0 - stats.chi2.cdf(t_bk, df))
+        p_bk = max(0.0, min(1.0, p_bk))
+        is_hetero = bool(p_bk < 0.05 and t_bk > float(stats.chi2.ppf(0.95, df)))
+        return t_bk, p_bk, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_adaptive_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2011 Biometrics) Adaptive Rank U-Statistic Sensitivity Bounds (Gamma_ADAP).
+
+    Applies Rosenbaum's adaptive power-rank scoring function a_m = sign(D_m) * (rank(|D_m|) / M)^2 on matched
+    pairs between treated (X > med(X)) and control (X <= med(X)) cohorts:
+      Under sensitivity parameter Gamma >= 1:
+        Worst-case expectation: E_Gamma = sum_{m=1}^M |a_m| * (Gamma - 1) / (Gamma + 1).
+        Variance: Var_Gamma = sum_{m=1}^M a_m^2 * 4 * Gamma / (Gamma + 1)^2.
+        Standardized score: Z_ADAP(Gamma) = (T_ADAP - E_Gamma) / sqrt(Var_Gamma).
+        Upper tail p-value: p_upper(Gamma) = 1 - Phi(Z_ADAP(Gamma)).
+    Solves for critical sensitivity threshold Gamma_ADAP where p_upper(Gamma) >= 0.05.
+    Rejection (is_fragile = True if Gamma_ADAP < 1.25) confirms vulnerability to hidden unmeasured bias under adaptive design sensitivity.
+    """
+    n = len(x)
+    if n < 10:
+        return None, None, False
+    try:
+        med_x = np.median(x)
+        t_mask = (x > med_x)
+        c_mask = ~t_mask
+        if np.sum(t_mask) < 4 or np.sum(c_mask) < 4:
+            return None, None, False
+
+        z_t = z[t_mask]
+        y_t = y[t_mask]
+        z_c = z[c_mask]
+        y_c = y[c_mask]
+
+        used_c = np.zeros(len(z_c), dtype=bool)
+        diffs = []
+        for i in range(len(z_t)):
+            avail_c = np.where(~used_c)[0]
+            if len(avail_c) == 0:
+                break
+            best_j = avail_c[np.argmin(np.abs(z_c[avail_c] - z_t[i]))]
+            used_c[best_j] = True
+            diffs.append(y_t[i] - y_c[best_j])
+
+        m = len(diffs)
+        if m < 4:
+            return None, None, False
+
+        d_arr = np.array(diffs, dtype=float)
+        non_zero = np.abs(d_arr) > 1e-9
+        if np.sum(non_zero) < 4:
+            return 1.0, 1.0, True
+
+        d_valid = d_arr[non_zero]
+        m_valid = len(d_valid)
+        ranks = stats.rankdata(np.abs(d_valid))
+        scores = np.sign(d_valid) * ((ranks / float(m_valid)) ** 2)
+        t_stat = float(np.sum(scores))
+        abs_scores = np.abs(scores)
+        sq_scores = scores ** 2
+
+        def calc_p_upper(gamma_val: float) -> float:
+            e_g = float(np.sum(abs_scores * ((gamma_val - 1.0) / (gamma_val + 1.0))))
+            var_g = float(np.sum(sq_scores * (4.0 * gamma_val / (gamma_val + 1.0)**2)))
+            if var_g <= 1e-12:
+                return 1.0
+            z_score = (t_stat - e_g) / np.sqrt(var_g)
+            return float(1.0 - stats.norm.cdf(z_score))
+
+        p_1 = calc_p_upper(1.0)
+        if p_1 >= 0.05:
+            return 1.0, p_1, True
+
+        low, high = 1.0, 10.0
+        gamma_crit_res = 10.0
+        for _ in range(25):
+            mid = 0.5 * (low + high)
+            p_mid = calc_p_upper(mid)
+            if p_mid >= 0.05:
+                gamma_crit_res = mid
+                high = mid
+            else:
+                low = mid
+
+        p_final = calc_p_upper(gamma_crit_res)
+        is_fragile = bool(gamma_crit_res < 1.25)
+        return float(gamma_crit_res), float(p_final), is_fragile
+    except Exception:
+        return None, None, False
+
+
+def abadie_imbens_disparity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Alberto Abadie & Guido W. Imbens' (2006 Econometrica) Bias-Corrected Matching Disparity Ratio (delta_AIM, B_AIM).
+
+    Evaluates nearest-neighbor matching on continuous confounder Z and tests sensitivity to covariate discrepancy bias:
+      Matching pairs: m = 1, ..., M between treated (X > med(X)) and control (X <= med(X)).
+      Normalized matching discrepancy: B_AIM = mean(|Z_{T,m} - Z_{C,m}|) / std(Z).
+      Naive matched effect: tau_match = mean(Y_{T,m} - Y_{C,m}).
+      Control regression adjustment: beta_C from OLS of Y_C on Z_C.
+      Bias-corrected matched effect: tau_BC = mean[(Y_{T,m} - Y_{C,m}) - beta_C * (Z_{T,m} - Z_{C,m})].
+      Disparity ratio: delta_AIM = |tau_match - tau_BC| / max(1e-6, |tau_match|).
+    Rejection (is_fragile = True if B_AIM > 0.25 or delta_AIM > 0.20 or sign reversal)
+    diagnoses substantial matching discrepancy and residual covariate confounding.
+    """
+    n = len(x)
+    if n < 10:
+        return None, None, False
+    try:
+        med_x = np.median(x)
+        t_mask = (x > med_x)
+        c_mask = ~t_mask
+        if np.sum(t_mask) < 4 or np.sum(c_mask) < 4:
+            return None, None, False
+
+        z_t = z[t_mask]
+        y_t = y[t_mask]
+        z_c = z[c_mask]
+        y_c = y[c_mask]
+
+        std_z = max(1e-6, float(np.std(z)))
+        used_c = np.zeros(len(z_c), dtype=bool)
+        z_diffs = []
+        y_diffs = []
+
+        for i in range(len(z_t)):
+            avail_c = np.where(~used_c)[0]
+            if len(avail_c) == 0:
+                break
+            best_j = avail_c[np.argmin(np.abs(z_c[avail_c] - z_t[i]))]
+            used_c[best_j] = True
+            z_diffs.append(z_t[i] - z_c[best_j])
+            y_diffs.append(y_t[i] - y_c[best_j])
+
+        m = len(y_diffs)
+        if m < 4:
+            return None, None, False
+
+        z_diff_arr = np.array(z_diffs, dtype=float)
+        y_diff_arr = np.array(y_diffs, dtype=float)
+
+        b_aim = float(np.mean(np.abs(z_diff_arr)) / std_z)
+        tau_match = float(np.mean(y_diff_arr))
+
+        if len(z_c) >= 3 and np.std(z_c) > 1e-9:
+            slope_c, _, _, _, _ = stats.linregress(z_c, y_c)
+            tau_bc = float(np.mean(y_diff_arr - slope_c * z_diff_arr))
+        else:
+            tau_bc = tau_match
+
+        denom = max(1e-6, abs(tau_match))
+        delta_aim = float(abs(tau_match - tau_bc) / denom)
+        has_reversal = bool(np.sign(tau_match) != np.sign(tau_bc) and abs(tau_bc) > 1e-4 and abs(tau_match) > 1e-4)
+
+        is_fragile = bool(b_aim > 0.25 or delta_aim > 0.20 or has_reversal)
+        return delta_aim, b_aim, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def martinez_iglewicz_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Jorge F. Martinez & Boris Iglewicz's (1981 Biometrika) Studentized Jackknife Scale Normality Test (I_MI).
+
+    Evaluates departure from Gaussian normality by comparing the heavy-tail-resistant biweight scale estimator
+    S_bw to the sample standard deviation S_sample:
+      Biweight scale: S_bw with tuning parameter c = 9.0 * MAD:
+        u_i = (e_i - med(e)) / (9 * MAD).
+        S_bw = sqrt(n) * sqrt(sum_{|u|<1} (e_i - med)^2 * (1 - u_i^2)^4) / |sum_{|u|<1} (1 - u_i^2)*(1 - 5*u_i^2)|.
+      Test ratio: I_MI = S_bw / S_sample.
+      Under normality, E[I_MI] ~ 1.0, Var(I_MI) ~ 1.06 / n.
+      Standardized score:
+        Z_MI = (I_MI - 1.0) / sqrt(1.06 / n) ~ N(0, 1).
+        p_MI = 2 * (1 - Phi(|Z_MI|)).
+    Rejection (p_MI < 0.05 with |Z_MI| > 1.96) proves heavy-tailed non-Gaussian residual distortion.
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        e = np.asarray(residuals, dtype=float)
+        med_e = np.median(e)
+        mad = float(np.median(np.abs(e - med_e)))
+        s_sample = float(np.std(e, ddof=1))
+        if s_sample < 1e-12 or mad < 1e-12:
+            return 1.0, 1.0, False
+
+        c = 9.0 * mad
+        u = (e - med_e) / c
+        in_mask = np.abs(u) < 1.0
+        if np.sum(in_mask) < 4:
+            return None, None, False
+
+        u_in = u[in_mask]
+        e_diff = e[in_mask] - med_e
+        num = np.sqrt(n) * np.sqrt(np.sum((e_diff**2) * ((1.0 - u_in**2)**4)))
+        denom = np.abs(np.sum((1.0 - u_in**2) * (1.0 - 5.0 * (u_in**2))))
+        if denom < 1e-12:
+            return None, None, False
+
+        s_bw = float(num / denom)
+        i_mi = float(s_bw / s_sample)
+
+        se_i = np.sqrt(1.06 / n)
+        z_mi = float((i_mi - 1.0) / se_i)
+        p_mi = float(2.0 * (1.0 - stats.norm.cdf(abs(z_mi))))
+        p_mi = max(0.0, min(1.0, p_mi))
+        is_non_norm = bool(p_mi < 0.05 and abs(z_mi) > 1.96)
+        return i_mi, p_mi, is_non_norm
+    except Exception:
+        return None, None, False
+
+
+def beaton_tukey_bisquare_estimator_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], int, bool]:
+    """Calculates Albert E. Beaton & John W. Tukey's (1974 Technometrics) Bisquare Biweight Redescending M-Estimator Robust Slope Discrepancy (Delta_BIS).
+
+    Applies Tukey's bisquare (biweight) redescending weight function with tuning constant c = 4.685:
+      For standardized residuals u_i = |r_i| / sigma_0 (sigma_0 = 1.4826 * MAD):
+        w(u) = (1 - (u / c)^2)^2 for |u| <= c;
+        w(u) = 0.0 for |u| > c (completely eliminates extreme leverage points).
+      Iteratively reweighted least squares (IRLS) converges to robust slope beta_BIS.
+      Discrepancy: Delta_BIS = |beta_OLS - beta_BIS| / max(1e-6, |beta_OLS|).
+      Redescended outlier count: n_out = sum(|u_i| > c).
+    Rejection (Delta_BIS > 0.25 or (n_out >= 2 and Delta_BIS > 0.15)) diagnoses severe vulnerability to gross leverage outliers.
+    """
+    n = len(x)
+    if n < 8 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, 0, False
+    try:
+        slope_ols, intercept_ols, _, _, _ = stats.linregress(x, y)
+        r_ols = y - (slope_ols * x + intercept_ols)
+        mad = float(np.median(np.abs(r_ols - np.median(r_ols))))
+        sigma_0 = max(1e-6, 1.4826 * mad)
+
+        c = 4.685
+        b_curr = slope_ols
+        a_curr = intercept_ols
+
+        for _ in range(25):
+            r_curr = y - (b_curr * x + a_curr)
+            u = np.abs(r_curr) / sigma_0
+            w = np.zeros_like(u)
+            in_bounds = (u <= c)
+            w[in_bounds] = (1.0 - (u[in_bounds] / c)**2)**2
+
+            if np.sum(w) < 4:
+                break
+
+            w_x = w * x
+            w_y = w * y
+            sum_w = np.sum(w)
+            mean_x_w = np.sum(w_x) / sum_w
+            mean_y_w = np.sum(w_y) / sum_w
+            denom = np.sum(w * (x - mean_x_w)**2)
+            if denom < 1e-12:
+                break
+            b_next = np.sum(w * (x - mean_x_w) * (y - mean_y_w)) / denom
+            a_next = mean_y_w - b_next * mean_x_w
+
+            if abs(b_next - b_curr) < 1e-5:
+                b_curr = b_next
+                a_curr = a_next
+                break
+            b_curr = b_next
+            a_curr = a_next
+
+        beta_bis = float(b_curr)
+        denom_ols = max(1e-6, abs(slope_ols))
+        delta_bis = float(abs(slope_ols - beta_bis) / denom_ols)
+
+        final_r = y - (beta_bis * x + a_curr)
+        final_u = np.abs(final_r) / sigma_0
+        outlier_count = int(np.sum(final_u > c))
+
+        is_distorted = bool(delta_bis > 0.25 or (outlier_count >= 2 and delta_bis > 0.15))
+        return beta_bis, delta_bis, outlier_count, is_distorted
+    except Exception:
+        return None, None, 0, False
+
+
 
 
 
@@ -10608,6 +11010,8 @@ class DevilsAdvocateAgent:
         lim_loh_w, lim_loh_p, is_lim_loh_hetero = None, None, False
         verbeke_s, verbeke_p, is_verbeke_hetero = None, None, False
         conover_t, conover_p, is_conover_hetero = None, None, False
+        hirotsu_s, hirotsu_p, is_hirotsu_hetero = None, None, False
+        bk_t, bk_p, is_bk_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -10680,6 +11084,10 @@ class DevilsAdvocateAgent:
             verbeke_s, verbeke_p, is_verbeke_hetero = verbeke_molenberghs_score_test(breakdowns)
             # W. J. Conover, Mark E. Johnson & Myrle M. Johnson (1981 Technometrics) Squared Ranks Test
             conover_t, conover_p, is_conover_hetero = conover_johnson_variance_homogeneity_test(kw_samples)
+            # Chihiro Hirotsu (1986 Biometrika) Cumulative Chi-Squared Statistic
+            hirotsu_s, hirotsu_p, is_hirotsu_hetero = hirotsu_cumulative_chi_squared_test(breakdowns)
+            # M. S. Bartlett & D. G. Kendall (1946 JRSS-B) Log-Variance Transformation ANOVA Homogeneity Test
+            bk_t, bk_p, is_bk_hetero = bartlett_kendall_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -11022,6 +11430,12 @@ class DevilsAdvocateAgent:
             conover_johnson_stat_t=conover_t,
             conover_johnson_p_value=conover_p,
             is_conover_johnson_heterogeneous=is_conover_hetero,
+            hirotsu_stat_s=hirotsu_s,
+            hirotsu_p_value=hirotsu_p,
+            is_hirotsu_heterogeneous=is_hirotsu_hetero,
+            bartlett_kendall_stat_t=bk_t,
+            bartlett_kendall_p_value=bk_p,
+            is_bartlett_kendall_heterogeneous=is_bk_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -11211,6 +11625,8 @@ class DevilsAdvocateAgent:
         ai_disp, ai_tau_max, ai_tau_min, is_ai_hetero = None, None, None, False
         rosen_hub_gamma, rosen_hub_p, is_rosen_hub_frag = None, None, False
         iks_disp, iks_smd, is_iks_frag = None, None, False
+        rosen_adap_gamma, rosen_adap_p, is_rosen_adap_frag = None, None, False
+        aim_disp, aim_smd, is_aim_frag = None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -11317,6 +11733,10 @@ class DevilsAdvocateAgent:
                     rosen_hub_gamma, rosen_hub_p, is_rosen_hub_frag = rosenbaum_huber_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # Kosuke Imai, Gary King & Elizabeth A. Stuart (2008 JRSS-A) Balance & Disparity Ratio
                     iks_disp, iks_smd, is_iks_frag = imai_king_stuart_disparity_test(x_mal, z_mal, y_mal)
+                    # Paul R. Rosenbaum (2011 Biometrics) Adaptive Rank U-Statistic Sensitivity Bounds
+                    rosen_adap_gamma, rosen_adap_p, is_rosen_adap_frag = rosenbaum_adaptive_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Alberto Abadie & Guido W. Imbens (2006 Econometrica) Bias-Corrected Matching Disparity Ratio
+                    aim_disp, aim_smd, is_aim_frag = abadie_imbens_disparity_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -11562,6 +11982,12 @@ class DevilsAdvocateAgent:
             imai_king_stuart_disparity=iks_disp,
             imai_king_stuart_balance_smd=iks_smd,
             is_imai_king_stuart_fragile=is_iks_frag,
+            rosenbaum_adaptive_gamma_crit=rosen_adap_gamma,
+            rosenbaum_adaptive_p_upper=rosen_adap_p,
+            is_rosenbaum_adaptive_fragile=is_rosen_adap_frag,
+            abadie_imbens_disparity=aim_disp,
+            abadie_imbens_balance_smd=aim_smd,
+            is_abadie_imbens_fragile=is_aim_frag,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -11924,6 +12350,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: David F. Andrews (1974 Technometrics) Sine Wave Redescending M-Estimator
         and_slope, and_disc, and_cnt, is_and_dist = andrews_sine_estimator_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: Jorge F. Martinez & Boris Iglewicz (1981 Biometrika) Studentized Jackknife Scale Normality Test
+        mi_stat, mi_p, is_mi_non_norm = martinez_iglewicz_normality_test(residuals)
+
+        # Advanced Diagnostic: Albert E. Beaton & John W. Tukey (1974 Technometrics) Bisquare Biweight Redescending M-Estimator
+        bis_slope, bis_disc, bis_cnt, is_bis_dist = beaton_tukey_bisquare_estimator_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -12166,6 +12598,13 @@ class DevilsAdvocateAgent:
             andrews_sine_discrepancy=and_disc,
             andrews_sine_outlier_count=and_cnt,
             is_andrews_sine_distorted=is_and_dist,
+            martinez_iglewicz_stat_i=mi_stat,
+            martinez_iglewicz_p_value=mi_p,
+            is_martinez_iglewicz_non_normal=is_mi_non_norm,
+            beaton_tukey_slope=bis_slope,
+            beaton_tukey_discrepancy=bis_disc,
+            beaton_tukey_outlier_count=bis_cnt,
+            is_beaton_tukey_distorted=is_bis_dist,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

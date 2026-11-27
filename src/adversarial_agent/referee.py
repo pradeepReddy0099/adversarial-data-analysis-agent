@@ -209,6 +209,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Verbeke-Molenberghs Score Test: S_VM = {simpsons.verbeke_molenberghs_stat_s:.2f} (p = {simpsons.verbeke_molenberghs_p_value:.3e}) {'[AUTHENTIC SUBGROUP RANDOM EFFECT VARIANCE PROVEN]' if simpsons.is_verbeke_heterogeneous else '[HOMOGENEOUS SUBGROUP SLOPE]'}")
             if simpsons.conover_johnson_p_value is not None:
                 rationale["key_evidence"].append(f"Conover-Johnson Squared Ranks Test: T_CJJ = {simpsons.conover_johnson_stat_t:.2f} (p = {simpsons.conover_johnson_p_value:.3e}) {'[SCALE DISPERSION HETEROGENEITY PROVEN]' if simpsons.is_conover_johnson_heterogeneous else '[HOMOGENEOUS SUBGROUP SCALE]'}")
+            if simpsons.hirotsu_p_value is not None:
+                rationale["key_evidence"].append(f"Hirotsu Cumulative Chi-Squared Test: S*_HIR = {simpsons.hirotsu_stat_s:.2f} (p = {simpsons.hirotsu_p_value:.3e}) {'[ORDERED SUBGROUP TREND HETEROGENEITY PROVEN]' if simpsons.is_hirotsu_heterogeneous else '[CONCORDANT SUBGROUP EFFECTS]'}")
+            if simpsons.bartlett_kendall_p_value is not None:
+                rationale["key_evidence"].append(f"Bartlett-Kendall Log-Variance Test: T_BK = {simpsons.bartlett_kendall_stat_t:.2f} (p = {simpsons.bartlett_kendall_p_value:.3e}) {'[STRATUM LOG-SCALE HETEROGENEITY PROVEN]' if simpsons.is_bartlett_kendall_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -370,6 +374,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Dynamic Huber M-Statistic: Gamma_HUB = {confounder.rosenbaum_huber_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_huber_p_upper:.3e}) {'[FRAGILE TO M-ESTIMATOR HIDDEN BIAS]' if confounder.is_rosenbaum_huber_fragile else '[ROBUST HUBER M-SENSITIVITY]'}")
             if confounder.imai_king_stuart_disparity is not None:
                 rationale["key_evidence"].append(f"Imai-King-Stuart Balance & Disparity: Delta_IKS = {confounder.imai_king_stuart_disparity:.1%}, SMD_peak = {confounder.imai_king_stuart_balance_smd:.3f} {'[SEVERE OBSERVATIONAL QUINTILE DISPARITY]' if confounder.is_imai_king_stuart_fragile else '[BALANCED OBSERVATIONAL QUINTILES]'}")
+            if confounder.rosenbaum_adaptive_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Adaptive Rank Sensitivity: Gamma_ADAP = {confounder.rosenbaum_adaptive_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_adaptive_p_upper:.3e}) {'[FRAGILE TO ADAPTIVE DESIGN HIDDEN BIAS]' if confounder.is_rosenbaum_adaptive_fragile else '[ROBUST ADAPTIVE DESIGN SENSITIVITY]'}")
+            if confounder.abadie_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Abadie-Imbens Bias-Corrected Disparity: Delta_AIM = {confounder.abadie_imbens_disparity:.1%}, B_AIM = {confounder.abadie_imbens_balance_smd:.3f} {'[SEVERE MATCHING DISCREPANCY & RESIDUAL BIAS]' if confounder.is_abadie_imbens_fragile else '[BALANCED BIAS-CORRECTED MATCHING]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -532,6 +540,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Mudholkar-Lin MSL Normality: Z_MSL = {stability.mudholkar_lin_stat_z:.3f} (p = {stability.mudholkar_lin_p_value:.3e}) {'[NON-GAUSSIAN RESIDUAL DISTORTION]' if stability.is_mudholkar_lin_non_normal else '[GAUSSIAN CUBE-ROOT RESIDUALS]'}")
             if stability.andrews_sine_discrepancy is not None:
                 rationale["key_evidence"].append(f"Andrews Sine Wave Estimator: Delta_AND = {stability.andrews_sine_discrepancy:.1%} ({stability.andrews_sine_outlier_count} redescended outliers) {'[GROSS LEVERAGE WAVE DISTORTION]' if stability.is_andrews_sine_distorted else '[ROBUST SINE WAVE CONCORDANCE]'}")
+            if stability.martinez_iglewicz_p_value is not None:
+                rationale["key_evidence"].append(f"Martinez-Iglewicz Jackknife Normality: I_MI = {stability.martinez_iglewicz_stat_i:.3f} (p = {stability.martinez_iglewicz_p_value:.3e}) {'[HEAVY-TAILED RESIDUAL SCALE DISTORTION]' if stability.is_martinez_iglewicz_non_normal else '[NORMAL JACKKNIFE SCALE RATIO]'}")
+            if stability.beaton_tukey_discrepancy is not None:
+                rationale["key_evidence"].append(f"Beaton-Tukey Bisquare Estimator: Delta_BIS = {stability.beaton_tukey_discrepancy:.1%} ({stability.beaton_tukey_outlier_count} redescended outliers) {'[GROSS LEVERAGE BIWEIGHT DISTORTION]' if stability.is_beaton_tukey_distorted else '[ROBUST BIWEIGHT CONCORDANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -915,6 +927,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Verbeke-Molenberghs Score: S_VM = {simpsons.verbeke_molenberghs_stat_s:.2f} (p = {simpsons.verbeke_molenberghs_p_value:.3e})")
             if simpsons.conover_johnson_p_value is not None:
                 rationale["key_evidence"].append(f"Conover-Johnson Squared Ranks: T_CJJ = {simpsons.conover_johnson_stat_t:.2f} (p = {simpsons.conover_johnson_p_value:.3e})")
+            if simpsons.hirotsu_p_value is not None:
+                rationale["key_evidence"].append(f"Hirotsu Cumulative Chi-Squared: S*_HIR = {simpsons.hirotsu_stat_s:.2f} (p = {simpsons.hirotsu_p_value:.3e})")
+            if simpsons.bartlett_kendall_p_value is not None:
+                rationale["key_evidence"].append(f"Bartlett-Kendall Log-Variance: T_BK = {simpsons.bartlett_kendall_stat_t:.2f} (p = {simpsons.bartlett_kendall_p_value:.3e})")
             if confounder.rosenbaum_cm_gamma_crit is not None:
                 rationale["key_evidence"].append(f"Rosenbaum Cross-Match Sensitivity: Gamma_CM = {confounder.rosenbaum_cm_gamma_crit:.2f}")
             if confounder.athey_imbens_disparity is not None:
@@ -923,6 +939,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Huber Sensitivity: Gamma_HUB = {confounder.rosenbaum_huber_gamma_crit:.2f}")
             if confounder.imai_king_stuart_disparity is not None:
                 rationale["key_evidence"].append(f"Imai-King-Stuart Disparity: Delta_IKS = {confounder.imai_king_stuart_disparity:.1%}")
+            if confounder.rosenbaum_adaptive_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Adaptive Rank Sensitivity: Gamma_ADAP = {confounder.rosenbaum_adaptive_gamma_crit:.2f}")
+            if confounder.abadie_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Abadie-Imbens Disparity: Delta_AIM = {confounder.abadie_imbens_disparity:.1%}")
             if stability.spiegelhalter_p_value is not None:
                 rationale["key_evidence"].append(f"Spiegelhalter Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e})")
             if stability.hampel_slope_discrepancy is not None:
@@ -931,6 +951,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Mudholkar-Lin Normality: Z_MSL = {stability.mudholkar_lin_stat_z:.3f} (p = {stability.mudholkar_lin_p_value:.3e})")
             if stability.andrews_sine_discrepancy is not None:
                 rationale["key_evidence"].append(f"Andrews Sine Wave Discrepancy: Delta_AND = {stability.andrews_sine_discrepancy:.1%}")
+            if stability.martinez_iglewicz_p_value is not None:
+                rationale["key_evidence"].append(f"Martinez-Iglewicz Normality: I_MI = {stability.martinez_iglewicz_stat_i:.3f} (p = {stability.martinez_iglewicz_p_value:.3e})")
+            if stability.beaton_tukey_discrepancy is not None:
+                rationale["key_evidence"].append(f"Beaton-Tukey Bisquare Discrepancy: Delta_BIS = {stability.beaton_tukey_discrepancy:.1%}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

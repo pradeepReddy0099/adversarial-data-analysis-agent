@@ -204,6 +204,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.verbeke_molenberghs_p_value is not None
     assert audit.simpsons_audit.conover_johnson_stat_t is not None
     assert audit.simpsons_audit.conover_johnson_p_value is not None
+    # Verify Hirotsu cumulative chi-squared and Bartlett-Kendall log-variance test
+    assert audit.simpsons_audit.hirotsu_stat_s is not None
+    assert audit.simpsons_audit.hirotsu_p_value is not None
+    assert audit.simpsons_audit.bartlett_kendall_stat_t is not None
+    assert audit.simpsons_audit.bartlett_kendall_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -428,6 +433,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.rosenbaum_huber_gamma_crit >= 1.0
         assert audit_coffee.confounder_audit.imai_king_stuart_disparity is not None
         assert audit_coffee.confounder_audit.imai_king_stuart_disparity >= 0.0
+        # Check Rosenbaum adaptive rank U-statistic and Abadie-Imbens matching disparity
+        assert audit_coffee.confounder_audit.rosenbaum_adaptive_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_adaptive_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.abadie_imbens_disparity is not None
+        assert audit_coffee.confounder_audit.abadie_imbens_disparity >= 0.0
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -632,6 +642,13 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.andrews_sine_discrepancy is not None
     assert audit.stability_audit.andrews_sine_discrepancy >= 0.0
     assert audit.stability_audit.andrews_sine_outlier_count >= 0
+    # Check Martinez-Iglewicz jackknife scale normality and Beaton-Tukey bisquare M-estimator
+    assert audit.stability_audit.martinez_iglewicz_stat_i is not None
+    assert audit.stability_audit.martinez_iglewicz_p_value is not None
+    assert audit.stability_audit.beaton_tukey_slope is not None
+    assert audit.stability_audit.beaton_tukey_discrepancy is not None
+    assert audit.stability_audit.beaton_tukey_discrepancy >= 0.0
+    assert audit.stability_audit.beaton_tukey_outlier_count >= 0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1265,6 +1282,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_and = narrator.answer_query("Explain David Andrews sine wave redescending M-estimator", findings)
     assert "Andrews" in ans_and or "Sine" in ans_and or "Wave" in ans_and or "Estimator" in ans_and
+
+    ans_hir = narrator.answer_query("Explain Chihiro Hirotsu cumulative chi-squared statistic for ordered alternatives", findings)
+    assert "Hirotsu" in ans_hir or "Cumulative" in ans_hir or "Chi" in ans_hir or "Ordered" in ans_hir
+
+    ans_bk = narrator.answer_query("Explain Bartlett and Kendall log-variance transformation ANOVA homogeneity test", findings)
+    assert "Bartlett" in ans_bk or "Kendall" in ans_bk or "Log-Variance" in ans_bk or "Variance" in ans_bk
+
+    ans_adap = narrator.answer_query("Explain Paul Rosenbaum adaptive rank U-statistic sensitivity bounds", findings)
+    assert "Rosenbaum" in ans_adap or "Adaptive" in ans_adap or "Rank" in ans_adap or "Sensitivity" in ans_adap
+
+    ans_aim = narrator.answer_query("Explain Alberto Abadie and Guido Imbens bias-corrected matching disparity", findings)
+    assert "Abadie" in ans_aim or "Imbens" in ans_aim or "Matching" in ans_aim or "Disparity" in ans_aim or "Bias" in ans_aim
+
+    ans_mi = narrator.answer_query("Explain Jorge Martinez and Boris Iglewicz studentized jackknife scale normality test", findings)
+    assert "Martinez" in ans_mi or "Iglewicz" in ans_mi or "Jackknife" in ans_mi or "Normality" in ans_mi or "Scale" in ans_mi
+
+    ans_bis = narrator.answer_query("Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator", findings)
+    assert "Beaton" in ans_bis or "Tukey" in ans_bis or "Bisquare" in ans_bis or "Biweight" in ans_bis or "Estimator" in ans_bis
 
 
 def test_end_to_end_pipeline(tmp_path):

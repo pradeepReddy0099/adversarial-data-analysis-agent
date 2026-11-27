@@ -378,6 +378,12 @@ with col_right:
                         if simpsons.get("conover_johnson_p_value") is not None:
                             cj_flag = " ⚠️ Scale Dispersion Heterogeneity (p < 0.05)" if simpsons.get("is_conover_johnson_heterogeneous") else " (Homogeneous Subgroup Scale)"
                             st.markdown(f"**Conover-Johnson Squared Ranks Test:** T_CJJ = `{simpsons.get('conover_johnson_stat_t', 0.0):.2f}` (p = `{simpsons.get('conover_johnson_p_value', 0.0):.3e}`){cj_flag}")
+                        if simpsons.get("hirotsu_p_value") is not None:
+                            hir_flag = " ⚠️ Ordered Subgroup Trend Heterogeneity (p < 0.05)" if simpsons.get("is_hirotsu_heterogeneous") else " (Concordant Subgroup Trends)"
+                            st.markdown(f"**Hirotsu Cumulative Chi-Squared Test:** S*_HIR = `{simpsons.get('hirotsu_stat_s', 0.0):.2f}` (p = `{simpsons.get('hirotsu_p_value', 0.0):.3e}`){hir_flag}")
+                        if simpsons.get("bartlett_kendall_p_value") is not None:
+                            bk_flag = " ⚠️ Stratum Log-Scale Heterogeneity (p < 0.05)" if simpsons.get("is_bartlett_kendall_heterogeneous") else " (Homogeneous Stratum Dispersion)"
+                            st.markdown(f"**Bartlett-Kendall Log-Variance Test:** T_BK = `{simpsons.get('bartlett_kendall_stat_t', 0.0):.2f}` (p = `{simpsons.get('bartlett_kendall_p_value', 0.0):.3e}`){bk_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -544,6 +550,12 @@ with col_right:
                         if conf_aud.get("imai_king_stuart_disparity") is not None:
                             iks_flag = f" ⚠️ Severe Quintile Disparity (Δ_IKS = {conf_aud.get('imai_king_stuart_disparity', 0.0):.1%})" if conf_aud.get("is_imai_king_stuart_fragile") else " (Balanced Confounder Quintiles)"
                             st.markdown(f"**Imai-King-Stuart Balance & Disparity:** Δ_IKS = `{conf_aud.get('imai_king_stuart_disparity', 0.0):.1%}` (SMD_peak = `{conf_aud.get('imai_king_stuart_balance_smd', 0.0):.3f}`){iks_flag}")
+                        if conf_aud.get("rosenbaum_adaptive_gamma_crit") is not None:
+                            adap_flag = " ⚠️ Sensitive to Adaptive Rank Hidden Bias (Γ_ADAP < 1.25)" if conf_aud.get("is_rosenbaum_adaptive_fragile") else " (Robust Adaptive Rank Sensitivity, Γ_ADAP ≥ 1.25)"
+                            st.markdown(f"**Rosenbaum Adaptive Rank Sensitivity:** Γ_ADAP = `{conf_aud.get('rosenbaum_adaptive_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_adaptive_p_upper', 0.0):.3e}`){adap_flag}")
+                        if conf_aud.get("abadie_imbens_disparity") is not None:
+                            aim_flag = f" ⚠️ Severe Matching Discrepancy & Bias (Δ_AIM = {conf_aud.get('abadie_imbens_disparity', 0.0):.1%})" if conf_aud.get("is_abadie_imbens_fragile") else " (Balanced Bias-Corrected Matching)"
+                            st.markdown(f"**Abadie-Imbens Bias-Corrected Disparity:** Δ_AIM = `{conf_aud.get('abadie_imbens_disparity', 0.0):.1%}` (B_AIM = `{conf_aud.get('abadie_imbens_balance_smd', 0.0):.3f}`){aim_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -764,6 +776,12 @@ with col_right:
                         if stab_aud.get("andrews_sine_discrepancy") is not None:
                             and_flag = f" ⚠️ Wave Redescending Outlier Distortion ({stab_aud.get('andrews_sine_outlier_count', 0)} gross outliers)" if stab_aud.get("is_andrews_sine_distorted") else " (Robust Sine Wave Concordance)"
                             st.markdown(f"**Andrews Sine Wave Estimator:** Δ_AND = `{stab_aud.get('andrews_sine_discrepancy', 0.0):.1%}`{and_flag}")
+                        if stab_aud.get("martinez_iglewicz_p_value") is not None:
+                            mi_flag = f" ⚠️ Heavy-Tailed Scale Ratio Departure (p = {stab_aud['martinez_iglewicz_p_value']:.3e})" if stab_aud.get("is_martinez_iglewicz_non_normal") else " (Gaussian Jackknife Scale Concordance)"
+                            st.markdown(f"**Martinez-Iglewicz Jackknife Normality:** I_MI = `{stab_aud.get('martinez_iglewicz_stat_i', 0.0):.3f}` (p = `{stab_aud['martinez_iglewicz_p_value']:.3e}`){mi_flag}")
+                        if stab_aud.get("beaton_tukey_discrepancy") is not None:
+                            bis_flag = f" ⚠️ Bisquare Outlier Distortion ({stab_aud.get('beaton_tukey_outlier_count', 0)} gross outliers)" if stab_aud.get("is_beaton_tukey_distorted") else " (Robust Bisquare Concordance)"
+                            st.markdown(f"**Beaton-Tukey Bisquare Estimator:** Δ_BIS = `{stab_aud.get('beaton_tukey_discrepancy', 0.0):.1%}`{bis_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1332,6 +1350,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain David Andrews sine wave redescending M-estimator"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain David Andrews sine wave redescending M-estimator", findings, dataset_name=dataset_name)
 
+            sug_col85, sug_col86, sug_col87 = st.columns(3)
+            with sug_col85:
+                if st.button("📈 Hirotsu Cumulative Chi", key="sug_hir"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Chihiro Hirotsu cumulative chi-squared statistic for ordered alternatives"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Chihiro Hirotsu cumulative chi-squared statistic for ordered alternatives", findings, dataset_name=dataset_name)
+            with sug_col86:
+                if st.button("🛡️ Rosenbaum Adaptive Rank", key="sug_adap"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum adaptive rank U-statistic sensitivity bounds"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum adaptive rank U-statistic sensitivity bounds", findings, dataset_name=dataset_name)
+            with sug_col87:
+                if st.button("🎯 Beaton-Tukey Bisquare", key="sug_bis"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1622,6 +1657,17 @@ with col_right:
                     "Mudholkar_Lin_p": f"{stab.get('mudholkar_lin_p_value', 0.0):.3e}" if stab.get("mudholkar_lin_p_value") is not None else "N/A",
                     "Andrews_Sine_Discrepancy": f"{stab.get('andrews_sine_discrepancy', 0.0):.1%}" if stab.get("andrews_sine_discrepancy") is not None else "N/A",
                     "Andrews_Sine_Outliers": f"{stab.get('andrews_sine_outlier_count', 0)}" if stab.get("andrews_sine_outlier_count") is not None else "N/A",
+                    "Hirotsu_S_Star": f"{simp.get('hirotsu_stat_s', 0.0):.2f}" if simp.get("hirotsu_stat_s") is not None else "N/A",
+                    "Hirotsu_p": f"{simp.get('hirotsu_p_value', 0.0):.3e}" if simp.get("hirotsu_p_value") is not None else "N/A",
+                    "Bartlett_Kendall_T": f"{simp.get('bartlett_kendall_stat_t', 0.0):.2f}" if simp.get("bartlett_kendall_stat_t") is not None else "N/A",
+                    "Bartlett_Kendall_p": f"{simp.get('bartlett_kendall_p_value', 0.0):.3e}" if simp.get("bartlett_kendall_p_value") is not None else "N/A",
+                    "Rosenbaum_Adaptive_Gamma": f"{conf.get('rosenbaum_adaptive_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_adaptive_gamma_crit") is not None else "N/A",
+                    "Abadie_Imbens_Disparity": f"{conf.get('abadie_imbens_disparity', 0.0):.1%}" if conf.get("abadie_imbens_disparity") is not None else "N/A",
+                    "Abadie_Imbens_SMD": f"{conf.get('abadie_imbens_balance_smd', 0.0):.3f}" if conf.get("abadie_imbens_balance_smd") is not None else "N/A",
+                    "Martinez_Iglewicz_I": f"{stab.get('martinez_iglewicz_stat_i', 0.0):.3f}" if stab.get("martinez_iglewicz_stat_i") is not None else "N/A",
+                    "Martinez_Iglewicz_p": f"{stab.get('martinez_iglewicz_p_value', 0.0):.3e}" if stab.get("martinez_iglewicz_p_value") is not None else "N/A",
+                    "Beaton_Tukey_Discrepancy": f"{stab.get('beaton_tukey_discrepancy', 0.0):.1%}" if stab.get("beaton_tukey_discrepancy") is not None else "N/A",
+                    "Beaton_Tukey_Outliers": f"{stab.get('beaton_tukey_outlier_count', 0)}" if stab.get("beaton_tukey_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
