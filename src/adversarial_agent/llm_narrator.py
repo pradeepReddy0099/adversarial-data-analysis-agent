@@ -744,7 +744,7 @@ class LLMNarrator:
                 )
             return "BCa bootstrap intervals provide second-order accurate confidence limits correcting for parameter skew and non-normality."
 
-        if (any(w in q_lower for w in ["rosenbaum", "hidden bias", "gamma bound"]) or " gamma " in f" {q_lower} " or "γ" in q_lower) and not any(k in q_lower for k in ["design", "amplification", "attributable", "silber", "tilde"]):
+        if (any(w in q_lower for w in ["rosenbaum", "hidden bias", "gamma bound"]) or " gamma " in f" {q_lower} " or "γ" in q_lower) and not any(k in q_lower for k in ["design", "amplification", "attributable", "silber", "tilde", "cross", "dual", "differential", "evidence", "huber", "dynamic"]):
             rosen_items = []
             for f in findings:
                 conf = f.get("audit", {}).get("confounder_audit", {})
@@ -1745,7 +1745,7 @@ class LLMNarrator:
                 )
             return "The Ansari-Bradley test assesses non-parametric equality of spread across strata using rank sums of absolute deviations from the median."
 
-        if any(w in q_lower for w in ["rubin", "rubin's", "rubin b", "rubin r", "covariate balance diagnostics", "propensity balance"]):
+        if any(w in q_lower for w in ["rubin", "rubin's", "rubin b", "rubin r", "covariate balance diagnostics", "propensity balance"]) and not any(k in q_lower for k in ["imai", "king", "stuart", "delta_iks", "b_iks"]):
             rub_items = []
             for f in findings:
                 conf = f.get("audit", {}).get("confounder_audit", {})
@@ -3760,6 +3760,120 @@ class LLMNarrator:
                     + "\n".join(ham_items)
                 )
             return "Hampel's redescending M-estimator test evaluates whether regression slopes are distorted by severe outliers using redescending influence curves."
+
+        if any(w in q_lower for w in ["verbeke", "molenberghs", "s_vm", "score test random", "random slope score"]):
+            vm_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                s_stat = simp.get("verbeke_molenberghs_stat_s")
+                p_val = simp.get("verbeke_molenberghs_p_value")
+                is_het = simp.get("is_verbeke_heterogeneous", False)
+                if s_stat is not None and p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Random Subgroup Effect Variance Proven (p = {p_val:.3e} < 0.05)" if is_het else " (Homogeneous Subgroup Slopes)"
+                    vm_items.append(f"• **{v_name}**: Verbeke-Molenberghs S_VM = {s_stat:.2f} (p = {p_val:.3e}){flag}")
+            if vm_items:
+                return (
+                    "**Geert Verbeke & Geert Molenberghs' (2000, 2003 Stat. Sci.) Score Test for Subgroup Random Effect Variance (S_VM):**\n"
+                    "Tests whether subgroup effect estimates demonstrate authentic random variance beyond sampling noise:\n"
+                    + "\n".join(vm_items)
+                )
+            return "Verbeke & Molenberghs' score test evaluates whether subgroup treatment effects exhibit genuine random variance beyond sampling error."
+
+        if any(w in q_lower for w in ["conover-johnson", "conover johnson", "t_cjj", "squared ranks variance"]):
+            cj_items = []
+            for f in findings:
+                simp = f.get("audit", {}).get("simpsons_audit", {})
+                t_stat = simp.get("conover_johnson_stat_t")
+                p_val = simp.get("conover_johnson_p_value")
+                is_het = simp.get("is_conover_johnson_heterogeneous", False)
+                if t_stat is not None and p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Scale Dispersion Heterogeneity (p = {p_val:.3e} < 0.05)" if is_het else " (Homogeneous Subgroup Scale)"
+                    cj_items.append(f"• **{v_name}**: Conover-Johnson T_CJJ = {t_stat:.2f} (p = {p_val:.3e}){flag}")
+            if cj_items:
+                return (
+                    "**W. J. Conover, Mark E. Johnson & Myrle M. Johnson's (1981 Technometrics) Squared Ranks Test for Scale Dispersion (T_CJJ):**\n"
+                    "Evaluates scale dispersion equality across subgroup strata samples using squared ranks of median-centered absolute deviations:\n"
+                    + "\n".join(cj_items)
+                )
+            return "Conover-Johnson squared ranks test evaluates scale dispersion homogeneity across subgroups robust to non-normal kurtosis."
+
+        if any(w in q_lower for w in ["rosenbaum huber", "gamma_hub", "huber sensitivity", "huber m-statistic", "huber-type sensitivity"]):
+            rh_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                g_hub = conf.get("rosenbaum_huber_gamma_crit")
+                p_up = conf.get("rosenbaum_huber_p_upper")
+                is_frag = conf.get("is_rosenbaum_huber_fragile", False)
+                if g_hub is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Sensitive to M-Estimator Hidden Bias (Γ_HUB = {g_hub:.2f} < 1.25)" if is_frag else f" (Robust Huber M-Sensitivity, Γ_HUB = {g_hub:.2f} ≥ 1.25)"
+                    rh_items.append(f"• **{v_name}**: Rosenbaum Dynamic Huber Γ_HUB = {g_hub:.2f} (p_upper = {p_up:.3e}){flag}")
+            if rh_items:
+                return (
+                    "**Paul R. Rosenbaum's (2007 JASA) Dynamic Huber-Type M-Statistic Sensitivity Bounds (Γ_HUB):**\n"
+                    "Tests observational treatment effect sensitivity to unmeasured confounder bias using robust Huber M-scores:\n"
+                    + "\n".join(rh_items)
+                )
+            return "Rosenbaum's Huber-type sensitivity bound evaluates treatment effect stability under robust M-estimation against unmeasured confounding."
+
+        if any(w in q_lower for w in ["imai", "king-stuart", "imai king", "delta_iks", "b_iks", "propensity balance disparity"]):
+            iks_items = []
+            for f in findings:
+                conf = f.get("audit", {}).get("confounder_audit", {})
+                disp = conf.get("imai_king_stuart_disparity")
+                smd = conf.get("imai_king_stuart_balance_smd")
+                is_frag = conf.get("is_imai_king_stuart_fragile", False)
+                if disp is not None and smd is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Observational Quintile Disparity / Imbalance (Δ_IKS = {disp:.1%}, SMD = {smd:.3f})" if is_frag else f" (Balanced Quintiles, Δ_IKS = {disp:.1%})"
+                    iks_items.append(f"• **{v_name}**: Imai-King-Stuart Δ_IKS = {disp:.1%}, SMD_peak = {smd:.3f}{flag}")
+            if iks_items:
+                return (
+                    "**Kosuke Imai, Gary King & Elizabeth A. Stuart's (2008 JRSS-A) Propensity Balance & Subgroup Disparity Ratio (Δ_IKS, B_IKS):**\n"
+                    "Evaluates confounder quintile standardized mean differences (SMD) and treatment effect disparities across propensity strata:\n"
+                    + "\n".join(iks_items)
+                )
+            return "Imai, King & Stuart's disparity test evaluates observational covariate balance and treatment effect heterogeneity across confounder quintiles."
+
+        if any(w in q_lower for w in ["mudholkar", "msl", "mudholkar srivastava lin", "cube-root normality", "wilson-hilferty normality", "z_msl"]):
+            msl_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                z_msl = stab.get("mudholkar_lin_stat_z")
+                p_val = stab.get("mudholkar_lin_p_value")
+                is_non = stab.get("is_mudholkar_lin_non_normal", False)
+                if z_msl is not None and p_val is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Non-Gaussian Cube-Root Residual Departure (p = {p_val:.3e} < 0.05)" if is_non else " (Gaussian Residual Concordance)"
+                    msl_items.append(f"• **{v_name}**: Mudholkar-Lin Z_MSL = {z_msl:.3f} (p = {p_val:.3e}){flag}")
+            if msl_items:
+                return (
+                    "**Govind S. Mudholkar, Deo Kumar Srivastava & C. Thomas Lin's (1981 Technometrics) Lin-Mudholkar / MSL Cube-Root Transformed Normality Test (Z_MSL):**\n"
+                    "Evaluates departure of standardized residuals from Gaussian normality using Wilson-Hilferty cube-root transformations of sample moments:\n"
+                    + "\n".join(msl_items)
+                )
+            return "Mudholkar-Srivastava-Lin's cube-root normality test evaluates standardized residual moments via Wilson-Hilferty transformation against Gaussian null."
+
+        if any(w in q_lower for w in ["andrews", "sine wave", "wave estimator", "delta_and", "andrews sine"]):
+            and_items = []
+            for f in findings:
+                stab = f.get("audit", {}).get("stability_audit", {})
+                disc = stab.get("andrews_sine_discrepancy")
+                cnt = stab.get("andrews_sine_outlier_count", 0)
+                is_dist = stab.get("is_andrews_sine_distorted", False)
+                if disc is not None:
+                    v_name = f.get("claim", {}).get("source_variable")
+                    flag = f" ⚠️ Wave Redescending Outlier Distortion (Δ_AND = {disc:.1%}, {cnt} gross outliers)" if is_dist else f" (Robust Sine Wave Concordance, Δ_AND = {disc:.1%})"
+                    and_items.append(f"• **{v_name}**: Andrews Δ_AND = {disc:.1%} ({cnt} redescended gross outliers){flag}")
+            if and_items:
+                return (
+                    "**David F. Andrews' (1974 Technometrics) Sine Wave Redescending M-Estimator Robust Slope Discrepancy (Δ_AND):**\n"
+                    "Applies Andrews' sine wave score function (c = 1.339 * pi) to completely reject the influence of extreme leverage outliers:\n"
+                    + "\n".join(and_items)
+                )
+            return "Andrews' sine wave redescending M-estimator test evaluates whether regression slopes are distorted by severe outliers using wave influence curves."
 
 
         context_str = json.dumps([{

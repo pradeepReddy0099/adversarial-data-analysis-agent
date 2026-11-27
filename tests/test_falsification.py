@@ -199,11 +199,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.crainiceanu_ruppert_p_value is not None
     assert audit.simpsons_audit.lim_loh_stat_w is not None
     assert audit.simpsons_audit.lim_loh_p_value is not None
-    # Verify Crainiceanu-Ruppert RLRT and Lim-Loh robust variance ratio test
-    assert audit.simpsons_audit.crainiceanu_ruppert_stat_rlrt is not None
-    assert audit.simpsons_audit.crainiceanu_ruppert_p_value is not None
-    assert audit.simpsons_audit.lim_loh_stat_w is not None
-    assert audit.simpsons_audit.lim_loh_p_value is not None
+    # Verify Verbeke-Molenberghs score and Conover-Johnson squared ranks test
+    assert audit.simpsons_audit.verbeke_molenberghs_stat_s is not None
+    assert audit.simpsons_audit.verbeke_molenberghs_p_value is not None
+    assert audit.simpsons_audit.conover_johnson_stat_t is not None
+    assert audit.simpsons_audit.conover_johnson_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -423,6 +423,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.rosenbaum_cm_gamma_crit >= 1.0
         assert audit_coffee.confounder_audit.athey_imbens_disparity is not None
         assert audit_coffee.confounder_audit.athey_imbens_disparity >= 0.0
+        # Check Rosenbaum dynamic Huber M-statistic and Imai-King-Stuart balance disparity
+        assert audit_coffee.confounder_audit.rosenbaum_huber_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_huber_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.imai_king_stuart_disparity is not None
+        assert audit_coffee.confounder_audit.imai_king_stuart_disparity >= 0.0
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -620,12 +625,13 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.hampel_slope_discrepancy is not None
     assert audit.stability_audit.hampel_slope_discrepancy >= 0.0
     assert audit.stability_audit.hampel_outlier_count >= 0
-    # Check Spiegelhalter omnibus normality and Hampel redescending M-estimator
-    assert audit.stability_audit.spiegelhalter_stat_n is not None
-    assert audit.stability_audit.spiegelhalter_p_value is not None
-    assert audit.stability_audit.hampel_slope_discrepancy is not None
-    assert audit.stability_audit.hampel_slope_discrepancy >= 0.0
-    assert audit.stability_audit.hampel_outlier_count >= 0
+    # Check Mudholkar-Lin cube-root normality and Andrews sine wave redescending M-estimator
+    assert audit.stability_audit.mudholkar_lin_stat_z is not None
+    assert audit.stability_audit.mudholkar_lin_p_value is not None
+    assert audit.stability_audit.andrews_sine_slope is not None
+    assert audit.stability_audit.andrews_sine_discrepancy is not None
+    assert audit.stability_audit.andrews_sine_discrepancy >= 0.0
+    assert audit.stability_audit.andrews_sine_outlier_count >= 0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1241,6 +1247,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_ham = narrator.answer_query("Explain Frank Hampel three-part redescending M-estimator robust slope", findings)
     assert "Hampel" in ans_ham or "Redescending" in ans_ham or "Estimator" in ans_ham or "Robust" in ans_ham or "Slope" in ans_ham
+
+    ans_vm = narrator.answer_query("Explain Geert Verbeke and Geert Molenberghs score test for random effect variance", findings)
+    assert "Verbeke" in ans_vm or "Molenberghs" in ans_vm or "Random" in ans_vm or "Variance" in ans_vm
+
+    ans_cj = narrator.answer_query("Explain Conover Johnson squared ranks test for scale dispersion", findings)
+    assert "Conover" in ans_cj or "Johnson" in ans_cj or "Squared Ranks" in ans_cj or "Dispersion" in ans_cj
+
+    ans_rh = narrator.answer_query("Explain Paul Rosenbaum dynamic Huber sensitivity bounds", findings)
+    assert "Rosenbaum" in ans_rh or "Huber" in ans_rh or "Sensitivity" in ans_rh or "M-Statistic" in ans_rh
+
+    ans_iks = narrator.answer_query("Explain Kosuke Imai and Gary King propensity balance disparity", findings)
+    assert "Imai" in ans_iks or "King" in ans_iks or "Balance" in ans_iks or "Disparity" in ans_iks
+
+    ans_msl = narrator.answer_query("Explain Mudholkar Srivastava Lin cube-root normality test", findings)
+    assert "Mudholkar" in ans_msl or "Lin" in ans_msl or "Normality" in ans_msl or "Cube-Root" in ans_msl or "MSL" in ans_msl
+
+    ans_and = narrator.answer_query("Explain David Andrews sine wave redescending M-estimator", findings)
+    assert "Andrews" in ans_and or "Sine" in ans_and or "Wave" in ans_and or "Estimator" in ans_and
 
 
 def test_end_to_end_pipeline(tmp_path):
