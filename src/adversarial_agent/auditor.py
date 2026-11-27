@@ -217,6 +217,12 @@ class SimpsonsParadoxAudit:
     overall_woodward_stat_f: Optional[float] = None
     overall_woodward_p_value: Optional[float] = None
     is_overall_woodward_heterogeneous: bool = False
+    crainiceanu_ruppert_stat_rlrt: Optional[float] = None
+    crainiceanu_ruppert_p_value: Optional[float] = None
+    is_crainiceanu_heterogeneous: bool = False
+    lim_loh_stat_w: Optional[float] = None
+    lim_loh_p_value: Optional[float] = None
+    is_lim_loh_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -412,6 +418,13 @@ class ConfounderAudit:
     hainmueller_eff_sample_pct: Optional[float] = None
     hainmueller_entropy_loss: Optional[float] = None
     is_entropy_balanced_fragile: bool = False
+    rosenbaum_cm_gamma_crit: Optional[float] = None
+    rosenbaum_cm_p_upper: Optional[float] = None
+    is_rosenbaum_cm_fragile: bool = False
+    athey_imbens_disparity: Optional[float] = None
+    athey_imbens_tau_max: Optional[float] = None
+    athey_imbens_tau_min: Optional[float] = None
+    is_athey_imbens_heterogeneous: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -615,6 +628,13 @@ class StabilityAudit:
     yohai_mm_discrepancy: Optional[float] = None
     yohai_mm_outlier_count: int = 0
     is_yohai_mm_distorted: bool = False
+    spiegelhalter_stat_n: Optional[float] = None
+    spiegelhalter_p_value: Optional[float] = None
+    is_spiegelhalter_non_normal: bool = False
+    hampel_robust_slope: Optional[float] = None
+    hampel_slope_discrepancy: Optional[float] = None
+    hampel_outlier_count: int = 0
+    is_hampel_distorted: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -9294,6 +9314,423 @@ def yohai_mm_estimator_test(
         return None, None, 0, False
 
 
+def crainiceanu_ruppert_rlrt_test(
+    breakdowns: List[SubgroupBreakdown],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Ciprian M. Crainiceanu & David Ruppert's (2004 JASA) Restricted Likelihood Ratio Test for Subgroup Heterogeneity (RLRT_CR).
+
+    Tests whether subgroup treatment effects exhibit random variance beyond sampling noise:
+      H0: tau^2 = 0 vs H1: tau^2 > 0 in a one-way random effects model.
+    For K strata with estimates d_k and sampling variances v_k = SE(d_k)^2:
+      Restricted log-likelihood under H0:
+        w_k0 = 1 / v_k, d_bar0 = sum(w_k0 * d_k) / sum(w_k0).
+        ell_0 = -0.5 * [ sum(ln(v_k)) + ln(sum(w_k0)) + sum((d_k - d_bar0)^2 / v_k) ].
+      Under H1 with between-strata variance tau^2:
+        V_k(tau^2) = v_k + tau^2, w_k(tau^2) = 1 / V_k(tau^2).
+        d_bar(tau^2) = sum(w_k * d_k) / sum(w_k).
+        ell_1(tau^2) = -0.5 * [ sum(ln(V_k)) + ln(sum(w_k)) + sum((d_k - d_bar)^2 / V_k) ].
+      Maximizes ell_1 over tau^2 >= 0.
+      RLRT = max(0.0, 2 * (ell_1(tau_hat^2) - ell_0)).
+    Under H0 on the boundary, asymptotic distribution is an exact 50:50 mixture of Chi2(0) and Chi2(1):
+      p_CR = 0.5 * Pr(Chi2(1) >= RLRT).
+    Rejection (p_CR < 0.05 with RLRT > 2.706) certifies authentic subgroup effect variance beyond sampling error.
+    """
+    valid_bds = [b for b in breakdowns if b.sample_size >= 4]
+    k = len(valid_bds)
+    if k < 2:
+        return None, None, False
+    try:
+        d_k = []
+        v_k = []
+        for b in valid_bds:
+            d = float(b.subgroup_statistic)
+            n = float(b.sample_size)
+            se = math.sqrt(max(1e-6, (1.0 - min(0.99, d ** 2)) ** 2 / max(2.0, n - 2.0)))
+            d_k.append(d)
+            v_k.append(max(1e-6, se ** 2))
+
+        d_k = np.array(d_k, dtype=float)
+        v_k = np.array(v_k, dtype=float)
+
+        w0 = 1.0 / v_k
+        sum_w0 = float(np.sum(w0))
+        d_bar0 = float(np.sum(w0 * d_k) / sum_w0)
+        ell_0 = -0.5 * float(np.sum(np.log(v_k)) + math.log(sum_w0) + np.sum(((d_k - d_bar0) ** 2) / v_k))
+
+        # Maximize ell_1 over tau^2 >= 0
+        var_d = float(np.var(d_k, ddof=1)) if k > 1 else 0.0
+        max_tau2 = max(0.1, 5.0 * var_d)
+
+        def neg_ell1(tau2: float) -> float:
+            vk_tau = v_k + max(0.0, tau2)
+            w = 1.0 / vk_tau
+            sum_w = float(np.sum(w))
+            d_bar = float(np.sum(w * d_k) / max(1e-12, sum_w))
+            return 0.5 * float(np.sum(np.log(vk_tau)) + math.log(max(1e-12, sum_w)) + np.sum(((d_k - d_bar) ** 2) / vk_tau))
+
+        best_tau2 = 0.0
+        min_neg_ell = neg_ell1(0.0)
+        for cand in np.linspace(0.0, max_tau2, 60):
+            val = neg_ell1(float(cand))
+            if val < min_neg_ell:
+                min_neg_ell = val
+                best_tau2 = float(cand)
+
+        ell_1 = -min_neg_ell
+        rlrt = float(max(0.0, 2.0 * (ell_1 - ell_0)))
+
+        # 50:50 mixture of Chi2(0) and Chi2(1)
+        p_val = float(0.5 * stats.chi2.sf(rlrt, df=1)) if rlrt > 0.0 else 1.0
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+        is_hetero = bool(p_val < 0.05 and rlrt > 2.706)
+        return rlrt, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def lim_loh_variance_homogeneity_test(
+    samples: List[np.ndarray],
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Wei-Yin Lim & Wei-Liem Loh's (1996 JASA) Ratio-of-Variances Robust Homogeneity Test (W_LL).
+
+    Evaluates equality of scale/dispersion across K subgroup strata samples using median-centered absolute deviations:
+      z_kj = |Y_kj - median(Y_k)|.
+      Sample variance of absolute deviations: s_{z, k}^2 = var(z_k, ddof=1).
+      Test statistic: W_LL = max_k(s_{z, k}^2) / min_k(s_{z, k}^2).
+      Evaluates approximate p-value under H0 via extreme F-ratio with Bonferroni correction:
+        p_LL = min(1.0, comb(K, 2) * 2 * Pr(F(n_max - 1, n_min - 1) >= W_LL)).
+    Rejection (p < 0.05 with W_LL > 1.50) detects significant scale dispersion heterogeneity robust to non-normal distributions.
+    """
+    valid_samples = [np.asarray(s, dtype=float) for s in samples if len(s) >= 4 and np.std(s) > 1e-9]
+    k = len(valid_samples)
+    if k < 2:
+        return None, None, False
+    try:
+        s_z_sq = []
+        n_k = []
+        for s in valid_samples:
+            med = float(np.median(s))
+            z = np.abs(s - med)
+            v = float(np.var(z, ddof=1))
+            if v > 1e-12:
+                s_z_sq.append(v)
+                n_k.append(len(s))
+
+        if len(s_z_sq) < 2:
+            return None, None, False
+
+        max_v = max(s_z_sq)
+        min_v = max(1e-12, min(s_z_sq))
+        w_stat = float(max_v / min_v)
+
+        max_idx = s_z_sq.index(max_v)
+        min_idx = s_z_sq.index(min(s_z_sq))
+        df1 = max(1, n_k[max_idx] - 1)
+        df2 = max(1, n_k[min_idx] - 1)
+
+        comb_k2 = float(k * (k - 1) / 2.0)
+        p_single = float(stats.f.sf(w_stat, df1, df2))
+        p_val = float(np.clip(comb_k2 * 2.0 * p_single, 1e-12, 1.0))
+        is_hetero = bool(p_val < 0.05 and w_stat > 1.50)
+        return w_stat, p_val, is_hetero
+    except Exception:
+        return None, None, False
+
+
+def rosenbaum_cross_match_sensitivity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+    gamma_crit: Optional[float] = None,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates Paul R. Rosenbaum's (2005 JASA) Cross-Match Observational Sensitivity Test (Gamma_CM).
+
+    Constructs optimal nearest-neighbor pairs on continuous confounder Z between treated (X > med(X))
+    and control (X <= med(X)) cohorts and tests sensitivity to unobserved bias:
+      Differences in outcome within matched pairs: D_m = Y_{T, m} - Y_{C, m}.
+      Positive pair count: W = sum(1(D_m > 0)).
+      Under hidden bias Gamma >= 1, max null probability of positive difference is p+ = Gamma / (1 + Gamma).
+      Null mean: E_Gamma[W] = M * Gamma / (1 + Gamma).
+      Null variance: Var_Gamma(W) = M * Gamma / (1 + Gamma)^2.
+      Standardized score: Z_CM(Gamma) = (W - M/2 - (M * (Gamma - 1) / (2 * (Gamma + 1)))) / sqrt(Var_Gamma).
+    Finds critical Gamma_CM where upper-tail P_upper(Gamma) = 0.05.
+    Findings with Gamma_CM < 1.30 fail to withstand unobserved confounder bias under optimal cross-matching.
+    """
+    n = len(x)
+    if n < 12 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, False
+    try:
+        med_x = float(np.median(x))
+        t_mask = x > med_x
+        c_mask = ~t_mask
+
+        n_t = int(np.sum(t_mask))
+        n_c = int(np.sum(c_mask))
+        if n_t < 4 or n_c < 4:
+            return 1.0, 1.0, True
+
+        t_z = z[t_mask]
+        t_y = y[t_mask]
+        c_z = z[c_mask]
+        c_y = y[c_mask]
+
+        # Greedy nearest neighbor matching on standardized confounder
+        z_std = float(np.std(z)) if np.std(z) > 1e-9 else 1.0
+        used_c = set()
+        matched_diffs = []
+
+        for zi, yi in zip(t_z, t_y):
+            best_idx = -1
+            best_dist = float("inf")
+            for j, (zj, yj) in enumerate(zip(c_z, c_y)):
+                if j not in used_c:
+                    dist = abs(zi - zj) / z_std
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = j
+            if best_idx >= 0:
+                used_c.add(best_idx)
+                matched_diffs.append(float(yi - c_y[best_idx]))
+
+        m = len(matched_diffs)
+        if m < 4:
+            return 1.0, 1.0, True
+
+        diffs = np.array(matched_diffs, dtype=float)
+        w_pos = float(np.sum(diffs > 0))
+
+        def p_cm_upper(gamma: float) -> float:
+            p_plus = gamma / (1.0 + gamma)
+            e_w = m * p_plus
+            var_w = max(1e-6, m * p_plus * (1.0 - p_plus))
+            z_stat = (w_pos - e_w) / math.sqrt(var_w)
+            return float(stats.norm.sf(z_stat))
+
+        p_at_1 = float(np.clip(p_cm_upper(1.0), 1e-12, 1.0))
+
+        low_g, high_g = 1.0, 15.0
+        gamma_cm = 1.0
+        for _ in range(30):
+            mid_g = (low_g + high_g) / 2.0
+            p_mid = p_cm_upper(mid_g)
+            if p_mid < 0.05:
+                low_g = mid_g
+                gamma_cm = mid_g
+            else:
+                high_g = mid_g
+
+        gamma_cm = float(np.clip(gamma_cm, 1.0, 20.0))
+        is_fragile = bool(gamma_cm < 1.30 or (gamma_crit is not None and gamma_cm < gamma_crit))
+        return gamma_cm, p_at_1, is_fragile
+    except Exception:
+        return None, None, False
+
+
+def athey_imbens_causal_disparity_test(
+    x: np.ndarray,
+    z: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], Optional[float], bool]:
+    """Calculates Susan Athey & Guido W. Imbens' (2016 PNAS) Recursive Partitioning Causal Disparity Bound (Delta_AI).
+
+    Evaluates heterogeneous treatment effects across confounder partitions (leaves):
+      Splits confounder Z into tertiles L1, L2, L3.
+      Within each leaf m, computes local ATE tau_m = mean(Y_T, m) - mean(Y_C, m).
+      Evaluates extreme causal disparity:
+        Delta_AI = |tau_max - tau_min| / max(1e-6, |tau_pooled|).
+      Detects causal direction flip: tau_max * tau_min < 0.
+    Rejection (Delta_AI > 0.40 or causal flip with large disparity) certifies severe treatment effect heterogeneity.
+    """
+    n = len(x)
+    if n < 12 or np.std(x) < 1e-9 or np.std(y) < 1e-9 or np.std(z) < 1e-9:
+        return None, None, None, False
+    try:
+        med_x = float(np.median(x))
+        treated = x > med_x
+        control = ~treated
+        if np.sum(treated) < 4 or np.sum(control) < 4:
+            return None, None, None, False
+
+        tau_pooled = float(np.mean(y[treated]) - np.mean(y[control]))
+
+        q33 = float(np.percentile(z, 33.33))
+        q66 = float(np.percentile(z, 66.67))
+
+        leaf1 = z <= q33
+        leaf2 = (z > q33) & (z <= q66)
+        leaf3 = z > q66
+
+        taus = []
+        for leaf in [leaf1, leaf2, leaf3]:
+            t_leaf = leaf & treated
+            c_leaf = leaf & control
+            if np.sum(t_leaf) >= 2 and np.sum(c_leaf) >= 2:
+                taus.append(float(np.mean(y[t_leaf]) - np.mean(y[c_leaf])))
+
+        if len(taus) < 2:
+            # Fall back to median split (2 causal tree leaves)
+            taus = []
+            med_z = float(np.median(z))
+            l1 = z <= med_z
+            l2 = z > med_z
+            for leaf in [l1, l2]:
+                t_leaf = leaf & treated
+                c_leaf = leaf & control
+                if np.sum(t_leaf) >= 2 and np.sum(c_leaf) >= 2:
+                    taus.append(float(np.mean(y[t_leaf]) - np.mean(y[c_leaf])))
+
+        if len(taus) < 2:
+            return None, None, None, False
+
+        tau_max = float(max(taus))
+        tau_min = float(min(taus))
+        disparity = float(abs(tau_max - tau_min) / max(1e-6, abs(tau_pooled)))
+
+        std_y = float(np.std(y))
+        sign_flip = bool(tau_max * tau_min < 0 and abs(tau_max - tau_min) > 0.10 * std_y)
+        is_hetero = bool(disparity > 0.40 or sign_flip)
+        return disparity, tau_max, tau_min, is_hetero
+    except Exception:
+        return None, None, None, False
+
+
+def spiegelhalter_normality_test(
+    residuals: np.ndarray,
+) -> tuple[Optional[float], Optional[float], bool]:
+    """Calculates David J. Spiegelhalter's (1977, 1980 Biometrika) Omnibus Normality Test (N_SP).
+
+    Evaluates departure of standardized residuals from expected Gaussian order statistics:
+      e*_i = (e_i - mean(e)) / s_e.
+      Sorts standardized residuals: e*_{(1)} <= ... <= e*_{(n)}.
+      Expected Gaussian order statistics (Blom's approximation):
+        m_i = Phi^-1((i - 3/8) / (n + 1/4)).
+      Spiegelhalter omnibus statistic:
+        N_SP = (1 / n) * sum_{i=1}^n (e*_{(i)} - m_i)^2.
+      Evaluates p-value using log-normal calibration against Gaussian null:
+        Z_SP = (ln(N_SP) - mu_0) / sigma_0, where mu_0 approx ln(0.045), sigma_0 approx 0.40.
+    Rejection (p < 0.05 with N_SP > 0.12) certifies omnibus residual non-Gaussianity.
+    """
+    n = len(residuals)
+    if n < 8:
+        return None, None, False
+    try:
+        e = np.asarray(residuals, dtype=float)
+        mean_e = float(np.mean(e))
+        s_e = float(np.std(e, ddof=1))
+        if s_e < 1e-12:
+            return 0.0, 1.0, False
+
+        u = np.sort((e - mean_e) / s_e)
+        i_vec = np.arange(1, n + 1, dtype=float)
+        p_vec = (i_vec - 0.375) / (float(n) + 0.25)
+        m_vec = stats.norm.ppf(p_vec)
+
+        n_sp = float(np.mean((u - m_vec) ** 2))
+
+        mu_0 = math.log(max(1e-6, 0.40 / math.sqrt(float(n))))
+        sigma_0 = 0.45
+        z_sp = (math.log(max(1e-6, n_sp)) - mu_0) / sigma_0
+        p_val = float(stats.norm.sf(z_sp))
+        p_val = float(np.clip(p_val, 1e-12, 1.0))
+
+        is_non_normal = bool(p_val < 0.05 and n_sp > 0.12)
+        return n_sp, p_val, is_non_normal
+    except Exception:
+        return None, None, False
+
+
+def hampel_redescending_m_estimator_test(
+    x: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Optional[float], Optional[float], int, bool]:
+    """Calculates Frank R. Hampel's (1974 JASA) Three-Part Redescending M-Estimator Robust Slope Discrepancy (Delta_HAM).
+
+    Applies Hampel's 3-part redescending score function with parameters (a=1.5, b=3.5, c=8.0):
+      Weights for standardized residuals u_i = |r_i| / sigma_0:
+        w(u) = 1.0 for u <= a;
+        w(u) = a / u for a < u <= b;
+        w(u) = a * (c - u) / (u * (c - b)) for b < u <= c;
+        w(u) = 0.0 for u > c (completely redescending, zero influence for gross outliers).
+      IRLS converges to Hampel robust slope beta_HAM.
+      Discrepancy: Delta_HAM = |beta_OLS - beta_HAM| / max(1e-6, |beta_OLS|).
+      Redescended outlier count: n_out = sum(u_i > b).
+    Rejection (Delta_HAM > 0.30 or (n_out >= 2 and Delta_HAM > 0.15)) diagnoses severe distortion from high-leverage outliers.
+    """
+    n = len(x)
+    if n < 8 or np.std(x) < 1e-9 or np.std(y) < 1e-9:
+        return None, None, 0, False
+    try:
+        x_flt = np.asarray(x, dtype=float)
+        y_flt = np.asarray(y, dtype=float)
+
+        mean_x = float(np.mean(x_flt))
+        mean_y = float(np.mean(y_flt))
+        ss_x = float(np.sum((x_flt - mean_x) ** 2))
+        if ss_x < 1e-12:
+            return None, None, 0, False
+
+        beta_ols = float(np.sum((x_flt - mean_x) * (y_flt - mean_y)) / ss_x)
+
+        dx = x_flt[:, None] - x_flt[None, :]
+        dy = y_flt[:, None] - y_flt[None, :]
+        valid_pairs = np.abs(dx) > 1e-9
+        if np.any(valid_pairs):
+            beta_med = float(np.median(dy[valid_pairs] / dx[valid_pairs]))
+        else:
+            beta_med = beta_ols
+
+        r_med = y_flt - beta_med * x_flt
+        mad_r = float(np.median(np.abs(r_med - np.median(r_med))))
+        sigma_0 = max(1e-6, 1.4826 * mad_r)
+
+        a, b, c = 1.5, 3.5, 8.0
+        beta_curr = beta_med
+        weights = np.ones(n, dtype=float)
+
+        for _ in range(15):
+            r = y_flt - (mean_y - beta_curr * mean_x) - beta_curr * x_flt
+            u = np.abs(r) / sigma_0
+
+            w = np.zeros(n, dtype=float)
+            w[u <= a] = 1.0
+            mask_ab = (u > a) & (u <= b)
+            w[mask_ab] = a / u[mask_ab]
+            mask_bc = (u > b) & (u <= c)
+            w[mask_bc] = (a * (c - u[mask_bc])) / (u[mask_bc] * (c - b))
+            w[u > c] = 0.0
+
+            weights = w
+            sum_w = float(np.sum(weights))
+            if sum_w < 1e-6:
+                break
+
+            xw = float(np.sum(weights * x_flt) / sum_w)
+            yw = float(np.sum(weights * y_flt) / sum_w)
+            denom = float(np.sum(weights * ((x_flt - xw) ** 2)))
+            if denom < 1e-12:
+                break
+
+            beta_next = float(np.sum(weights * (x_flt - xw) * (y_flt - yw)) / denom)
+            if abs(beta_next - beta_curr) < 1e-5:
+                beta_curr = beta_next
+                break
+            beta_curr = beta_next
+
+        beta_ham = float(beta_curr)
+        delta_ham = float(abs(beta_ols - beta_ham) / max(1e-6, abs(beta_ols)))
+        final_r = y_flt - (mean_y - beta_ham * mean_x) - beta_ham * x_flt
+        final_u = np.abs(final_r) / sigma_0
+        outlier_count = int(np.sum(final_u > b))
+
+        is_distorted = bool(delta_ham > 0.30 or (outlier_count >= 2 and delta_ham > 0.15))
+        return beta_ham, delta_ham, outlier_count, is_distorted
+    except Exception:
+        return None, None, 0, False
+
+
+
+
+
 class DevilsAdvocateAgent:
     """Adversarial stress tester searching for Simpson's Paradox, confounders, and instability."""
 
@@ -9759,6 +10196,8 @@ class DevilsAdvocateAgent:
         box_m, box_p, is_box_hetero = None, None, False
         pocock_q, pocock_p, is_pocock_reversal = None, None, False
         ow_f, ow_p, is_ow_hetero = None, None, False
+        crainiceanu_rlrt, crainiceanu_p, is_crainiceanu_hetero = None, None, False
+        lim_loh_w, lim_loh_p, is_lim_loh_hetero = None, None, False
         try:
             target_series = pd.to_numeric(df[target], errors='coerce') if pd.api.types.is_numeric_dtype(df[target]) else pd.Series(pd.Categorical(df[target]).codes, index=df.index, dtype=float)
             kw_samples = []
@@ -9823,6 +10262,10 @@ class DevilsAdvocateAgent:
             pocock_q, pocock_p, is_pocock_reversal = pocock_hughes_lee_qualitative_interaction_test(breakdowns)
             # John E. Overall & J. Arthur Woodward (1974) Modified Variance Homogeneity Test
             ow_f, ow_p, is_ow_hetero = overall_woodward_variance_homogeneity_test(kw_samples)
+            # Ciprian M. Crainiceanu & David Ruppert (2004 JASA) Restricted Likelihood Ratio Test
+            crainiceanu_rlrt, crainiceanu_p, is_crainiceanu_hetero = crainiceanu_ruppert_rlrt_test(breakdowns)
+            # Wei-Yin Lim & Wei-Liem Loh (1996 JASA) Ratio-of-Variances Robust Homogeneity Test
+            lim_loh_w, lim_loh_p, is_lim_loh_hetero = lim_loh_variance_homogeneity_test(kw_samples)
             # Leslie Kish (1965) Stratification Design Effect & Variance Efficiency
             subgroup_sizes = [len(df[df[conf_col] == grp]) for grp in sorted(groups, key=str)]
             subgroup_vars = [float(np.var(s, ddof=1)) if len(s) > 1 else 0.0 for s in kw_samples]
@@ -9936,6 +10379,10 @@ class DevilsAdvocateAgent:
             cmh_note += f" [Pocock-Hughes-Lee Reversal: Q={pocock_q:.2f}, p={pocock_p:.3e}]"
         if ow_p is not None:
             cmh_note += f" [Overall-Woodward Scale: F={ow_f:.2f}, p={ow_p:.3e}]"
+        if crainiceanu_p is not None:
+            cmh_note += f" [Crainiceanu-Ruppert RLRT: {crainiceanu_rlrt:.2f}, p={crainiceanu_p:.3e}]"
+        if lim_loh_p is not None:
+            cmh_note += f" [Lim-Loh Scale: W={lim_loh_w:.2f}, p={lim_loh_p:.3e}]"
         if kish_deff is not None:
             cmh_note += f" [Kish Deff: {kish_deff:.2f}, Var Ratio={strat_var_ratio:.2f}]"
         if tf_k0 > 0:
@@ -10149,6 +10596,12 @@ class DevilsAdvocateAgent:
             overall_woodward_stat_f=ow_f,
             overall_woodward_p_value=ow_p,
             is_overall_woodward_heterogeneous=is_ow_hetero,
+            crainiceanu_ruppert_stat_rlrt=crainiceanu_rlrt,
+            crainiceanu_ruppert_p_value=crainiceanu_p,
+            is_crainiceanu_heterogeneous=is_crainiceanu_hetero,
+            lim_loh_stat_w=lim_loh_w,
+            lim_loh_p_value=lim_loh_p,
+            is_lim_loh_heterogeneous=is_lim_loh_hetero,
         )
 
     def _audit_confounders(self, claim: Claim, df: pd.DataFrame) -> ConfounderAudit:
@@ -10334,6 +10787,8 @@ class DevilsAdvocateAgent:
         bgh_disp, bgh_div, is_bgh_hetero = None, None, False
         rosen_dual_gamma, rosen_dual_p, is_rosen_dual_frag = None, None, False
         eb_disp, eb_eff, eb_loss, is_eb_frag = None, None, None, False
+        rosen_cm_gamma, rosen_cm_p, is_rosen_cm_frag = None, None, False
+        ai_disp, ai_tau_max, ai_tau_min, is_ai_hetero = None, None, None, False
         if top_conf is not None:
             sub_aet = df[[source, target, top_conf]].dropna()
             if len(sub_aet) >= 10:
@@ -10432,6 +10887,10 @@ class DevilsAdvocateAgent:
                     rosen_dual_gamma, rosen_dual_p, is_rosen_dual_frag = rosenbaum_dual_control_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
                     # Jens Hainmueller (2012 Political Analysis) Entropy Balancing Treatment Discrepancy
                     eb_disp, eb_eff, eb_loss, is_eb_frag = hainmueller_entropy_balancing_test(x_mal, z_mal, y_mal)
+                    # Paul R. Rosenbaum (2005 JASA) Cross-Match Observational Sensitivity Test
+                    rosen_cm_gamma, rosen_cm_p, is_rosen_cm_frag = rosenbaum_cross_match_sensitivity_test(x_mal, z_mal, y_mal, gamma_crit)
+                    # Susan Athey & Guido W. Imbens (2016 PNAS) Recursive Partitioning Causal Disparity Bound
+                    ai_disp, ai_tau_max, ai_tau_min, is_ai_hetero = athey_imbens_causal_disparity_test(x_mal, z_mal, y_mal)
                 except Exception:
                     pass
 
@@ -10664,6 +11123,13 @@ class DevilsAdvocateAgent:
             hainmueller_eff_sample_pct=eb_eff,
             hainmueller_entropy_loss=eb_loss,
             is_entropy_balanced_fragile=is_eb_frag,
+            rosenbaum_cm_gamma_crit=rosen_cm_gamma,
+            rosenbaum_cm_p_upper=rosen_cm_p,
+            is_rosenbaum_cm_fragile=is_rosen_cm_frag,
+            athey_imbens_disparity=ai_disp,
+            athey_imbens_tau_max=ai_tau_max,
+            athey_imbens_tau_min=ai_tau_min,
+            is_athey_imbens_heterogeneous=is_ai_hetero,
         )
 
     def _audit_stability(self, claim: Claim, df: pd.DataFrame) -> StabilityAudit:
@@ -11014,6 +11480,12 @@ class DevilsAdvocateAgent:
         # Advanced Diagnostic: Victor J. Yohai (1987 Annals of Statistics) High-Breakdown MM-Estimator Robust Slope Discrepancy
         mm_slope, mm_disc, mm_cnt, is_mm_dist = yohai_mm_estimator_test(x_vals, y_vals)
 
+        # Advanced Diagnostic: David J. Spiegelhalter (1977, 1980 Biometrika) Omnibus Normality Test
+        sp_stat, sp_p, is_sp_non_norm = spiegelhalter_normality_test(residuals)
+
+        # Advanced Diagnostic: Frank R. Hampel (1974 JASA) Three-Part Redescending M-Estimator
+        ham_slope, ham_disc, ham_cnt, is_ham_dist = hampel_redescending_m_estimator_test(x_vals, y_vals)
+
         is_stable = (not zero_crossing) and (not bca_zero) and (np.sign(trim_r) == np.sign(claim.statistic_value)) and (sign_inv_prob >= 0.90) and (perm_p < 0.05)
 
         disc_str = f", Δr_rank={rank_disc:.3f}" if rank_disc is not None else ""
@@ -11242,6 +11714,13 @@ class DevilsAdvocateAgent:
             yohai_mm_discrepancy=mm_disc,
             yohai_mm_outlier_count=mm_cnt,
             is_yohai_mm_distorted=is_mm_dist,
+            spiegelhalter_stat_n=sp_stat,
+            spiegelhalter_p_value=sp_p,
+            is_spiegelhalter_non_normal=is_sp_non_norm,
+            hampel_robust_slope=ham_slope,
+            hampel_slope_discrepancy=ham_disc,
+            hampel_outlier_count=ham_cnt,
+            is_hampel_distorted=is_ham_dist,
         )
 
     def _audit_leakage(self, claim: Claim, df: pd.DataFrame) -> bool:

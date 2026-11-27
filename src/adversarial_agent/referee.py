@@ -201,6 +201,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Pocock-Hughes-Lee Qualitative Interaction: Q_PHL = {simpsons.pocock_hughes_lee_stat_q:.2f} (p = {simpsons.pocock_hughes_lee_p_value:.3e}) {'[QUALITATIVE CROSS-OVER REVERSAL PROVEN]' if simpsons.is_pocock_reversal else '[CONCORDANT DIRECTION]'}")
             if simpsons.overall_woodward_p_value is not None:
                 rationale["key_evidence"].append(f"Overall-Woodward Modified Variance: F_OW = {simpsons.overall_woodward_stat_f:.2f} (p = {simpsons.overall_woodward_p_value:.3e}) {'[KURTOSIS-ROBUST SCALE HETEROGENEITY]' if simpsons.is_overall_woodward_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
+            if simpsons.crainiceanu_ruppert_p_value is not None:
+                rationale["key_evidence"].append(f"Crainiceanu-Ruppert RLRT Heterogeneity: RLRT = {simpsons.crainiceanu_ruppert_stat_rlrt:.2f} (p = {simpsons.crainiceanu_ruppert_p_value:.3e}) {'[RANDOM SUBGROUP EFFECT VARIANCE PROVEN]' if simpsons.is_crainiceanu_heterogeneous else '[HOMOGENEOUS SUBGROUP EFFECTS]'}")
+            if simpsons.lim_loh_p_value is not None:
+                rationale["key_evidence"].append(f"Lim-Loh Robust Variance Ratio: W_LL = {simpsons.lim_loh_stat_w:.2f} (p = {simpsons.lim_loh_p_value:.3e}) {'[ROBUST MEDIAN-CENTERED SCALE HETEROGENEITY]' if simpsons.is_lim_loh_heterogeneous else '[HOMOGENEOUS STRATUM SCALE]'}")
+            if simpsons.crainiceanu_ruppert_p_value is not None:
+                rationale["key_evidence"].append(f"Crainiceanu-Ruppert Restricted Likelihood Ratio: RLRT_CR = {simpsons.crainiceanu_ruppert_stat_rlrt:.2f} (p = {simpsons.crainiceanu_ruppert_p_value:.3e}) {'[SUBGROUP RANDOM SLOPE VARIANCE PROVEN]' if simpsons.is_crainiceanu_heterogeneous else '[HOMOGENEOUS STRATUM EFFECT]'}")
+            if simpsons.lim_loh_p_value is not None:
+                rationale["key_evidence"].append(f"Lim-Loh Ratio-of-Variances: W_LL = {simpsons.lim_loh_stat_w:.2f} (p = {simpsons.lim_loh_p_value:.3e}) {'[NON-NORMALITY ROBUST DISPERSION HETEROGENEITY]' if simpsons.is_lim_loh_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -354,6 +362,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Dual-Control Sensitivity: Gamma_Dual = {confounder.rosenbaum_dual_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_dual_p_upper:.3e}) {'[FRAGILE DUAL-CONTROL BIAS]' if confounder.is_rosenbaum_dual_fragile else '[ROBUST DUAL-CONTROL COMPARISON]'}")
             if confounder.hainmueller_eb_disparity is not None:
                 rationale["key_evidence"].append(f"Hainmueller Entropy Balancing Disparity: Delta_EB = {confounder.hainmueller_eb_disparity:.1%} (Effective N = {confounder.hainmueller_eff_sample_pct:.1f}%) {'[MOMENT IMBALANCE DISTORTION]' if confounder.is_entropy_balanced_fragile else '[ROBUST ENTROPY BALANCE]'}")
+            if confounder.rosenbaum_cm_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Cross-Match Sensitivity: Gamma_CM = {confounder.rosenbaum_cm_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_cm_p_upper:.3e}) {'[FRAGILE TO CROSS-MATCH HIDDEN BIAS]' if confounder.is_rosenbaum_cm_fragile else '[ROBUST NEAREST-NEIGHBOR CROSS-MATCH]'}")
+            if confounder.athey_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Athey-Imbens Causal Disparity: Delta_AI = {confounder.athey_imbens_disparity:.1%} (Leaf Range: [{confounder.athey_imbens_tau_min:.3f}, {confounder.athey_imbens_tau_max:.3f}]) {'[SEVERE RECURSIVE PARTITIONING CAUSAL DISPARITY]' if confounder.is_athey_imbens_heterogeneous else '[HOMOGENEOUS CAUSAL TREE EFFECTS]'}")
+            if confounder.rosenbaum_cm_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Cross-Match Sensitivity: Gamma_CM = {confounder.rosenbaum_cm_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_cm_p_upper:.3e}) {'[FRAGILE CROSS-MATCH BIAS]' if confounder.is_rosenbaum_cm_fragile else '[ROBUST CROSS-MATCH INVARIANCE]'}")
+            if confounder.athey_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Athey-Imbens Causal Disparity: Delta_AI = {confounder.athey_imbens_disparity:.1%} (Tau_max = {confounder.athey_imbens_tau_max:.3f}, Tau_min = {confounder.athey_imbens_tau_min:.3f}) {'[SEVERE CAUSAL EFFECT HETEROGENEITY]' if confounder.is_athey_imbens_heterogeneous else '[HOMOGENEOUS CAUSAL PARTITIONS]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -508,6 +524,14 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Bontemps-Meddahi Hermite Normality: M_BM = {stability.bontemps_meddahi_stat_m:.2f} (p = {stability.bontemps_meddahi_p_value:.3e}) {'[HERMITE MOMENT NON-NORMALITY CERTIFIED]' if stability.is_bontemps_meddahi_non_normal else '[GAUSSIAN HERMITE MOMENTS CONFIRMED]'}")
             if stability.yohai_mm_discrepancy is not None:
                 rationale["key_evidence"].append(f"Yohai High-Breakdown MM-Estimator: Delta_MM = {stability.yohai_mm_discrepancy:.1%} ({stability.yohai_mm_outlier_count} downweighted outliers) {'[HIGH-BREAKDOWN OUTLIER DISTORTION]' if stability.is_yohai_mm_distorted else '[ROBUST MM-OLS CONCORDANCE]'}")
+            if stability.spiegelhalter_p_value is not None:
+                rationale["key_evidence"].append(f"Spiegelhalter Omnibus Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e}) {'[ORDER-STATISTIC NON-NORMALITY CERTIFIED]' if stability.is_spiegelhalter_non_normal else '[GAUSSIAN ORDER-STATISTIC FIT]'}")
+            if stability.hampel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hampel Redescending M-Estimator: Delta_HAM = {stability.hampel_slope_discrepancy:.1%} ({stability.hampel_outlier_count} redescended outliers) {'[GROSS LEVERAGE OUTLIER DISTORTION]' if stability.is_hampel_distorted else '[BOUNDED INFLUENCE CONCORDANCE]'}")
+            if stability.spiegelhalter_p_value is not None:
+                rationale["key_evidence"].append(f"Spiegelhalter Omnibus Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e}) {'[ORDER-STATISTIC NON-NORMALITY CERTIFIED]' if stability.is_spiegelhalter_non_normal else '[GAUSSIAN ORDER-STATISTICS CONFIRMED]'}")
+            if stability.hampel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hampel Redescending M-Estimator: Delta_HAM = {stability.hampel_slope_discrepancy:.1%} ({stability.hampel_outlier_count} redescended outliers) {'[REDESCENDING OUTLIER DISTORTION]' if stability.is_hampel_distorted else '[ROBUST HAMPEL-OLS CONCORDANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -883,6 +907,30 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Bontemps-Meddahi Normality: M_BM = {stability.bontemps_meddahi_stat_m:.2f} (p = {stability.bontemps_meddahi_p_value:.3e})")
             if stability.yohai_mm_discrepancy is not None:
                 rationale["key_evidence"].append(f"Yohai MM-Estimator Discrepancy: Delta_MM = {stability.yohai_mm_discrepancy:.1%}")
+            if simpsons.crainiceanu_ruppert_p_value is not None:
+                rationale["key_evidence"].append(f"Crainiceanu-Ruppert Score: RLRT = {simpsons.crainiceanu_ruppert_stat_rlrt:.2f} (p = {simpsons.crainiceanu_ruppert_p_value:.3e})")
+            if simpsons.lim_loh_p_value is not None:
+                rationale["key_evidence"].append(f"Lim-Loh Variance Ratio: W_LL = {simpsons.lim_loh_stat_w:.2f} (p = {simpsons.lim_loh_p_value:.3e})")
+            if confounder.rosenbaum_cm_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Cross-Match Sensitivity: Gamma_CM = {confounder.rosenbaum_cm_gamma_crit:.2f}")
+            if confounder.athey_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Athey-Imbens Causal Disparity: Delta_AI = {confounder.athey_imbens_disparity:.1%}")
+            if stability.spiegelhalter_p_value is not None:
+                rationale["key_evidence"].append(f"Spiegelhalter Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e})")
+            if stability.hampel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hampel Redescending Discrepancy: Delta_HAM = {stability.hampel_slope_discrepancy:.1%}")
+            if simpsons.crainiceanu_ruppert_p_value is not None:
+                rationale["key_evidence"].append(f"Crainiceanu-Ruppert RLRT: RLRT_CR = {simpsons.crainiceanu_ruppert_stat_rlrt:.2f} (p = {simpsons.crainiceanu_ruppert_p_value:.3e})")
+            if simpsons.lim_loh_p_value is not None:
+                rationale["key_evidence"].append(f"Lim-Loh Ratio-of-Variances: W_LL = {simpsons.lim_loh_stat_w:.2f} (p = {simpsons.lim_loh_p_value:.3e})")
+            if confounder.rosenbaum_cm_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Cross-Match Sensitivity: Gamma_CM = {confounder.rosenbaum_cm_gamma_crit:.2f}")
+            if confounder.athey_imbens_disparity is not None:
+                rationale["key_evidence"].append(f"Athey-Imbens Causal Disparity: Delta_AI = {confounder.athey_imbens_disparity:.1%}")
+            if stability.spiegelhalter_p_value is not None:
+                rationale["key_evidence"].append(f"Spiegelhalter Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e})")
+            if stability.hampel_slope_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hampel M-Estimator Discrepancy: Delta_HAM = {stability.hampel_slope_discrepancy:.1%}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

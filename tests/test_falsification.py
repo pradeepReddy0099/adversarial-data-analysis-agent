@@ -194,6 +194,16 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.pocock_hughes_lee_p_value is not None
     assert audit.simpsons_audit.overall_woodward_stat_f is not None
     assert audit.simpsons_audit.overall_woodward_p_value is not None
+    # Verify Crainiceanu-Ruppert RLRT and Lim-Loh variance test
+    assert audit.simpsons_audit.crainiceanu_ruppert_stat_rlrt is not None
+    assert audit.simpsons_audit.crainiceanu_ruppert_p_value is not None
+    assert audit.simpsons_audit.lim_loh_stat_w is not None
+    assert audit.simpsons_audit.lim_loh_p_value is not None
+    # Verify Crainiceanu-Ruppert RLRT and Lim-Loh robust variance ratio test
+    assert audit.simpsons_audit.crainiceanu_ruppert_stat_rlrt is not None
+    assert audit.simpsons_audit.crainiceanu_ruppert_p_value is not None
+    assert audit.simpsons_audit.lim_loh_stat_w is not None
+    assert audit.simpsons_audit.lim_loh_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -408,6 +418,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.hainmueller_eb_disparity >= 0.0
         assert audit_coffee.confounder_audit.hainmueller_eff_sample_pct is not None
         assert audit_coffee.confounder_audit.hainmueller_entropy_loss is not None
+        # Check Rosenbaum cross-match sensitivity and Athey-Imbens causal disparity
+        assert audit_coffee.confounder_audit.rosenbaum_cm_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_cm_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.athey_imbens_disparity is not None
+        assert audit_coffee.confounder_audit.athey_imbens_disparity >= 0.0
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -599,6 +614,18 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.yohai_mm_discrepancy is not None
     assert audit.stability_audit.yohai_mm_discrepancy >= 0.0
     assert audit.stability_audit.yohai_mm_outlier_count >= 0
+    # Check Spiegelhalter omnibus normality and Hampel redescending M-estimator
+    assert audit.stability_audit.spiegelhalter_stat_n is not None
+    assert audit.stability_audit.spiegelhalter_p_value is not None
+    assert audit.stability_audit.hampel_slope_discrepancy is not None
+    assert audit.stability_audit.hampel_slope_discrepancy >= 0.0
+    assert audit.stability_audit.hampel_outlier_count >= 0
+    # Check Spiegelhalter omnibus normality and Hampel redescending M-estimator
+    assert audit.stability_audit.spiegelhalter_stat_n is not None
+    assert audit.stability_audit.spiegelhalter_p_value is not None
+    assert audit.stability_audit.hampel_slope_discrepancy is not None
+    assert audit.stability_audit.hampel_slope_discrepancy >= 0.0
+    assert audit.stability_audit.hampel_outlier_count >= 0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1178,6 +1205,42 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_yohai = narrator.answer_query("Explain Victor Yohai high-breakdown MM-estimator robust slope discrepancy", findings)
     assert "Yohai" in ans_yohai or "MM" in ans_yohai or "Estimator" in ans_yohai or "Robust" in ans_yohai or "Discrepancy" in ans_yohai
+
+    ans_cr = narrator.answer_query("Explain Ciprian Crainiceanu and David Ruppert restricted likelihood ratio test", findings)
+    assert "Crainiceanu" in ans_cr or "Ruppert" in ans_cr or "RLRT" in ans_cr or "Restricted" in ans_cr
+
+    ans_ll = narrator.answer_query("Explain Wei-Yin Lim and Wei-Liem Loh ratio-of-variances robust homogeneity test", findings)
+    assert "Lim" in ans_ll or "Loh" in ans_ll or "Variance" in ans_ll or "Homogeneity" in ans_ll
+
+    ans_cm = narrator.answer_query("Explain Paul Rosenbaum cross-match sensitivity analysis", findings)
+    assert "Rosenbaum" in ans_cm or "Cross" in ans_cm or "Match" in ans_cm or "Sensitivity" in ans_cm
+
+    ans_ai = narrator.answer_query("Explain Susan Athey and Guido Imbens recursive partitioning causal disparity bound", findings)
+    assert "Athey" in ans_ai or "Imbens" in ans_ai or "Partitioning" in ans_ai or "Disparity" in ans_ai
+
+    ans_sp = narrator.answer_query("Explain David Spiegelhalter omnibus residual normality test", findings)
+    assert "Spiegelhalter" in ans_sp or "Normality" in ans_sp or "Order" in ans_sp or "Omnibus" in ans_sp
+
+    ans_ham = narrator.answer_query("Explain Frank Hampel three-part redescending M-estimator robust slope discrepancy", findings)
+    assert "Hampel" in ans_ham or "Redescending" in ans_ham or "Estimator" in ans_ham or "Robust" in ans_ham
+
+    ans_cr = narrator.answer_query("Explain Ciprian Crainiceanu and David Ruppert restricted likelihood ratio test", findings)
+    assert "Crainiceanu" in ans_cr or "Ruppert" in ans_cr or "RLRT" in ans_cr or "Likelihood" in ans_cr or "Ratio" in ans_cr
+
+    ans_ll = narrator.answer_query("Explain Wei-Yin Lim and Wei-Liem Loh ratio-of-variances robust test", findings)
+    assert "Lim" in ans_ll or "Loh" in ans_ll or "Ratio" in ans_ll or "Variance" in ans_ll or "Homogeneity" in ans_ll
+
+    ans_cm = narrator.answer_query("Explain Paul Rosenbaum cross match sensitivity test", findings)
+    assert "Rosenbaum" in ans_cm or "Cross" in ans_cm or "Match" in ans_cm or "Sensitivity" in ans_cm or "Bound" in ans_cm
+
+    ans_ai = narrator.answer_query("Explain Susan Athey and Guido Imbens recursive partitioning causal disparity", findings)
+    assert "Athey" in ans_ai or "Imbens" in ans_ai or "Causal" in ans_ai or "Disparity" in ans_ai or "Partitioning" in ans_ai
+
+    ans_sp = narrator.answer_query("Explain David Spiegelhalter omnibus residual normality test", findings)
+    assert "Spiegelhalter" in ans_sp or "Omnibus" in ans_sp or "Normality" in ans_sp or "Residual" in ans_sp or "Order" in ans_sp
+
+    ans_ham = narrator.answer_query("Explain Frank Hampel three-part redescending M-estimator robust slope", findings)
+    assert "Hampel" in ans_ham or "Redescending" in ans_ham or "Estimator" in ans_ham or "Robust" in ans_ham or "Slope" in ans_ham
 
 
 def test_end_to_end_pipeline(tmp_path):

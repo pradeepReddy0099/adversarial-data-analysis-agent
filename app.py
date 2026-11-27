@@ -366,6 +366,12 @@ with col_right:
                         if simpsons.get("overall_woodward_p_value") is not None:
                             ow_flag = " ⚠️ Kurtosis-Robust Scale Heterogeneity (p < 0.05)" if simpsons.get("is_overall_woodward_heterogeneous") else " (Homogeneous Stratum Dispersion)"
                             st.markdown(f"**Overall-Woodward Modified Variance:** F_OW = `{simpsons.get('overall_woodward_stat_f', 0.0):.2f}` (p = `{simpsons.get('overall_woodward_p_value', 0.0):.3e}`){ow_flag}")
+                        if simpsons.get("crainiceanu_ruppert_p_value") is not None:
+                            cr_flag = " ⚠️ Random Subgroup Effect Variance Proven (p < 0.05)" if simpsons.get("is_crainiceanu_heterogeneous") else " (Homogeneous Subgroup Effects)"
+                            st.markdown(f"**Crainiceanu-Ruppert RLRT Heterogeneity:** RLRT = `{simpsons.get('crainiceanu_ruppert_stat_rlrt', 0.0):.2f}` (p = `{simpsons.get('crainiceanu_ruppert_p_value', 0.0):.3e}`){cr_flag}")
+                        if simpsons.get("lim_loh_p_value") is not None:
+                            ll_flag = " ⚠️ Robust Median-Centered Scale Heterogeneity (p < 0.05)" if simpsons.get("is_lim_loh_heterogeneous") else " (Homogeneous Stratum Scale)"
+                            st.markdown(f"**Lim-Loh Robust Variance Ratio:** W_LL = `{simpsons.get('lim_loh_stat_w', 0.0):.2f}` (p = `{simpsons.get('lim_loh_p_value', 0.0):.3e}`){ll_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -520,6 +526,12 @@ with col_right:
                         if conf_aud.get("hainmueller_eb_disparity") is not None:
                             eb_flag = f" ⚠️ Moment Imbalance Distortion (Effective N = {conf_aud.get('hainmueller_eff_sample_pct', 0.0):.1f}%)" if conf_aud.get("is_entropy_balanced_fragile") else " (Robust Entropy Calibration)"
                             st.markdown(f"**Hainmueller Entropy Balancing:** Δ_EB = `{conf_aud.get('hainmueller_eb_disparity', 0.0):.1%}`{eb_flag}")
+                        if conf_aud.get("rosenbaum_cm_gamma_crit") is not None:
+                            cm_flag = " ⚠️ Sensitive to Cross-Match Hidden Bias (Γ_CM < 1.30)" if conf_aud.get("is_rosenbaum_cm_fragile") else " (Robust Cross-Match Sensitivity, Γ_CM ≥ 1.30)"
+                            st.markdown(f"**Rosenbaum Cross-Match Sensitivity:** Γ_CM = `{conf_aud.get('rosenbaum_cm_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_cm_p_upper', 0.0):.3e}`){cm_flag}")
+                        if conf_aud.get("athey_imbens_disparity") is not None:
+                            ai_flag = f" ⚠️ Severe Partitioning Causal Disparity (Δ_AI = {conf_aud.get('athey_imbens_disparity', 0.0):.1%})" if conf_aud.get("is_athey_imbens_heterogeneous") else " (Homogeneous Causal Tree Effects)"
+                            st.markdown(f"**Athey-Imbens Causal Disparity:** Δ_AI = `{conf_aud.get('athey_imbens_disparity', 0.0):.1%}` (Leaves: [`{conf_aud.get('athey_imbens_tau_min', 0.0):.3f}`, `{conf_aud.get('athey_imbens_tau_max', 0.0):.3f}`]){ai_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -728,6 +740,12 @@ with col_right:
                         if stab_aud.get("yohai_mm_discrepancy") is not None:
                             mm_flag = f" ⚠️ High-Breakdown Outlier Distortion ({stab_aud.get('yohai_mm_outlier_count', 0)} Tukey biweight outliers < 0.50)" if stab_aud.get("is_yohai_mm_distorted") else " (Robust MM-OLS Agreement)"
                             st.markdown(f"**Yohai MM-Estimator Discrepancy:** Δ_MM = `{stab_aud.get('yohai_mm_discrepancy', 0.0):.1%}`{mm_flag}")
+                        if stab_aud.get("spiegelhalter_p_value") is not None:
+                            sp_flag = f" ⚠️ Significant Non-Gaussian Order Departure (p = {stab_aud['spiegelhalter_p_value']:.3e})" if stab_aud.get("is_spiegelhalter_non_normal") else " (Gaussian Order-Statistic Concordance)"
+                            st.markdown(f"**Spiegelhalter Omnibus Normality:** N_SP = `{stab_aud.get('spiegelhalter_stat_n', 0.0):.3f}` (p = `{stab_aud['spiegelhalter_p_value']:.3e}`){sp_flag}")
+                        if stab_aud.get("hampel_slope_discrepancy") is not None:
+                            ham_flag = f" ⚠️ Redescending Outlier Distortion ({stab_aud.get('hampel_outlier_count', 0)} gross outliers)" if stab_aud.get("is_hampel_distorted") else " (Robust B-Estimator Concordance)"
+                            st.markdown(f"**Hampel Redescending M-Estimator:** Δ_HAM = `{stab_aud.get('hampel_slope_discrepancy', 0.0):.1%}`{ham_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1262,6 +1280,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Victor Yohai high-breakdown MM-estimator robust slope discrepancy"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Victor Yohai high-breakdown MM-estimator robust slope discrepancy", findings, dataset_name=dataset_name)
 
+            sug_col79, sug_col80, sug_col81 = st.columns(3)
+            with sug_col79:
+                if st.button("📐 Crainiceanu-Ruppert RLRT", key="sug_cr"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Ciprian Crainiceanu and David Ruppert restricted likelihood ratio test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Ciprian Crainiceanu and David Ruppert restricted likelihood ratio test", findings, dataset_name=dataset_name)
+            with sug_col80:
+                if st.button("🛡️ Rosenbaum Cross-Match", key="sug_cm"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum cross-match sensitivity analysis"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum cross-match sensitivity analysis", findings, dataset_name=dataset_name)
+            with sug_col81:
+                if st.button("🔬 Spiegelhalter Normality", key="sug_sp"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain David Spiegelhalter omnibus residual normality test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain David Spiegelhalter omnibus residual normality test", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1531,6 +1566,26 @@ with col_right:
                     "Bontemps_Meddahi_p": f"{stab.get('bontemps_meddahi_p_value', 0.0):.3e}" if stab.get("bontemps_meddahi_p_value") is not None else "N/A",
                     "Yohai_MM_Discrepancy": f"{stab.get('yohai_mm_discrepancy', 0.0):.1%}" if stab.get("yohai_mm_discrepancy") is not None else "N/A",
                     "Yohai_MM_Outliers": f"{stab.get('yohai_mm_outlier_count', 0)}" if stab.get("yohai_mm_outlier_count") is not None else "N/A",
+                    "Crainiceanu_RLRT_Stat": f"{simp.get('crainiceanu_ruppert_stat_rlrt', 0.0):.2f}" if simp.get("crainiceanu_ruppert_stat_rlrt") is not None else "N/A",
+                    "Crainiceanu_RLRT_p": f"{simp.get('crainiceanu_ruppert_p_value', 0.0):.3e}" if simp.get("crainiceanu_ruppert_p_value") is not None else "N/A",
+                    "Lim_Loh_W": f"{simp.get('lim_loh_stat_w', 0.0):.2f}" if simp.get("lim_loh_stat_w") is not None else "N/A",
+                    "Lim_Loh_p": f"{simp.get('lim_loh_p_value', 0.0):.3e}" if simp.get("lim_loh_p_value") is not None else "N/A",
+                    "Rosenbaum_CM_Gamma": f"{conf.get('rosenbaum_cm_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_cm_gamma_crit") is not None else "N/A",
+                    "Athey_Imbens_Disparity": f"{conf.get('athey_imbens_disparity', 0.0):.1%}" if conf.get("athey_imbens_disparity") is not None else "N/A",
+                    "Spiegelhalter_Stat_N": f"{stab.get('spiegelhalter_stat_n', 0.0):.3f}" if stab.get("spiegelhalter_stat_n") is not None else "N/A",
+                    "Spiegelhalter_p": f"{stab.get('spiegelhalter_p_value', 0.0):.3e}" if stab.get("spiegelhalter_p_value") is not None else "N/A",
+                    "Hampel_Slope_Discrepancy": f"{stab.get('hampel_slope_discrepancy', 0.0):.1%}" if stab.get("hampel_slope_discrepancy") is not None else "N/A",
+                    "Hampel_Outliers": f"{stab.get('hampel_outlier_count', 0)}" if stab.get("hampel_outlier_count") is not None else "N/A",
+                    "Crainiceanu_Ruppert_RLRT": f"{simp.get('crainiceanu_ruppert_stat_rlrt', 0.0):.2f}" if simp.get("crainiceanu_ruppert_stat_rlrt") is not None else "N/A",
+                    "Crainiceanu_Ruppert_p": f"{simp.get('crainiceanu_ruppert_p_value', 0.0):.3e}" if simp.get("crainiceanu_ruppert_p_value") is not None else "N/A",
+                    "Lim_Loh_W": f"{simp.get('lim_loh_stat_w', 0.0):.2f}" if simp.get("lim_loh_stat_w") is not None else "N/A",
+                    "Lim_Loh_p": f"{simp.get('lim_loh_p_value', 0.0):.3e}" if simp.get("lim_loh_p_value") is not None else "N/A",
+                    "Rosenbaum_Cross_Match_Gamma": f"{conf.get('rosenbaum_cm_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_cm_gamma_crit") is not None else "N/A",
+                    "Athey_Imbens_Disparity": f"{conf.get('athey_imbens_disparity', 0.0):.1%}" if conf.get("athey_imbens_disparity") is not None else "N/A",
+                    "Spiegelhalter_N": f"{stab.get('spiegelhalter_stat_n', 0.0):.3f}" if stab.get("spiegelhalter_stat_n") is not None else "N/A",
+                    "Spiegelhalter_p": f"{stab.get('spiegelhalter_p_value', 0.0):.3e}" if stab.get("spiegelhalter_p_value") is not None else "N/A",
+                    "Hampel_Slope_Discrepancy": f"{stab.get('hampel_slope_discrepancy', 0.0):.1%}" if stab.get("hampel_slope_discrepancy") is not None else "N/A",
+                    "Hampel_Outliers": f"{stab.get('hampel_outlier_count', 0)}" if stab.get("hampel_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",
