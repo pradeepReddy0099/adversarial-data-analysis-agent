@@ -213,6 +213,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Hirotsu Cumulative Chi-Squared Test: S*_HIR = {simpsons.hirotsu_stat_s:.2f} (p = {simpsons.hirotsu_p_value:.3e}) {'[ORDERED SUBGROUP TREND HETEROGENEITY PROVEN]' if simpsons.is_hirotsu_heterogeneous else '[CONCORDANT SUBGROUP EFFECTS]'}")
             if simpsons.bartlett_kendall_p_value is not None:
                 rationale["key_evidence"].append(f"Bartlett-Kendall Log-Variance Test: T_BK = {simpsons.bartlett_kendall_stat_t:.2f} (p = {simpsons.bartlett_kendall_p_value:.3e}) {'[STRATUM LOG-SCALE HETEROGENEITY PROVEN]' if simpsons.is_bartlett_kendall_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
+            if simpsons.anderson_darling_p_value is not None:
+                rationale["key_evidence"].append(f"Pettitt-Anderson-Darling Heterogeneity: A²_AD = {simpsons.anderson_darling_stat_a2:.2f} (p = {simpsons.anderson_darling_p_value:.3e}) {'[DISTRIBUTIONAL STRATUM DIVERGENCE PROVEN]' if simpsons.is_anderson_darling_heterogeneous else '[HOMOGENEOUS STRATUM DISTRIBUTIONS]'}")
+            if simpsons.box_m_p_value is not None:
+                rationale["key_evidence"].append(f"Box's M Variance Homogeneity: M_BOX = {simpsons.box_m_stat:.2f} (p = {simpsons.box_m_p_value:.3e}) {'[LIKELIHOOD-RATIO SCALE HETEROGENEITY PROVEN]' if simpsons.is_box_m_heterogeneous else '[HOMOGENEOUS STRATUM DISPERSION]'}")
 
         elif confounder.is_confounded:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -378,6 +382,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Adaptive Rank Sensitivity: Gamma_ADAP = {confounder.rosenbaum_adaptive_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_adaptive_p_upper:.3e}) {'[FRAGILE TO ADAPTIVE DESIGN HIDDEN BIAS]' if confounder.is_rosenbaum_adaptive_fragile else '[ROBUST ADAPTIVE DESIGN SENSITIVITY]'}")
             if confounder.abadie_imbens_disparity is not None:
                 rationale["key_evidence"].append(f"Abadie-Imbens Bias-Corrected Disparity: Delta_AIM = {confounder.abadie_imbens_disparity:.1%}, B_AIM = {confounder.abadie_imbens_balance_smd:.3f} {'[SEVERE MATCHING DISCREPANCY & RESIDUAL BIAS]' if confounder.is_abadie_imbens_fragile else '[BALANCED BIAS-CORRECTED MATCHING]'}")
+            if confounder.rosenbaum_caliper_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Caliper-Matched Sensitivity: Gamma_CAL = {confounder.rosenbaum_caliper_gamma_crit:.2f} (p_upper = {confounder.rosenbaum_caliper_p_upper:.3e}) {'[FRAGILE TO CALIPER-MATCHED HIDDEN BIAS]' if confounder.is_rosenbaum_caliper_fragile else '[ROBUST CALIPER-MATCHED DESIGN]'}")
+            if confounder.hajek_ipw_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hájek Normalized IPW Disparity: Delta_IPW = {confounder.hajek_ipw_discrepancy:.1%}, tau_IPW = {confounder.hajek_ipw_treatment_effect:.4f} {'[SEVERE INVERSE-PROBABILITY CONFOUNDING DISCREPANCY]' if confounder.is_hajek_ipw_fragile else '[BALANCED IPW CONCORDANCE]'}")
 
         elif not stability.is_stable:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -544,6 +552,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Martinez-Iglewicz Jackknife Normality: I_MI = {stability.martinez_iglewicz_stat_i:.3f} (p = {stability.martinez_iglewicz_p_value:.3e}) {'[HEAVY-TAILED RESIDUAL SCALE DISTORTION]' if stability.is_martinez_iglewicz_non_normal else '[NORMAL JACKKNIFE SCALE RATIO]'}")
             if stability.beaton_tukey_discrepancy is not None:
                 rationale["key_evidence"].append(f"Beaton-Tukey Bisquare Estimator: Delta_BIS = {stability.beaton_tukey_discrepancy:.1%} ({stability.beaton_tukey_outlier_count} redescended outliers) {'[GROSS LEVERAGE BIWEIGHT DISTORTION]' if stability.is_beaton_tukey_distorted else '[ROBUST BIWEIGHT CONCORDANCE]'}")
+            if stability.bowman_shenton_p_value is not None:
+                rationale["key_evidence"].append(f"Bowman-Shenton Omnibus Normality: K²_BS = {stability.bowman_shenton_stat_k2:.3f} (p = {stability.bowman_shenton_p_value:.3e}) {'[NON-GAUSSIAN JOINT SKEWNESS-KURTOSIS DISTORTION]' if stability.is_bowman_shenton_non_normal else '[GAUSSIAN JOINT SKEW-KURTOSIS CONCORDANCE]'}")
+            if stability.koenker_bassett_lad_discrepancy is not None:
+                rationale["key_evidence"].append(f"Koenker-Bassett LAD Estimator: Delta_LAD = {stability.koenker_bassett_lad_discrepancy:.1%} ({stability.koenker_bassett_lad_outlier_count} L1 outliers) {'[MEDIAN REGRESSION SLOPE DISTORTION]' if stability.is_koenker_bassett_lad_distorted else '[ROBUST L1 MEDIAN CONCORDANCE]'}")
 
         elif audit.leakage_detected:
             verdict = "SPURIOUS_OR_CONFOUNDED"
@@ -943,6 +955,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Rosenbaum Adaptive Rank Sensitivity: Gamma_ADAP = {confounder.rosenbaum_adaptive_gamma_crit:.2f}")
             if confounder.abadie_imbens_disparity is not None:
                 rationale["key_evidence"].append(f"Abadie-Imbens Disparity: Delta_AIM = {confounder.abadie_imbens_disparity:.1%}")
+            if confounder.rosenbaum_caliper_gamma_crit is not None:
+                rationale["key_evidence"].append(f"Rosenbaum Caliper-Matched Sensitivity: Gamma_CAL = {confounder.rosenbaum_caliper_gamma_crit:.2f}")
+            if confounder.hajek_ipw_discrepancy is not None:
+                rationale["key_evidence"].append(f"Hájek Normalized IPW Disparity: Delta_IPW = {confounder.hajek_ipw_discrepancy:.1%}")
             if stability.spiegelhalter_p_value is not None:
                 rationale["key_evidence"].append(f"Spiegelhalter Normality: N_SP = {stability.spiegelhalter_stat_n:.3f} (p = {stability.spiegelhalter_p_value:.3e})")
             if stability.hampel_slope_discrepancy is not None:
@@ -955,6 +971,10 @@ class RefereeAgent:
                 rationale["key_evidence"].append(f"Martinez-Iglewicz Normality: I_MI = {stability.martinez_iglewicz_stat_i:.3f} (p = {stability.martinez_iglewicz_p_value:.3e})")
             if stability.beaton_tukey_discrepancy is not None:
                 rationale["key_evidence"].append(f"Beaton-Tukey Bisquare Discrepancy: Delta_BIS = {stability.beaton_tukey_discrepancy:.1%}")
+            if stability.bowman_shenton_p_value is not None:
+                rationale["key_evidence"].append(f"Bowman-Shenton Normality: K²_BS = {stability.bowman_shenton_stat_k2:.3f} (p = {stability.bowman_shenton_p_value:.3e})")
+            if stability.koenker_bassett_lad_discrepancy is not None:
+                rationale["key_evidence"].append(f"Koenker-Bassett LAD Discrepancy: Delta_LAD = {stability.koenker_bassett_lad_discrepancy:.1%}")
 
         return AdjudicatedFinding(
             finding_id=f"FINDING_{claim.claim_id}",

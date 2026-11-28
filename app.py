@@ -384,6 +384,12 @@ with col_right:
                         if simpsons.get("bartlett_kendall_p_value") is not None:
                             bk_flag = " ⚠️ Stratum Log-Scale Heterogeneity (p < 0.05)" if simpsons.get("is_bartlett_kendall_heterogeneous") else " (Homogeneous Stratum Dispersion)"
                             st.markdown(f"**Bartlett-Kendall Log-Variance Test:** T_BK = `{simpsons.get('bartlett_kendall_stat_t', 0.0):.2f}` (p = `{simpsons.get('bartlett_kendall_p_value', 0.0):.3e}`){bk_flag}")
+                        if simpsons.get("anderson_darling_p_value") is not None:
+                            ad_flag = " ⚠️ Distributional Stratum Divergence (p < 0.05)" if simpsons.get("is_anderson_darling_heterogeneous") else " (Homogeneous Stratum Distributions)"
+                            st.markdown(f"**Pettitt-Anderson-Darling Heterogeneity:** A²_AD = `{simpsons.get('anderson_darling_stat_a2', 0.0):.2f}` (p = `{simpsons.get('anderson_darling_p_value', 0.0):.3e}`){ad_flag}")
+                        if simpsons.get("box_m_p_value") is not None:
+                            bm_flag = " ⚠️ Likelihood-Ratio Scale Heterogeneity (p < 0.05)" if simpsons.get("is_box_m_heterogeneous") else " (Homogeneous Stratum Variances)"
+                            st.markdown(f"**Box's M Variance Homogeneity:** M_BOX = `{simpsons.get('box_m_stat', 0.0):.2f}` (p = `{simpsons.get('box_m_p_value', 0.0):.3e}`){bm_flag}")
 
                         conf_aud = audit.get("confounder_audit", {})
                         if conf_aud.get("e_value") is not None:
@@ -556,6 +562,12 @@ with col_right:
                         if conf_aud.get("abadie_imbens_disparity") is not None:
                             aim_flag = f" ⚠️ Severe Matching Discrepancy & Bias (Δ_AIM = {conf_aud.get('abadie_imbens_disparity', 0.0):.1%})" if conf_aud.get("is_abadie_imbens_fragile") else " (Balanced Bias-Corrected Matching)"
                             st.markdown(f"**Abadie-Imbens Bias-Corrected Disparity:** Δ_AIM = `{conf_aud.get('abadie_imbens_disparity', 0.0):.1%}` (B_AIM = `{conf_aud.get('abadie_imbens_balance_smd', 0.0):.3f}`){aim_flag}")
+                        if conf_aud.get("rosenbaum_caliper_gamma_crit") is not None:
+                            cal_flag = " ⚠️ Sensitive to Caliper-Matched Hidden Bias (Γ_CAL < 1.25)" if conf_aud.get("is_rosenbaum_caliper_fragile") else " (Robust Caliper Design Sensitivity, Γ_CAL ≥ 1.25)"
+                            st.markdown(f"**Rosenbaum Caliper-Matched Sensitivity:** Γ_CAL = `{conf_aud.get('rosenbaum_caliper_gamma_crit', 0.0):.2f}` (p_upper = `{conf_aud.get('rosenbaum_caliper_p_upper', 0.0):.3e}`){cal_flag}")
+                        if conf_aud.get("hajek_ipw_discrepancy") is not None:
+                            hajek_flag = f" ⚠️ Severe IPW Discrepancy (Δ_IPW = {conf_aud.get('hajek_ipw_discrepancy', 0.0):.1%})" if conf_aud.get("is_hajek_ipw_fragile") else " (Balanced IPW Concordance)"
+                            st.markdown(f"**Hájek Normalized IPW Disparity:** Δ_IPW = `{conf_aud.get('hajek_ipw_discrepancy', 0.0):.1%}` (τ_IPW = `{conf_aud.get('hajek_ipw_treatment_effect', 0.0):.4f}`){hajek_flag}")
                         if conf_aud.get("frank_itcv") is not None:
                             itcv_flag = " ⚠️ ITCV Exceeded" if conf_aud.get("is_itcv_exceeded") else " (Below ITCV)"
                             st.markdown(f"**Frank's ITCV Threshold:** ITCV = `{conf_aud['frank_itcv']:.3f}` (Impact = `{conf_aud.get('frank_observed_impact', 0.0):.3f}`){itcv_flag}")
@@ -782,6 +794,12 @@ with col_right:
                         if stab_aud.get("beaton_tukey_discrepancy") is not None:
                             bis_flag = f" ⚠️ Bisquare Outlier Distortion ({stab_aud.get('beaton_tukey_outlier_count', 0)} gross outliers)" if stab_aud.get("is_beaton_tukey_distorted") else " (Robust Bisquare Concordance)"
                             st.markdown(f"**Beaton-Tukey Bisquare Estimator:** Δ_BIS = `{stab_aud.get('beaton_tukey_discrepancy', 0.0):.1%}`{bis_flag}")
+                        if stab_aud.get("bowman_shenton_p_value") is not None:
+                            bs_flag = f" ⚠️ Joint Skew/Kurtosis Departure (p = {stab_aud['bowman_shenton_p_value']:.3e})" if stab_aud.get("is_bowman_shenton_non_normal") else " (Gaussian Skew/Kurtosis Validated)"
+                            st.markdown(f"**Bowman-Shenton Omnibus Normality:** K²_BS = `{stab_aud.get('bowman_shenton_stat_k2', 0.0):.3f}` (p = `{stab_aud['bowman_shenton_p_value']:.3e}`){bs_flag}")
+                        if stab_aud.get("koenker_bassett_lad_discrepancy") is not None:
+                            lad_flag = f" ⚠️ L1 Median Slope Distortion ({stab_aud.get('koenker_bassett_lad_outlier_count', 0)} L1 outliers)" if stab_aud.get("is_koenker_bassett_lad_distorted") else " (Robust L1 Median Concordance)"
+                            st.markdown(f"**Koenker-Bassett LAD Estimator:** Δ_LAD = `{stab_aud.get('koenker_bassett_lad_discrepancy', 0.0):.1%}` (β_LAD = `{stab_aud.get('koenker_bassett_lad_slope', 0.0):.4f}`){lad_flag}")
 
                         if simpsons.get("confounder_column") and simpsons.get("breakdowns"):
                             st.markdown(f"**Subgroup Conditioning on `{simpsons['confounder_column']}`:**")
@@ -1367,6 +1385,23 @@ with col_right:
                     st.session_state["last_copilot_q"] = "Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator"
                     st.session_state["last_copilot_a"] = narrator.answer_query("Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator", findings, dataset_name=dataset_name)
 
+            sug_col88, sug_col89, sug_col90 = st.columns(3)
+            with sug_col88:
+                if st.button("📐 Pettitt Anderson-Darling", key="sug_ad"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Pettitt Anderson-Darling multi-sample non-parametric heterogeneity test"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Pettitt Anderson-Darling multi-sample non-parametric heterogeneity test", findings, dataset_name=dataset_name)
+            with sug_col89:
+                if st.button("🛡️ Rosenbaum Caliper Sensitivity", key="sug_cal"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Paul Rosenbaum adaptive caliper-matched design sensitivity bound"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Paul Rosenbaum adaptive caliper-matched design sensitivity bound", findings, dataset_name=dataset_name)
+            with sug_col90:
+                if st.button("🎯 Koenker-Bassett LAD", key="sug_lad"):
+                    narrator = LLMNarrator(provider=llm_provider)
+                    st.session_state["last_copilot_q"] = "Explain Roger Koenker and Gilbert Bassett L1 median regression LAD estimator"
+                    st.session_state["last_copilot_a"] = narrator.answer_query("Explain Roger Koenker and Gilbert Bassett L1 median regression LAD estimator", findings, dataset_name=dataset_name)
+
             with st.form(key="copilot_form", clear_on_submit=False):
                 user_q = st.text_input(
                     "Enter your question:",
@@ -1668,6 +1703,18 @@ with col_right:
                     "Martinez_Iglewicz_p": f"{stab.get('martinez_iglewicz_p_value', 0.0):.3e}" if stab.get("martinez_iglewicz_p_value") is not None else "N/A",
                     "Beaton_Tukey_Discrepancy": f"{stab.get('beaton_tukey_discrepancy', 0.0):.1%}" if stab.get("beaton_tukey_discrepancy") is not None else "N/A",
                     "Beaton_Tukey_Outliers": f"{stab.get('beaton_tukey_outlier_count', 0)}" if stab.get("beaton_tukey_outlier_count") is not None else "N/A",
+                    "Pettitt_Anderson_Darling_A2": f"{simp.get('anderson_darling_stat_a2', 0.0):.2f}" if simp.get("anderson_darling_stat_a2") is not None else "N/A",
+                    "Pettitt_Anderson_Darling_p": f"{simp.get('anderson_darling_p_value', 0.0):.3e}" if simp.get("anderson_darling_p_value") is not None else "N/A",
+                    "Box_M_Stat": f"{simp.get('box_m_stat', 0.0):.2f}" if simp.get("box_m_stat") is not None else "N/A",
+                    "Box_M_p": f"{simp.get('box_m_p_value', 0.0):.3e}" if simp.get("box_m_p_value") is not None else "N/A",
+                    "Rosenbaum_Caliper_Gamma": f"{conf.get('rosenbaum_caliper_gamma_crit', 0.0):.2f}" if conf.get("rosenbaum_caliper_gamma_crit") is not None else "N/A",
+                    "Hajek_IPW_Disparity": f"{conf.get('hajek_ipw_discrepancy', 0.0):.1%}" if conf.get("hajek_ipw_discrepancy") is not None else "N/A",
+                    "Hajek_IPW_Effect": f"{conf.get('hajek_ipw_treatment_effect', 0.0):.4f}" if conf.get("hajek_ipw_treatment_effect") is not None else "N/A",
+                    "Bowman_Shenton_K2": f"{stab.get('bowman_shenton_stat_k2', 0.0):.3f}" if stab.get("bowman_shenton_stat_k2") is not None else "N/A",
+                    "Bowman_Shenton_p": f"{stab.get('bowman_shenton_p_value', 0.0):.3e}" if stab.get("bowman_shenton_p_value") is not None else "N/A",
+                    "Koenker_Bassett_LAD_Slope": f"{stab.get('koenker_bassett_lad_slope', 0.0):.4f}" if stab.get("koenker_bassett_lad_slope") is not None else "N/A",
+                    "Koenker_Bassett_LAD_Discrepancy": f"{stab.get('koenker_bassett_lad_discrepancy', 0.0):.1%}" if stab.get("koenker_bassett_lad_discrepancy") is not None else "N/A",
+                    "Koenker_Bassett_LAD_Outliers": f"{stab.get('koenker_bassett_lad_outlier_count', 0)}" if stab.get("koenker_bassett_lad_outlier_count") is not None else "N/A",
                     "Altonji_Elder_Taber_Ratio": f"{conf.get('aet_selection_ratio', 0.0):.2f}" if conf.get("aet_selection_ratio") is not None else "N/A",
                     "Akaike_Model_Weight": f"{conf.get('akaike_model_weight', 0.0):.3f}" if conf.get("akaike_model_weight") is not None else "N/A",
                     "Cohens_f2": f"{conf.get('cohens_f2', 0.0):.3f}" if conf.get("cohens_f2") is not None else "N/A",

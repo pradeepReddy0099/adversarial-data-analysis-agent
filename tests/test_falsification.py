@@ -209,6 +209,11 @@ def test_berkeley_admissions_falsification():
     assert audit.simpsons_audit.hirotsu_p_value is not None
     assert audit.simpsons_audit.bartlett_kendall_stat_t is not None
     assert audit.simpsons_audit.bartlett_kendall_p_value is not None
+    # Verify Pettitt-Anderson-Darling and Box's M variance homogeneity test
+    assert audit.simpsons_audit.anderson_darling_stat_a2 is not None
+    assert audit.simpsons_audit.anderson_darling_p_value is not None
+    assert audit.simpsons_audit.box_m_stat is not None
+    assert audit.simpsons_audit.box_m_p_value is not None
 
     finding = referee.adjudicate(gender_claim, audit)
     assert finding.verdict == "SIMPSONS_PARADOX_ALERT"
@@ -438,6 +443,11 @@ def test_confounder_variance_loss_and_leakage():
         assert audit_coffee.confounder_audit.rosenbaum_adaptive_gamma_crit >= 1.0
         assert audit_coffee.confounder_audit.abadie_imbens_disparity is not None
         assert audit_coffee.confounder_audit.abadie_imbens_disparity >= 0.0
+        # Check Rosenbaum adaptive caliper sensitivity and Hájek normalized IPW discrepancy
+        assert audit_coffee.confounder_audit.rosenbaum_caliper_gamma_crit is not None
+        assert audit_coffee.confounder_audit.rosenbaum_caliper_gamma_crit >= 1.0
+        assert audit_coffee.confounder_audit.hajek_ipw_discrepancy is not None
+        assert audit_coffee.confounder_audit.hajek_ipw_discrepancy >= 0.0
 
 def test_vectorized_bootstrap_speed_and_stability():
     df = pd.read_csv(DATA_DIR / "income_confounder_benchmark.csv")
@@ -649,6 +659,13 @@ def test_vectorized_bootstrap_speed_and_stability():
     assert audit.stability_audit.beaton_tukey_discrepancy is not None
     assert audit.stability_audit.beaton_tukey_discrepancy >= 0.0
     assert audit.stability_audit.beaton_tukey_outlier_count >= 0
+    # Check Bowman-Shenton omnibus normality and Koenker-Bassett LAD median regression
+    assert audit.stability_audit.bowman_shenton_stat_k2 is not None
+    assert audit.stability_audit.bowman_shenton_p_value is not None
+    assert audit.stability_audit.koenker_bassett_lad_slope is not None
+    assert audit.stability_audit.koenker_bassett_lad_discrepancy is not None
+    assert audit.stability_audit.koenker_bassett_lad_discrepancy >= 0.0
+    assert audit.stability_audit.koenker_bassett_lad_outlier_count >= 0
 
 
 def test_llm_narrator_risk_score_and_copilot():
@@ -1300,6 +1317,24 @@ def test_llm_narrator_risk_score_and_copilot():
 
     ans_bis = narrator.answer_query("Explain Albert Beaton and John Tukey bisquare biweight redescending M-estimator", findings)
     assert "Beaton" in ans_bis or "Tukey" in ans_bis or "Bisquare" in ans_bis or "Biweight" in ans_bis or "Estimator" in ans_bis
+
+    ans_ad = narrator.answer_query("Explain Pettitt Anderson-Darling multi-sample non-parametric heterogeneity test", findings)
+    assert "Anderson" in ans_ad or "Pettitt" in ans_ad or "Heterogeneity" in ans_ad or "Distribution" in ans_ad
+
+    ans_box = narrator.answer_query("Explain Box M variance homogeneity test", findings)
+    assert "Box" in ans_box or "Variance" in ans_box or "Homogeneity" in ans_box or "Likelihood" in ans_box
+
+    ans_cal = narrator.answer_query("Explain Paul Rosenbaum adaptive caliper-matched design sensitivity bound", findings)
+    assert "Rosenbaum" in ans_cal or "Caliper" in ans_cal or "Sensitivity" in ans_cal or "Matched" in ans_cal
+
+    ans_hajek = narrator.answer_query("Explain Hajek normalized inverse probability weighting IPW discrepancy", findings)
+    assert "Hájek" in ans_hajek or "Hajek" in ans_hajek or "IPW" in ans_hajek or "Weighting" in ans_hajek or "Discrepancy" in ans_hajek
+
+    ans_bs = narrator.answer_query("Explain Kenneth Bowman and Shenton omnibus normality test", findings)
+    assert "Bowman" in ans_bs or "Shenton" in ans_bs or "Normality" in ans_bs or "Skewness" in ans_bs or "Kurtosis" in ans_bs
+
+    ans_lad = narrator.answer_query("Explain Roger Koenker and Gilbert Bassett L1 median regression LAD estimator", findings)
+    assert "Koenker" in ans_lad or "Bassett" in ans_lad or "LAD" in ans_lad or "Median" in ans_lad or "Estimator" in ans_lad
 
 
 def test_end_to_end_pipeline(tmp_path):
